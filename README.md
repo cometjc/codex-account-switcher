@@ -2,6 +2,9 @@
 
 A command-line tool that lets you manage and switch between multiple Codex accounts instantly, no more constant logins and logouts.
 
+> [!WARNING]
+> Not affiliated with OpenAI or Codex. Not an official tool.
+
 ## How it Works
 
 Codex stores your authentication session in a single `auth.json` file. This tool works by creating named snapshots of that file for each of your accounts. When you want to switch, `codex-auth` swaps the active `~/.codex/auth.json` with the snapshot you select, instantly changing your logged-in account.
@@ -9,7 +12,6 @@ Codex stores your authentication session in a single `auth.json` file. This tool
 ## Requirements
 
 - Node.js 18 or newer
-- A valid Codex login so `~/.codex/auth.json` exists
 
 ## Install (npm)
 
@@ -45,5 +47,5 @@ codex-auth current
 
 Notes:
 
-- Works on macOS/Linux (symlink) and Windows (copy). Current account tracking works on all platforms.
+- Works on macOS/Linux (symlink) and Windows (copy).
 - Requires Node 18+.

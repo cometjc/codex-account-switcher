@@ -29,6 +29,15 @@
     "tokens"
   ],
   "preferGlobal": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Sls0n/codex-account-switcher.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Sls0n/codex-account-switcher/issues"
+  },
+  "homepage": "https://github.com/Sls0n/codex-account-switcher#readme",
+  "author": "Sls0n",
   "dependencies": {
     "@oclif/core": "^3.0.0",
     "prompts": "^2.4.2",
