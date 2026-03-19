@@ -22,28 +22,24 @@ npm i -g codex-auth
 ## Usage
 
 ```sh
-# save the current logged-in token as a named account
-codex-auth save <name>
-
-# switch active account (symlinks on macOS/Linux; copies on Windows)
-codex-auth use <name>
-
-# or pick interactively
-codex-auth use
-
-# list accounts
-codex-auth list
-
-# show current account name
-codex-auth current
+# start interactive profile manager
+codex-auth
 ```
 
-### Command reference
+### Interactive controls
 
-- `codex-auth save <name>` – Validates `<name>`, ensures `auth.json` exists, then snapshots it to `~/.codex/accounts/<name>.json`.
-- `codex-auth use [name]` – Accepts a name or launches an interactive selector with the current account pre-selected. Copies on Windows, creates a symlink elsewhere, and records the active name.
-- `codex-auth list` – Lists all saved snapshots alphabetically and marks the active one with `*`.
-- `codex-auth current` – Prints the active account name, or a friendly message if none is active.
+- `Enter` on `[CURRENT][UNSAVED]` – Save current `~/.codex/auth.json` with editable default name (`email-plan`).
+- `Enter` on `[SAVED]` – If current profile is unsaved, prompts to save first, then switches to selected saved profile.
+- `D` or `Del` on `[SAVED]` – Confirm and delete saved snapshot.
+- `R` on `[SAVED]` – Rename saved snapshot.
+- `U` – Refresh 5h/weekly limits immediately.
+
+### Limits shown per profile
+
+- Weekly and (if available) 5-hour limits are fetched from ChatGPT usage endpoint and cached locally.
+- If no separate 5-hour window exists for an account, only Weekly is shown.
+- Line format is aligned and includes rate hint:
+  - `Weekly limit:         [███████████████████░] 94% left (resets 10:38 on 26 Mar) · Can use 1.2%/hour for next 78.0 hours`
 
 Notes:
 

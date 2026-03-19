@@ -40,3 +40,15 @@ export class PromptCancelledError extends CodexAuthError {
     super("No account selected. The operation was cancelled.");
   }
 }
+
+export class AccountAlreadyExistsError extends CodexAuthError {
+  constructor(accountName: string) {
+    super(`A saved Codex account named "${accountName}" already exists.`);
+  }
+}
+
+export class AuthFileInvalidError extends CodexAuthError {
+  constructor(targetPath: string) {
+    super(`Failed to parse JSON auth profile at ${targetPath}.`);
+  }
+}

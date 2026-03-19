@@ -3,12 +3,34 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { accountsDir, authPath, codexDir, currentNamePath } from "../config/paths";
 import {
+  AccountAlreadyExistsError,
   AccountNotFoundError,
+  AuthFileInvalidError,
   AuthFileMissingError,
   InvalidAccountNameError,
 } from "./errors";
 
 const ACCOUNT_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+
+export interface AuthTokens {
+  access_token?: string;
+  account_id?: string;
+  id_token?: string;
+  refresh_token?: string;
+}
+
+export interface AuthSnapshot {
+  auth_mode?: string;
+  last_refresh?: string;
+  OPENAI_API_KEY?: string;
+  tokens?: AuthTokens;
+}
+
+export interface SavedProfile {
+  name: string;
+  filePath: string;
+  snapshot: AuthSnapshot;
+}
 
 export class AccountService {
   public async listAccountNames(): Promise<string[]> {
@@ -51,6 +73,18 @@ export class AccountService {
     return name;
   }
 
+  public async saveSnapshot(rawName: string, snapshot: AuthSnapshot): Promise<string> {
+    const name = this.normalizeAccountName(rawName);
+    await this.ensureDir(accountsDir);
+    const destination = this.accountFilePath(name);
+    if (await this.pathExists(destination)) {
+      throw new AccountAlreadyExistsError(name);
+    }
+
+    await fsp.writeFile(destination, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
+    return name;
+  }
+
   public async useAccount(rawName: string): Promise<string> {
     const name = this.normalizeAccountName(rawName);
     const source = this.accountFilePath(name);
@@ -70,6 +104,60 @@ export class AccountService {
 
     await this.writeCurrentName(name);
     return name;
+  }
+
+  public async deleteAccount(rawName: string): Promise<string> {
+    const name = this.normalizeAccountName(rawName);
+    const target = this.accountFilePath(name);
+    if (!(await this.pathExists(target))) {
+      throw new AccountNotFoundError(name);
+    }
+    await fsp.rm(target, { force: true });
+    return name;
+  }
+
+  public async renameAccount(rawCurrentName: string, rawNextName: string): Promise<string> {
+    const current = this.normalizeAccountName(rawCurrentName);
+    const next = this.normalizeAccountName(rawNextName);
+
+    const currentPath = this.accountFilePath(current);
+    const nextPath = this.accountFilePath(next);
+    if (!(await this.pathExists(currentPath))) {
+      throw new AccountNotFoundError(current);
+    }
+    if (current !== next && (await this.pathExists(nextPath))) {
+      throw new AccountAlreadyExistsError(next);
+    }
+
+    if (current !== next) {
+      await fsp.rename(currentPath, nextPath);
+    }
+
+    const currentActive = await this.getCurrentAccountName();
+    if (currentActive === current) {
+      await this.writeCurrentName(next);
+    }
+
+    return next;
+  }
+
+  public async getCurrentSnapshot(): Promise<AuthSnapshot> {
+    await this.ensureAuthFileExists();
+    return this.readSnapshot(authPath);
+  }
+
+  public async listSavedProfiles(): Promise<SavedProfile[]> {
+    const names = await this.listAccountNames();
+    const profiles: SavedProfile[] = [];
+    for (const name of names) {
+      const filePath = this.accountFilePath(name);
+      profiles.push({
+        name,
+        filePath,
+        snapshot: await this.readSnapshot(filePath),
+      });
+    }
+    return profiles;
   }
 
   private accountFilePath(name: string): string {
@@ -97,6 +185,18 @@ export class AccountService {
   private async ensureAuthFileExists(): Promise<void> {
     if (!(await this.pathExists(authPath))) {
       throw new AuthFileMissingError(authPath);
+    }
+  }
+
+  private async readSnapshot(filePath: string): Promise<AuthSnapshot> {
+    try {
+      const text = await fsp.readFile(filePath, "utf8");
+      return JSON.parse(text) as AuthSnapshot;
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        throw new AuthFileInvalidError(filePath);
+      }
+      throw error;
     }
   }
 

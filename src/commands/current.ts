@@ -1,12 +1,10 @@
 import { BaseCommand } from "../lib/base-command";
 
 export default class CurrentCommand extends BaseCommand {
-  static description = "Show the currently active account name";
+  static hidden = true;
+  static description = "Deprecated. Use root interactive command.";
 
   async run(): Promise<void> {
-    await this.runSafe(async () => {
-      const name = await this.accounts.getCurrentAccountName();
-      this.log(name ?? "No Codex account is active yet.");
-    });
+    this.error('This command is deprecated. Run "codex-auth" and use the interactive menu.');
   }
 }
