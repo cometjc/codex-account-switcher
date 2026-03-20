@@ -15,8 +15,8 @@ test('panel renders profile header, whitespace-aligned detail rows, and hides mi
       lastUpdate: 'last update: 2.0h ago',
       weekly: {
         label: 'W:',
-        usageLeft: '📊  95% left',
-        resetLabel: '🔄 in',
+        usageLeft: ' 95% left',
+        resetLabel: 'reset',
         resetTime: '6.7d',
         resetPercent: '(95%)',
         pacingLabel: 'Pacing',
@@ -25,8 +25,8 @@ test('panel renders profile header, whitespace-aligned detail rows, and hides mi
       },
       fiveHour: {
         label: '5H:',
-        usageLeft: '📊  98% left',
-        resetLabel: '🔄 in',
+        usageLeft: ' 98% left',
+        resetLabel: 'reset',
         resetTime: '2.8h',
         resetPercent: '(56%)',
         pacingLabel: 'Pacing',
@@ -39,8 +39,8 @@ test('panel renders profile header, whitespace-aligned detail rows, and hides mi
       lastUpdate: 'last update: 1.5h ago',
       weekly: {
         label: 'W:',
-        usageLeft: '📊   2% left',
-        resetLabel: '🔄 in',
+        usageLeft: '  2% left',
+        resetLabel: 'reset',
         resetTime: '5.5d',
         resetPercent: '(79%)',
         pacingLabel: 'Pacing',
@@ -61,18 +61,21 @@ test('panel renders profile header, whitespace-aligned detail rows, and hides mi
   );
   assert.match(lines[1], /^    W:/);
   assert.match(lines[2], /^    5H:/);
-  assert.match(panel, /📊  95% left/);
+  assert.match(panel, / 95% left/);
+  assert.doesNotMatch(panel, /📊|🔄/);
   assert.doesNotMatch(panel, / \| /);
-  assert.match(panel, /🔄 in\s+6\.7d\s+\(95%\)/);
+  assert.match(panel, /reset\s+6\.7d\s+\(95%\)/);
   assert.match(panel, /Pacing\s+\+0\.7%\s+Overuse/);
   assert.match(panel, /Pacing\s+-41\.9%\s+Under/);
+  assert.doesNotMatch(panel, /reset\s{3,}\d/);
+  assert.doesNotMatch(panel, /Pacing\s{3,}[+-]\d/);
   assert.doesNotMatch(panel, /N\/A|n\/a/);
 
   const secondProfileHeaderIndex = lines.findIndex((line) =>
     line.includes('jethro-teamt5.org-free'),
   );
-  assert.equal(lines[secondProfileHeaderIndex + 1].indexOf('📊   2% left'), lines[1].indexOf('📊  95% left'));
-  assert.equal(lines[secondProfileHeaderIndex + 1].indexOf('🔄 in'), lines[1].indexOf('🔄 in'));
+  assert.equal(lines[secondProfileHeaderIndex + 1].indexOf('  2% left'), lines[1].indexOf(' 95% left'));
+  assert.equal(lines[secondProfileHeaderIndex + 1].indexOf('reset'), lines[1].indexOf('reset'));
   assert.equal(lines[secondProfileHeaderIndex + 1].indexOf('5.5d'), lines[1].indexOf('6.7d'));
   assert.equal(lines[secondProfileHeaderIndex + 1].indexOf('(79%)'), lines[1].indexOf('(95%)'));
   assert.equal(
@@ -80,7 +83,7 @@ test('panel renders profile header, whitespace-aligned detail rows, and hides mi
     lines[1].indexOf('+0.7%') + '+0.7%'.length,
   );
   assert.equal(lines[secondProfileHeaderIndex + 1].indexOf('Overuse'), lines[1].indexOf('Overuse'));
-  assert.equal(panel.includes('    5H: 📊'), true);
+  assert.equal(panel.includes('    5H:  98% left'), true);
   assert.equal(
     lines.slice(secondProfileHeaderIndex + 1).some((line) => /5H:/.test(line)),
     false,

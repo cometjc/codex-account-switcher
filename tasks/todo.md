@@ -195,6 +195,7 @@
 - `Delta` mode 現在不再把 `Pacing +0.9% Overuse` 當成整段字串補空白，而是拆成 `Pacing`、`+0.9%`、`Overuse` 三欄分別對齊。
 - adopted row 的高亮只套在 `+0.9%` 與 `Overuse` 兩欄，prefix 保持中性。
 - `🔄 in` 後方時間欄與括號百分比欄的距離已縮緊，避免像 `   6.6d  ` 這種過寬間距。
+- full panel 與 quota 欄位對齊現在使用當前資料集的實際寬度，不再用 `999.9d`、`+100.0%` 這種固定樣板把欄位撐太鬆。
 - 驗證：
   `npm run build`
   `node --test tests/root-option-layout.test.js`
@@ -214,6 +215,50 @@
 
 - Quota mode 現在只保留 quota 視角資訊，不再顯示 `% Overuse/Under` 或 `<- Bottleneck` 這類 delta 比較內容。
 - 這讓 Quota mode 和 Delta mode 的職責更清楚：Quota 看剩餘量與重置時間，Delta 看 pacing 比較。
+- 驗證：
+  `npm run build`
+  `node --test tests/root-option-layout.test.js`
+
+# 2026-03-20 prompt row 移除 emoji 標記
+
+- [x] 將 Delta prompt row 的 `📊`、`🔄 in` 改為寬度穩定的文字標籤
+- [x] 將「避免 emoji 影響對齊」提升為 spec core rule
+- [x] 補 panel / option 測試，鎖住 `...% left` 與 `reset ... (...)` 文案
+- [x] 修正 Node 25 下明確 `index` 路徑的目錄匯入，恢復 prompt tests 驗證
+
+## Review
+
+- Delta prompt row 現在改用 `94% left` 與 `reset 6.6d (95%)`，不再依賴 emoji 當欄位標記。
+- 這讓 JuiceSSH 這類對 Unicode cell width 較敏感的終端，不會因 emoji 造成同列後續欄位位移。
+- `spec/AGENTS.md` 現在明確要求：需要嚴格欄位對齊的 prompt row 應避免 emoji 或其他寬度不穩定字元。
+- 驗證：
+  `npm run build`
+  `node --test tests/root-panel-layout.test.js`
+  `node --test tests/root-option-layout.test.js`
+  `node --test tests/root-table-layout.test.js`
+  `node --test tests/workload-tier.test.js`
+  `node --test tests/entrypoints.test.js`
+  `node --test tests/root-panel-layout.test.js`
+  `node --test tests/root-table-layout.test.js`
+  `node --test tests/workload-tier.test.js`
+  `node --test tests/entrypoints.test.js`
+
+# 2026-03-20 adaptive prompt density MVP
+
+- [x] 補 density 決策測試，鎖住 `full` / `condensed` 切換條件
+- [x] 補 condensed Delta / Quota prompt 測試，鎖住每個 profile 從 3 行壓到 2 行
+- [x] 新增 prompt density helper，依 profile 數量、終端高度與 bar mode 決定 density
+- [x] 實作 condensed Delta 與 condensed Quota renderer，維持模式語意但壓低垂直高度
+- [x] 更新已落地 spec 並完成驗證
+
+## Review
+
+- 新增 `PromptDensity` 決策，當 profile 數量與終端高度造成過高垂直壓力時，prompt panel 會從 `full` 切到 `condensed`。
+- `Delta` condensed mode 仍保留 `profile + last update` 與 `W:` / `5H:` 語意，但把兩個 window 摘要壓到同一行。
+- `Quota` condensed mode 同樣壓成單一 detail line，並維持 quota-only 視角，不回帶 delta/drift 比較內容。
+- density trigger 現在用實際可見 detail lines 估算，不再固定每組一律當成 3 行。
+- 缺少 `5H` 的 profile 在 condensed 模式下仍維持穩定的兩行 block，不會留下多餘分隔符。
+- option list 行為沒有改變，adaptive density 只影響上方 prompt panel。
 - 驗證：
   `npm run build`
   `node --test tests/root-option-layout.test.js`

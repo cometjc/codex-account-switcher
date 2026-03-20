@@ -33,13 +33,13 @@ export function computePanelWidths(rows: RootPanelRow[]): RootPanelWidths {
   const detailRows = rows.flatMap((row) => [row.weekly, row.fiveHour].filter(Boolean) as RootPanelWindowRow[]);
 
   return {
-    usageLeft: width(["📊 100% left", ...detailRows.map((row) => row.usageLeft)]),
-    resetLabel: width(["🔄 in", ...detailRows.map((row) => row.resetLabel)]),
-    resetTime: width(["999.9d", ...detailRows.map((row) => row.resetTime)]),
-    resetPercent: width(["(100%)", ...detailRows.map((row) => row.resetPercent)]),
-    pacingLabel: width(["Pacing", ...detailRows.map((row) => row.pacingLabel)]),
-    pacingValue: width(["+100.0%", ...detailRows.map((row) => row.pacingValue)]),
-    pacingDescription: width(["Overuse", ...detailRows.map((row) => row.pacingDescription)]),
+    usageLeft: width(detailRows.map((row) => row.usageLeft)),
+    resetLabel: width(detailRows.map((row) => row.resetLabel)),
+    resetTime: width(detailRows.map((row) => row.resetTime)),
+    resetPercent: width(detailRows.map((row) => row.resetPercent)),
+    pacingLabel: width(detailRows.map((row) => row.pacingLabel)),
+    pacingValue: width(detailRows.map((row) => row.pacingValue)),
+    pacingDescription: width(detailRows.map((row) => row.pacingDescription)),
   };
 }
 
@@ -63,7 +63,7 @@ function renderDetailLine(
   row: RootPanelWindowRow,
   widths: RootPanelWidths,
 ): string {
-  return `    ${padRight(row.label, 3)} ${padRight(row.usageLeft, widths.usageLeft)}  ${padRight(row.resetLabel, widths.resetLabel)}${padLeft(row.resetTime, widths.resetTime)} ${padLeft(row.resetPercent, widths.resetPercent)} ${padRight(row.pacingLabel, widths.pacingLabel)} ${padLeft(row.pacingValue, widths.pacingValue)} ${padRight(row.pacingDescription, widths.pacingDescription)}`;
+  return `    ${padRight(row.label, 3)} ${padRight(row.usageLeft, widths.usageLeft)}  ${padRight(row.resetLabel, widths.resetLabel)} ${padLeft(row.resetTime, widths.resetTime)} ${padLeft(row.resetPercent, widths.resetPercent)} ${padRight(row.pacingLabel, widths.pacingLabel)} ${padLeft(row.pacingValue, widths.pacingValue)} ${padRight(row.pacingDescription, widths.pacingDescription)}`;
 }
 
 function padRight(text: string, width: number): string {

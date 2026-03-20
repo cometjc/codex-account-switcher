@@ -14,8 +14,8 @@ import {
   AccountAlreadyExistsError,
   type AuthSnapshot,
   type SavedProfile,
-} from "../lib/accounts";
-import { type UsageResponse, type UsageWindow, usageLimitService } from "../lib/limits";
+} from "../lib/accounts/index";
+import { type UsageResponse, type UsageWindow, usageLimitService } from "../lib/limits/index";
 
 type ItemKind = "saved" | "unsaved-current";
 type ActionKind =
@@ -31,6 +31,7 @@ type ActionKind =
 type BarStyle = "quota" | "delta";
 type RefreshScope = "none" | "current" | "all";
 type WorkloadTier = "auto" | "low" | "medium" | "high";
+type PromptDensity = "full" | "condensed";
 
 interface LimitAxis {
   startAt: number;
@@ -331,7 +332,13 @@ export default class RootCommand extends BaseCommand {
     const rowModels = items.map((item) => this.buildRowModel(item, axes, barStyle, workloadTier));
     const widths = this.computeColumnWidths(rowModels);
     const headerLine = "";
-    const panelText = this.renderPromptPanelText(rowModels, barStyle);
+    const promptDensity = this.pickPromptDensity(
+      this.countVisiblePromptDetailLines(rowModels),
+      rowModels.length,
+      this.currentTerminalRows(),
+      barStyle,
+    );
+    const panelText = this.renderPromptPanelText(rowModels, barStyle, promptDensity);
 
     const renderedItems = items.map((item, index) => ({
       ...item,
@@ -647,17 +654,17 @@ export default class RootCommand extends BaseCommand {
       profile: width(["Profile", ...rows.map((row) => row.profile)]),
       lastUpdate: width(["Last", ...rows.map((row) => row.lastUpdate)]),
       status: width(["Pacing Status", ...rows.map((row) => row.status)]),
-      bar: width(["[                            ]", ...rows.flatMap((row) => [row.weeklyBar, row.fiveHourBar])]),
-      timeToReset: width(["999.9d", ...rows.flatMap((row) => [row.weeklyTimeToReset, row.fiveHourTimeToReset])]),
-      usageLeft: width(["100% left", ...rows.flatMap((row) => [row.weeklyUsageLeft, row.fiveHourUsageLeft])]),
-      driftValue: width(["+100.0%", ...rows.flatMap((row) => [
+      bar: width(rows.flatMap((row) => [row.weeklyBar, row.fiveHourBar])),
+      timeToReset: width(rows.flatMap((row) => [row.weeklyTimeToReset, row.fiveHourTimeToReset])),
+      usageLeft: width(rows.flatMap((row) => [row.weeklyUsageLeft, row.fiveHourUsageLeft])),
+      driftValue: width(rows.flatMap((row) => [
         this.extractDriftValue(row.weeklyDrift),
         this.extractDriftValue(row.fiveHourDrift),
-      ])]),
-      driftLabel: width(["Overuse", ...rows.flatMap((row) => [
+      ])),
+      driftLabel: width(rows.flatMap((row) => [
         this.extractDriftLabel(row.weeklyDrift),
         this.extractDriftLabel(row.fiveHourDrift),
-      ])]),
+      ])),
     };
   }
 
@@ -746,7 +753,17 @@ export default class RootCommand extends BaseCommand {
     return "";
   }
 
-  private renderPromptPanelText(rows: RowModel[], barStyle: BarStyle): string {
+  private renderPromptPanelText(
+    rows: RowModel[],
+    barStyle: BarStyle,
+    density: PromptDensity = "full",
+  ): string {
+    if (density === "condensed") {
+      return barStyle === "quota"
+        ? rows.map((row) => this.renderCondensedQuotaPromptBlock(row)).join("\n")
+        : rows.map((row) => this.renderCondensedDeltaPromptBlock(row)).join("\n");
+    }
+
     if (barStyle === "quota") {
       const widths = this.computeColumnWidths(rows);
       return rows.map((row) => this.renderQuotaPromptBlock(row, widths)).join("\n");
@@ -773,6 +790,26 @@ export default class RootCommand extends BaseCommand {
         : null,
     }));
     return renderRootDetailPanel(panelRows, computePanelWidths(panelRows));
+  }
+
+  private pickPromptDensity(
+    visibleDetailLines: number,
+    profileCount: number,
+    terminalRows: number,
+    barStyle: BarStyle,
+  ): PromptDensity {
+    const reservedRows = barStyle === "delta" ? 8 : 7;
+    const fullPanelLines = profileCount + visibleDetailLines;
+    return fullPanelLines + reservedRows >= terminalRows
+      ? "condensed"
+      : "full";
+  }
+
+  private countVisiblePromptDetailLines(rows: RowModel[]): number {
+    return rows.reduce((count, row) => {
+      const fiveHourVisible = row.fiveHourTimeToReset ? 1 : 0;
+      return count + 1 + fiveHourVisible;
+    }, 0);
   }
 
   private renderQuotaPromptBlock(
@@ -805,6 +842,70 @@ export default class RootCommand extends BaseCommand {
     widths: RootTableWidths,
   ): string {
     return `    ${this.padRight(windowLabel, 3)} ${this.padRight(bar, widths.bar)}  ${this.padLeft(timeToReset, widths.timeToReset)}  ${this.padLeft(usageLeft, widths.usageLeft)}`;
+  }
+
+  private renderCondensedDeltaPromptBlock(row: RowModel): string {
+    const header = `${row.profile} ${this.formatPanelLastUpdate(row.lastUpdate)}`;
+    const detailParts = [
+      this.renderCondensedDeltaWindow(
+        "W:",
+        row.weeklyUsageLeft,
+        row.weeklyTimeToReset,
+        row.weeklyTimeLeftPercent,
+        row.weeklyDrift,
+        row.weeklyBottleneck,
+      ),
+      row.fiveHourTimeToReset
+        ? this.renderCondensedDeltaWindow(
+            "5H:",
+            row.fiveHourUsageLeft,
+            row.fiveHourTimeToReset,
+            row.fiveHourTimeLeftPercent,
+            row.fiveHourDrift,
+            row.fiveHourBottleneck,
+          )
+        : null,
+    ].filter((part): part is string => Boolean(part));
+    return `${header}\n    ${detailParts.join("  ·  ")}`;
+  }
+
+  private renderCondensedDeltaWindow(
+    label: "W:" | "5H:",
+    usageLeft: string,
+    timeToReset: string,
+    timeLeftPercent: string,
+    drift: string,
+    isAdopted: boolean,
+  ): string {
+    const usage = this.formatPanelUsage(usageLeft);
+    const reset = this.formatPanelTimeToReset(timeToReset, timeLeftPercent);
+    const pacing = this.formatPanelPacing(drift, isAdopted);
+    return `${label} ${usage} ${reset.resetLabel} ${reset.resetTime} ${reset.resetPercent} ${pacing.pacingLabel} ${pacing.pacingValue}${pacing.pacingDescription ? ` ${pacing.pacingDescription}` : ""}`;
+  }
+
+  private renderCondensedQuotaPromptBlock(row: RowModel): string {
+    const header = `${row.profile} ${this.formatPanelLastUpdate(row.lastUpdate)}`;
+    const detailParts = [
+      this.renderCondensedQuotaWindow("W:", row.weeklyBar, row.weeklyTimeToReset, row.weeklyUsageLeft),
+      row.fiveHourTimeToReset
+        ? this.renderCondensedQuotaWindow(
+            "5H:",
+            row.fiveHourBar,
+            row.fiveHourTimeToReset,
+            row.fiveHourUsageLeft,
+          )
+        : null,
+    ].filter((part): part is string => Boolean(part));
+    return `${header}\n    ${detailParts.join("  ·  ")}`;
+  }
+
+  private renderCondensedQuotaWindow(
+    label: "W:" | "5H:",
+    bar: string,
+    timeToReset: string,
+    usageLeft: string,
+  ): string {
+    return `${label} ${bar} ${timeToReset} ${usageLeft}`;
   }
 
   private renderSelectionOption(
@@ -856,6 +957,33 @@ export default class RootCommand extends BaseCommand {
     pushColumns(envColumns);
 
     return columnCandidates.length ? Math.max(...columnCandidates) : 80;
+  }
+
+  private currentTerminalRows(): number {
+    const rowCandidates: number[] = [];
+    const pushRows = (value: number | undefined) => {
+      if (typeof value !== "number" || !Number.isFinite(value)) return;
+      const rows = Math.floor(value);
+      if (rows > 0) rowCandidates.push(rows);
+    };
+
+    pushRows(process.stdout.rows);
+    pushRows(process.stderr.rows);
+
+    if (typeof process.stdout.getWindowSize === "function") {
+      const [, rows] = process.stdout.getWindowSize();
+      pushRows(rows);
+    }
+    if (typeof process.stderr.getWindowSize === "function") {
+      const [, rows] = process.stderr.getWindowSize();
+      pushRows(rows);
+    }
+
+    const envRows = Number(process.env.LINES);
+    pushRows(envRows);
+    pushRows(this.readTputRows());
+
+    return rowCandidates.length ? Math.max(...rowCandidates) : 24;
   }
 
   private buildActionsHelpText(barStyle: BarStyle, workloadTier: WorkloadTier = "auto"): string {
@@ -1163,8 +1291,8 @@ export default class RootCommand extends BaseCommand {
 
   private formatPanelUsage(value: string): string {
     const match = value.match(/^(\d+)% left$/);
-    if (!match) return `📊 ${value}`;
-    return `📊 ${match[1]!.padStart(3, " ")}% left`;
+    if (!match) return value;
+    return `${match[1]!.padStart(3, " ")}% left`;
   }
 
   private formatPanelTimeToReset(timeToReset: string, timeLeftPercent: string): {
@@ -1173,7 +1301,7 @@ export default class RootCommand extends BaseCommand {
     resetPercent: string;
   } {
     return {
-      resetLabel: "🔄 in",
+      resetLabel: "reset",
       resetTime: timeToReset,
       resetPercent: `(${timeLeftPercent})`,
     };
@@ -1402,30 +1530,7 @@ export default class RootCommand extends BaseCommand {
       return Math.floor(override);
     }
 
-    const rowCandidates: number[] = [];
-    const pushRows = (value: number | undefined) => {
-      if (typeof value !== "number" || !Number.isFinite(value)) return;
-      const rows = Math.floor(value);
-      if (rows > 0) rowCandidates.push(rows);
-    };
-
-    pushRows(process.stdout.rows);
-    pushRows(process.stderr.rows);
-
-    if (typeof process.stdout.getWindowSize === "function") {
-      const [, rows] = process.stdout.getWindowSize();
-      pushRows(rows);
-    }
-    if (typeof process.stderr.getWindowSize === "function") {
-      const [, rows] = process.stderr.getWindowSize();
-      pushRows(rows);
-    }
-
-    const envRows = Number(process.env.LINES);
-    pushRows(envRows);
-    pushRows(this.readTputRows());
-
-    const terminalRows = rowCandidates.length ? Math.max(...rowCandidates) : 24;
+    const terminalRows = this.currentTerminalRows();
     const reserveRows = 2;
     return Math.max(12, terminalRows - reserveRows);
   }

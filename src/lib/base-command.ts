@@ -1,5 +1,5 @@
 import { Command } from "@oclif/core";
-import { accountService, CodexAuthError } from "./accounts";
+import { accountService, CodexAuthError } from "./accounts/index";
 
 export abstract class BaseCommand extends Command {
   protected readonly accounts = accountService;
