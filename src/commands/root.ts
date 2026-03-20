@@ -55,11 +55,13 @@ interface RowModel {
   statusValue: number | null;
   scoreLabel: string;
   weeklyBar: string;
-  weeklyTimeLeft: string;
+  weeklyTimeToReset: string;
+  weeklyUsageLeft: string;
   weeklyDrift: string;
   weeklyBottleneck: boolean;
   fiveHourBar: string;
-  fiveHourTimeLeft: string;
+  fiveHourTimeToReset: string;
+  fiveHourUsageLeft: string;
   fiveHourDrift: string;
   fiveHourBottleneck: boolean;
 }
@@ -373,11 +375,13 @@ export default class RootCommand extends BaseCommand {
       statusValue: summary.statusValue,
       scoreLabel: summary.scoreLabel,
       weeklyBar: this.renderWindowCell(weekly, axes.weekly, barStyle, summary.noActivity, weeklySummary?.drift ?? null),
-      weeklyTimeLeft: this.formatTimeLeftFromSummary(weeklySummary),
+      weeklyTimeToReset: this.formatTimeToResetFromSummary(weeklySummary),
+      weeklyUsageLeft: this.formatUsageLeftFromSummary(weeklySummary),
       weeklyDrift: this.formatDrift(weeklySummary, summary.noActivity),
       weeklyBottleneck: summary.statusSource === "W",
       fiveHourBar: this.renderWindowCell(fiveHour, axes.fiveHour, barStyle, summary.noActivity, fiveHourSummary?.drift ?? null),
-      fiveHourTimeLeft: this.formatTimeLeftFromSummary(fiveHourSummary),
+      fiveHourTimeToReset: this.formatTimeToResetFromSummary(fiveHourSummary),
+      fiveHourUsageLeft: this.formatUsageLeftFromSummary(fiveHourSummary),
       fiveHourDrift: this.formatDrift(fiveHourSummary, summary.noActivity),
       fiveHourBottleneck: summary.statusSource === "5H",
     };
@@ -586,7 +590,8 @@ export default class RootCommand extends BaseCommand {
     lastUpdate: number;
     status: number;
     bar: number;
-    timeLeft: number;
+    timeToReset: number;
+    usageLeft: number;
     drift: number;
   } {
     const width = (values: string[]): number =>
@@ -597,7 +602,8 @@ export default class RootCommand extends BaseCommand {
       lastUpdate: width(["Last", ...rows.map((row) => row.lastUpdate)]),
       status: width(["Pacing Status", ...rows.map((row) => row.status)]),
       bar: width(["[                            ]", ...rows.flatMap((row) => [row.weeklyBar, row.fiveHourBar])]),
-      timeLeft: width(["100% (7.0d)", ...rows.flatMap((row) => [row.weeklyTimeLeft, row.fiveHourTimeLeft])]),
+      timeToReset: width(["999.9d", ...rows.flatMap((row) => [row.weeklyTimeToReset, row.fiveHourTimeToReset])]),
+      usageLeft: width(["100% left", ...rows.flatMap((row) => [row.weeklyUsageLeft, row.fiveHourUsageLeft])]),
       drift: width(["Drift", ...rows.flatMap((row) => [row.weeklyDrift, row.fiveHourDrift])]),
     };
   }
@@ -607,7 +613,8 @@ export default class RootCommand extends BaseCommand {
     lastUpdate: number;
     status: number;
     bar: number;
-    timeLeft: number;
+    timeToReset: number;
+    usageLeft: number;
     drift: number;
   }): string {
     return this.joinColumns([
@@ -624,7 +631,8 @@ export default class RootCommand extends BaseCommand {
       lastUpdate: number;
       status: number;
       bar: number;
-      timeLeft: number;
+      timeToReset: number;
+      usageLeft: number;
       drift: number;
     },
   ): string {
@@ -638,7 +646,7 @@ export default class RootCommand extends BaseCommand {
       this.padRight("", widths.profile),
       this.padCenter("", widths.lastUpdate),
       this.padRight(
-        `W: ${this.padRight(row.weeklyBar, widths.bar)}  ${this.padCenter(row.weeklyTimeLeft, widths.timeLeft)}  Drift ${this.padRight(row.weeklyDrift, widths.drift)}${row.weeklyBottleneck ? "  <- Bottleneck" : ""}`,
+        `W: ${this.padRight(row.weeklyBar, widths.bar)}  Time to reset ${this.padLeft(row.weeklyTimeToReset, widths.timeToReset)}  Usage Left ${this.padLeft(row.weeklyUsageLeft, widths.usageLeft)}  Drift ${this.padRight(row.weeklyDrift, widths.drift)}${row.weeklyBottleneck ? "  <- Bottleneck" : ""}`,
         widths.status,
       ),
     ]);
@@ -647,7 +655,7 @@ export default class RootCommand extends BaseCommand {
       this.padRight("", widths.profile),
       this.padCenter("", widths.lastUpdate),
       this.padRight(
-        `5H:${this.padRight(row.fiveHourBar, widths.bar)}  ${this.padCenter(row.fiveHourTimeLeft, widths.timeLeft)}  Drift ${this.padRight(row.fiveHourDrift, widths.drift)}${row.fiveHourBottleneck ? "  <- Bottleneck" : ""}`,
+        `5H:${this.padRight(row.fiveHourBar, widths.bar)}  Time to reset ${this.padLeft(row.fiveHourTimeToReset, widths.timeToReset)}  Usage Left ${this.padLeft(row.fiveHourUsageLeft, widths.usageLeft)}  Drift ${this.padRight(row.fiveHourDrift, widths.drift)}${row.fiveHourBottleneck ? "  <- Bottleneck" : ""}`,
         widths.status,
       ),
     ]);
@@ -663,7 +671,8 @@ export default class RootCommand extends BaseCommand {
       lastUpdate: number;
       status: number;
       bar: number;
-      timeLeft: number;
+      timeToReset: number;
+      usageLeft: number;
       drift: number;
     },
   ): string | null {
@@ -875,17 +884,14 @@ export default class RootCommand extends BaseCommand {
     return window.reset_at - windowSeconds;
   }
 
-  private formatTimeLeft(window: UsageWindow | null): string {
+  private formatTimeToResetFromSummary(window: WindowSummary | undefined): string {
     if (!window) return "";
-    const remaining = this.readEffectiveRemainingSeconds(window);
-    const total = Math.max(1, window.limit_window_seconds || remaining);
-    const leftPercent = this.clampPercent((remaining / total) * 100);
-    return `${Math.round(leftPercent)}% (${this.formatCompactTime(remaining)})`;
+    return this.formatCompactTime(window.remainingSeconds);
   }
 
-  private formatTimeLeftFromSummary(window: WindowSummary | undefined): string {
+  private formatUsageLeftFromSummary(window: WindowSummary | undefined): string {
     if (!window) return "";
-    return `${Math.round(window.timeLeftPercent)}% (${this.formatCompactTime(window.remainingSeconds)})`;
+    return `${Math.round(window.left)}% left`;
   }
 
   private formatDrift(window: WindowSummary | undefined, noActivity: boolean): string {

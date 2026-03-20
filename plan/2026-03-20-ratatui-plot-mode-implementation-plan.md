@@ -48,7 +48,7 @@ Required fields:
 - ordered 7d usage points in normalized `% used`
 - active 5h window start/end unix seconds
 - 5h projected band lower/upper bounds expressed in 7d-plot Y units
-- summary labels already shown by the current CLI (`Time Left`, `Drift`, `Pacing Status`)
+- summary labels already shown by the current CLI (`Time to reset`, `Usage Left`, `Drift`, `Pacing Status`)
 
 - [ ] **Step 2: Add a pure builder function**
 
@@ -235,7 +235,8 @@ Render for focused profile:
 - `Recommendation`
 - `Weekly Drift`
 - `5H Drift`
-- `Time Left`
+- `Time to reset`
+- `Usage Left`
 
 - [ ] **Step 2: Add compare panel**
 

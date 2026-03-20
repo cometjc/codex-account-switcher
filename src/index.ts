@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { run, flush, Errors } from "@oclif/core";
+import { routeCliArgv } from "./lib/route-cli-argv";
 
-const argv = process.argv.slice(2);
-const routedArgv = argv.length === 0 ? ["root"] : argv;
+const routedArgv = routeCliArgv(process.argv.slice(2));
 
 void run(routedArgv)
   .then(() => flush())

@@ -22,6 +22,9 @@ Date: 2026-03-19
   - numeric fields use fixed-width padding.
 - Date/time display uses `MM/DD HH:MM` (for weekly) and `HH:MM` (for 5h).
 - Aligned bracket column in time-axis views by padding 5h time labels.
+- Split the bar-adjacent summary into two explicit fields:
+  - `Time to reset`: remaining time only
+  - `Usage Left`: remaining quota only, formatted as `XX% left`
 - Cache status moved to each profile title suffix:
   - `fresh` when just refreshed by API
   - otherwise `MMm:SSs ago`

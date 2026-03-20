@@ -1,31 +1,34 @@
 # Multi-Phase Routing Plan (2026-03-20)
 
-## Phase 1 - UI Relationship Redesign
-- Switch to per-profile multi-line block layout.
-- Show Weekly and 5hr side-by-side in a dual-compare pattern.
-- Add explicit bottleneck marker (`<- Bottleneck`) on the worse window.
-- Keep existing actions/hotkeys unchanged.
+## Completed Foundations
 
-## Phase 2 - Recommendation Engine (Auto)
-- Introduce routing score focused on maximizing 7d utilization.
-- Use 5hr as smoothing constraint (not hard blocker).
-- Include small switch-cost penalty to reduce churn.
-- Sort by recommendation score with stable tie behavior.
+- [x] Phase 1 - UI relationship redesign
+  - per-profile multi-line block layout
+  - weekly and 5h dual-compare presentation
+  - explicit bottleneck marker
+  - existing actions/hotkeys preserved
+- [x] Phase 2 - recommendation engine
+  - score centered on 7d utilization
+  - 5h used as smoothing constraint
+  - switch-cost penalty added
+  - stable ranking behavior kept
+- [x] Phase 3 - pacing status semantics
+  - `Pacing Status` naming adopted
+  - concise status text added
+  - recommendation label tiers added
+- [x] Phase 4 - visual guidance
+  - recommendation color on summary row
+  - drift-based delta-bar background
+  - ANSI-off text readability kept
 
-## Phase 3 - Pacing Status Semantics
-- Rename summary concept to `Pacing Status`.
-- Display concise status text:
-  - `+x.x% Overuse [W|5H]`
-  - `-x.x% Under [W|5H]`
-  - `Unused, good [W|5H]`
-- Add recommendation label tiers: `Strong/Good/Neutral/Caution/Risky`.
+## Next MVP
 
-## Phase 4 - Visual Guidance
-- Apply recommendation color to profile summary row.
-- Apply drift-based background color on Delta bars.
-- Keep ANSI-off mode fully readable with text-only cues.
+- [ ] Add quick workload tiers `Low/Medium/High`
+- [ ] Expose current workload tier in the action/help area or another low-noise control surface
+- [ ] Re-rank recommendations based on projected workload impact while keeping current auto mode as default
+- [ ] Verify ranking changes stay stable when workload tier is unset
+- [ ] Update `spec/` with workload-aware routing behavior after MVP lands
 
-## Phase 5 - Workload-Aware Extension (Future)
-- Add quick workload tiers `Low/Medium/High`.
-- Re-rank recommendations based on projected workload impact.
-- Keep this optional and backward compatible with auto mode.
+## Follow-up Track
+
+- [ ] Keep the Rust plot-mode work in `plan/2026-03-20-ratatui-plot-mode-implementation-plan.md` as the separate visualization stream
