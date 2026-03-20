@@ -5,7 +5,8 @@ export interface RootTableWidths {
   bar: number;
   timeToReset: number;
   usageLeft: number;
-  drift: number;
+  driftValue: number;
+  driftLabel: number;
 }
 
 export interface WindowDetailRow {
@@ -48,7 +49,20 @@ export function renderWindowDetailLine(
   row: WindowDetailRow,
   widths: RootTableWidths,
 ): string {
-  return `${padRight(row.windowLabel, 3)} ${padRight(row.bar, widths.bar)}  ${padLeft(row.timeToReset, widths.timeToReset)}  ${padLeft(row.usageLeft, widths.usageLeft)}  ${padRight(row.drift, widths.drift)}${row.bottleneck ? "  <- Bottleneck" : ""}`;
+  const driftParts = splitDrift(row.drift);
+  return `${padRight(row.windowLabel, 3)} ${padRight(row.bar, widths.bar)}  ${padLeft(row.timeToReset, widths.timeToReset)}  ${padLeft(row.usageLeft, widths.usageLeft)}  ${padLeft(driftParts.value, widths.driftValue)} ${padRight(driftParts.label, widths.driftLabel)}${row.bottleneck ? "  <- Bottleneck" : ""}`;
+}
+
+function splitDrift(drift: string): { value: string; label: string } {
+  const match = drift.match(/^([+-]?\d+(?:\.\d+)?%)(?:\s+(.+))?$/);
+  if (!match) {
+    return { value: "", label: drift };
+  }
+
+  return {
+    value: match[1] ?? "",
+    label: match[2] ?? "",
+  };
 }
 
 function joinColumns(columns: string[]): string {

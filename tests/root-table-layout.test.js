@@ -15,7 +15,8 @@ test('table headers own Time to reset, Usage Left, and Drift labels', async () =
     bar: 30,
     timeToReset: 13,
     usageLeft: 10,
-    drift: 12,
+    driftValue: 7,
+    driftLabel: 8,
   };
 
   const header = renderRootHeaderBlock(widths);
@@ -48,7 +49,8 @@ test('detail headers align with detail values on the same columns', async () => 
     bar: 30,
     timeToReset: 13,
     usageLeft: 10,
-    drift: 12,
+    driftValue: 7,
+    driftLabel: 8,
   };
 
   const detailHeader = renderWindowDetailLine(
@@ -79,9 +81,52 @@ test('detail headers align with detail values on the same columns', async () => 
   const headerUsageEnd = detailHeader.indexOf('Usage Left') + 'Usage Left'.length;
   const rowUsageEnd = weeklyLine.indexOf('97% left') + '97% left'.length;
   const headerDriftStart = detailHeader.indexOf('Drift');
-  const rowDriftStart = weeklyLine.indexOf('-1.6% Under');
+  const rowDriftStart = weeklyLine.indexOf('Under');
 
   assert.equal(headerTimeEnd, rowTimeEnd);
   assert.equal(headerUsageEnd, rowUsageEnd);
   assert.equal(headerDriftStart, rowDriftStart);
+});
+
+test('quota drift splits percentage and description into aligned subfields', async () => {
+  const {renderWindowDetailLine} = await loadLayoutModule();
+  const widths = {
+    profile: 12,
+    lastUpdate: 6,
+    status: 13,
+    bar: 30,
+    timeToReset: 13,
+    usageLeft: 10,
+    driftValue: 7,
+    driftLabel: 8,
+  };
+
+  const overuseLine = renderWindowDetailLine(
+    {
+      windowLabel: 'W:',
+      bar: '[████░░░░░░░░░░░░░░░░░░░░░░░░]',
+      timeToReset: '6.8d',
+      usageLeft: '97% left',
+      drift: '+1.1% Overuse',
+      bottleneck: false,
+    },
+    widths,
+  );
+  const underLine = renderWindowDetailLine(
+    {
+      windowLabel: '5H:',
+      bar: '[████░░░░░░░░░░░░░░░░░░░░░░░░]',
+      timeToReset: '2.1h',
+      usageLeft: ' 2% left',
+      drift: '-55.4% Under',
+      bottleneck: false,
+    },
+    widths,
+  );
+
+  const overuseValueEnd = overuseLine.indexOf('+1.1%') + '+1.1%'.length;
+  const underValueEnd = underLine.indexOf('-55.4%') + '-55.4%'.length;
+
+  assert.equal(overuseValueEnd, underValueEnd);
+  assert.equal(overuseLine.indexOf('Overuse'), underLine.indexOf('Under'));
 });

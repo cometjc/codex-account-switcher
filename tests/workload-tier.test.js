@@ -40,6 +40,7 @@ test('actions help text shows workload tier state', async () => {
 
   const helpText = command.buildActionsHelpText('delta', 'auto');
 
+  assert.match(helpText, /\[Q\]uit/);
   assert.match(helpText, /\[W\]orkload: Auto/);
 });
 

@@ -24,6 +24,7 @@ type ActionKind =
   | "mode"
   | "workload"
   | "color"
+  | "quit"
   | "update-current"
   | "update-all"
   | "redraw";
@@ -65,11 +66,13 @@ interface RowModel {
   scoreLabel: string;
   weeklyBar: string;
   weeklyTimeToReset: string;
+  weeklyTimeLeftPercent: string;
   weeklyUsageLeft: string;
   weeklyDrift: string;
   weeklyBottleneck: boolean;
   fiveHourBar: string;
   fiveHourTimeToReset: string;
+  fiveHourTimeLeftPercent: string;
   fiveHourUsageLeft: string;
   fiveHourDrift: string;
   fiveHourBottleneck: boolean;
@@ -153,6 +156,9 @@ export default class RootCommand extends BaseCommand {
         if (action === "mode") {
           barStyle = barStyle === "quota" ? "delta" : "quota";
           continue;
+        }
+        if (action === "quit") {
+          return;
         }
         if (action === "workload") {
           workloadTier = this.nextWorkloadTier(workloadTier);
@@ -244,6 +250,7 @@ export default class RootCommand extends BaseCommand {
           { value: "mode", name: "Bar Style", key: "b" },
           { value: "workload", name: "Workload", key: "w" },
           { value: "color", name: "Color", key: "c" },
+          { value: "quit", name: "Quit", key: "q" },
         ],
         choices: promptChoices,
         pageSize,
@@ -324,7 +331,7 @@ export default class RootCommand extends BaseCommand {
     const rowModels = items.map((item) => this.buildRowModel(item, axes, barStyle, workloadTier));
     const widths = this.computeColumnWidths(rowModels);
     const headerLine = "";
-    const panelText = this.renderPromptPanelText(rowModels);
+    const panelText = this.renderPromptPanelText(rowModels, barStyle);
 
     const renderedItems = items.map((item, index) => ({
       ...item,
@@ -400,18 +407,20 @@ export default class RootCommand extends BaseCommand {
     const statusStyled = this.colorizePace(summary.statusText, summary.statusValue);
 
     return {
-      profile: this.colorizeRecommendationProfile(profileLabel, summary.score),
+      profile: profileLabel,
       lastUpdate: this.formatLastUpdate(item.usageView),
       status: `${statusStyled}  ${summary.scoreLabel}`,
       statusValue: summary.statusValue,
       scoreLabel: summary.scoreLabel,
       weeklyBar: this.renderWindowCell(weekly, axes.weekly, barStyle, summary.noActivity, weeklySummary?.drift ?? null),
       weeklyTimeToReset: this.formatTimeToResetFromSummary(weeklySummary),
+      weeklyTimeLeftPercent: this.formatTimeLeftPercentFromSummary(weeklySummary),
       weeklyUsageLeft: this.formatUsageLeftFromSummary(weeklySummary),
       weeklyDrift: this.formatDrift(weeklySummary, summary.noActivity),
       weeklyBottleneck: summary.statusSource === "W",
       fiveHourBar: this.renderWindowCell(fiveHour, axes.fiveHour, barStyle, summary.noActivity, fiveHourSummary?.drift ?? null),
       fiveHourTimeToReset: this.formatTimeToResetFromSummary(fiveHourSummary),
+      fiveHourTimeLeftPercent: this.formatTimeLeftPercentFromSummary(fiveHourSummary),
       fiveHourUsageLeft: this.formatUsageLeftFromSummary(fiveHourSummary),
       fiveHourDrift: this.formatDrift(fiveHourSummary, summary.noActivity),
       fiveHourBottleneck: summary.statusSource === "5H",
@@ -628,7 +637,8 @@ export default class RootCommand extends BaseCommand {
     bar: number;
     timeToReset: number;
     usageLeft: number;
-    drift: number;
+    driftValue: number;
+    driftLabel: number;
   } {
     const width = (values: string[]): number =>
       values.reduce((max, value) => Math.max(max, this.visibleLength(value)), 0);
@@ -640,7 +650,14 @@ export default class RootCommand extends BaseCommand {
       bar: width(["[                            ]", ...rows.flatMap((row) => [row.weeklyBar, row.fiveHourBar])]),
       timeToReset: width(["999.9d", ...rows.flatMap((row) => [row.weeklyTimeToReset, row.fiveHourTimeToReset])]),
       usageLeft: width(["100% left", ...rows.flatMap((row) => [row.weeklyUsageLeft, row.fiveHourUsageLeft])]),
-      drift: width(["Drift", ...rows.flatMap((row) => [row.weeklyDrift, row.fiveHourDrift])]),
+      driftValue: width(["+100.0%", ...rows.flatMap((row) => [
+        this.extractDriftValue(row.weeklyDrift),
+        this.extractDriftValue(row.fiveHourDrift),
+      ])]),
+      driftLabel: width(["Overuse", ...rows.flatMap((row) => [
+        this.extractDriftLabel(row.weeklyDrift),
+        this.extractDriftLabel(row.fiveHourDrift),
+      ])]),
     };
   }
 
@@ -718,28 +735,76 @@ export default class RootCommand extends BaseCommand {
       bar: number;
       timeToReset: number;
       usageLeft: number;
-      drift: number;
+      driftValue: number;
+      driftLabel: number;
     },
   ): string | null {
     return null;
   }
 
   private renderStatusLine(barStyle: BarStyle, workloadTier: WorkloadTier): string {
-    return `Bar ${barStyle === "delta" ? "Delta" : "Quota"}  Workload ${this.formatWorkloadTier(workloadTier)}`;
+    return "";
   }
 
-  private renderPromptPanelText(rows: RowModel[]): string {
+  private renderPromptPanelText(rows: RowModel[], barStyle: BarStyle): string {
+    if (barStyle === "quota") {
+      const widths = this.computeColumnWidths(rows);
+      return rows.map((row) => this.renderQuotaPromptBlock(row, widths)).join("\n");
+    }
+
     const panelRows = rows.map((row) => ({
       profile: row.profile,
-      lastUpdate: row.lastUpdate,
-      weeklyUsageLeft: row.weeklyUsageLeft,
-      weeklyTimeToReset: row.weeklyTimeToReset,
-      weeklyDelta: this.shortDeltaValue(row.weeklyDrift),
-      fiveHourUsageLeft: row.fiveHourUsageLeft || "n/a",
-      fiveHourTimeToReset: row.fiveHourTimeToReset || "n/a",
-      fiveHourDelta: this.shortDeltaValue(row.fiveHourDrift),
+      lastUpdate: this.formatPanelLastUpdate(row.lastUpdate),
+      weekly: row.weeklyTimeToReset
+        ? {
+            label: "W:" as const,
+            usageLeft: this.formatPanelUsage(row.weeklyUsageLeft),
+            ...this.formatPanelTimeToReset(row.weeklyTimeToReset, row.weeklyTimeLeftPercent),
+            ...this.formatPanelPacing(row.weeklyDrift, row.weeklyBottleneck),
+          }
+        : null,
+      fiveHour: row.fiveHourTimeToReset
+        ? {
+            label: "5H:" as const,
+            usageLeft: this.formatPanelUsage(row.fiveHourUsageLeft),
+            ...this.formatPanelTimeToReset(row.fiveHourTimeToReset, row.fiveHourTimeLeftPercent),
+            ...this.formatPanelPacing(row.fiveHourDrift, row.fiveHourBottleneck),
+          }
+        : null,
     }));
     return renderRootDetailPanel(panelRows, computePanelWidths(panelRows));
+  }
+
+  private renderQuotaPromptBlock(
+    row: RowModel,
+    widths: RootTableWidths,
+  ): string {
+    const header = `${row.profile} ${this.formatPanelLastUpdate(row.lastUpdate)}`;
+    const weeklyLine = this.renderQuotaPromptLine(
+      "W:",
+      row.weeklyBar,
+      row.weeklyTimeToReset,
+      row.weeklyUsageLeft,
+      widths,
+    );
+    const fiveHourLine = this.renderQuotaPromptLine(
+      "5H:",
+      row.fiveHourBar,
+      row.fiveHourTimeToReset,
+      row.fiveHourUsageLeft,
+      widths,
+    );
+    return `${header}\n${weeklyLine}\n${fiveHourLine}`;
+  }
+
+  private renderQuotaPromptLine(
+    windowLabel: "W:" | "5H:",
+    bar: string,
+    timeToReset: string,
+    usageLeft: string,
+    widths: RootTableWidths,
+  ): string {
+    return `    ${this.padRight(windowLabel, 3)} ${this.padRight(bar, widths.bar)}  ${this.padLeft(timeToReset, widths.timeToReset)}  ${this.padLeft(usageLeft, widths.usageLeft)}`;
   }
 
   private renderSelectionOption(
@@ -764,6 +829,16 @@ export default class RootCommand extends BaseCommand {
     if (match) return match[0];
     if (value.startsWith("Unused")) return "Unused";
     return value;
+  }
+
+  private extractDriftValue(value: string): string {
+    const match = value.match(/^([+-]?\d+(?:\.\d+)?%)/);
+    return match?.[1] ?? "";
+  }
+
+  private extractDriftLabel(value: string): string {
+    const match = value.match(/^[+-]?\d+(?:\.\d+)?%\s+(.+)$/);
+    return match?.[1] ?? value;
   }
 
   private currentTerminalColumns(): number {
@@ -797,6 +872,7 @@ export default class RootCommand extends BaseCommand {
       this.renderActionButton(`[B]ar Style: ${barStyleValue}`, actionStyle),
       this.renderActionButton(`[W]orkload: ${workloadValue}`, actionStyle),
       this.renderActionButton(`[C]olor: ${colorValue}`, actionStyle),
+      this.renderActionButton(`[Q]uit`, actionStyle),
     ];
     return buttons.join("  ");
   }
@@ -816,11 +892,11 @@ export default class RootCommand extends BaseCommand {
   }
 
   private pickPaceStyle(pace: number): string | null {
-    if (pace >= 20) return "\u001b[41m";
-    if (pace >= 5) return "\u001b[48;5;208m";
-    if (pace > -5) return "\u001b[48;5;240m";
-    if (pace > -20) return "\u001b[42m";
-    return "\u001b[48;5;34m";
+    if (pace >= 20) return "\u001b[97;48;5;52m";
+    if (pace >= 5) return "\u001b[97;48;5;88m";
+    if (pace > -5) return "\u001b[97;48;5;238m";
+    if (pace > -20) return "\u001b[97;48;5;28m";
+    return "\u001b[97;48;5;22m";
   }
 
   private formatLastUpdate(view: UsageView): string {
@@ -872,6 +948,11 @@ export default class RootCommand extends BaseCommand {
 
   private visibleLength(text: string): number {
     return text.replace(/\u001b\[[0-9;]*m/g, "").length;
+  }
+
+  private padVisibleRight(text: string, width: number): string {
+    const pad = Math.max(0, width - this.visibleLength(text));
+    return `${text}${" ".repeat(pad)}`;
   }
 
   private async readUsageView(
@@ -1064,6 +1145,11 @@ export default class RootCommand extends BaseCommand {
     return this.formatCompactTime(window.remainingSeconds);
   }
 
+  private formatTimeLeftPercentFromSummary(window: WindowSummary | undefined): string {
+    if (!window) return "";
+    return `${Math.round(window.timeLeftPercent)}%`;
+  }
+
   private formatUsageLeftFromSummary(window: WindowSummary | undefined): string {
     if (!window) return "";
     return `${Math.round(window.left)}% left`;
@@ -1073,6 +1159,71 @@ export default class RootCommand extends BaseCommand {
     if (!window) return "N/A";
     if (noActivity) return "Unused, good";
     return `${window.drift >= 0 ? "+" : ""}${window.drift.toFixed(1)}% ${window.drift >= 0 ? "Overuse" : "Under"}`;
+  }
+
+  private formatPanelUsage(value: string): string {
+    const match = value.match(/^(\d+)% left$/);
+    if (!match) return `📊 ${value}`;
+    return `📊 ${match[1]!.padStart(3, " ")}% left`;
+  }
+
+  private formatPanelTimeToReset(timeToReset: string, timeLeftPercent: string): {
+    resetLabel: string;
+    resetTime: string;
+    resetPercent: string;
+  } {
+    return {
+      resetLabel: "🔄 in",
+      resetTime: timeToReset,
+      resetPercent: `(${timeLeftPercent})`,
+    };
+  }
+
+  private formatPanelPacing(value: string, isAdopted: boolean): {
+    pacingLabel: string;
+    pacingValue: string;
+    pacingDescription: string;
+  } {
+    const match = value.match(/^([+-]?\d+(?:\.\d+)?%)\s+(.+)$/);
+    if (match) {
+      return {
+        pacingLabel: "Pacing",
+        pacingValue: this.colorizePanelPacingField(match[1] ?? "", value, isAdopted),
+        pacingDescription: this.colorizePanelPacingField(match[2] ?? "", value, isAdopted),
+      };
+    }
+
+    return {
+      pacingLabel: "Pacing",
+      pacingValue: value,
+      pacingDescription: "",
+    };
+  }
+
+  private colorizePanelPacingField(
+    field: string,
+    rawValue: string,
+    isAdopted: boolean,
+  ): string {
+    if (!this.useColor() || !isAdopted) return field;
+
+    const pace = this.parsePaceDelta(rawValue);
+    if (pace === null) return field;
+    const style = this.pickPaceStyle(pace);
+    if (!style) return field;
+    return `${style}${field}\u001b[0m`;
+  }
+
+  private formatPanelLastUpdate(value: string): string {
+    const label = `last update: ${value} ago`;
+    if (!this.useColor()) return label;
+    return `\u001b[90m${label}\u001b[0m`;
+  }
+
+  private parsePaceDelta(value: string): number | null {
+    const match = value.match(/[+-]?\d+(?:\.\d+)?%/);
+    if (!match) return null;
+    return Number.parseFloat(match[0].replace("%", ""));
   }
 
   private scoreLabel(score: number): string {

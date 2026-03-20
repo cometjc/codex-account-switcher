@@ -6,29 +6,48 @@ async function loadPanelModule() {
   return import(path.join(process.cwd(), 'dist/lib/root-panel-layout.js'));
 }
 
-test('panel renders all profiles with profile/last first line and aligned detail rows', async () => {
+test('panel renders profile header, whitespace-aligned detail rows, and hides missing limit rows', async () => {
   const {computePanelWidths, renderRootDetailPanel} = await loadPanelModule();
 
   const rows = [
     {
-      profile: 'main-account-profile',
-      lastUpdate: '2m',
-      weeklyUsageLeft: '91% left',
-      weeklyTimeToReset: '6.8d',
-      weeklyDelta: '-1.6%',
-      fiveHourUsageLeft: '68% left',
-      fiveHourTimeToReset: '2.1h',
-      fiveHourDelta: '+3.1%',
+      profile: '▶ comet.jc-gmail.com-plus',
+      lastUpdate: 'last update: 2.0h ago',
+      weekly: {
+        label: 'W:',
+        usageLeft: '📊  95% left',
+        resetLabel: '🔄 in',
+        resetTime: '6.7d',
+        resetPercent: '(95%)',
+        pacingLabel: 'Pacing',
+        pacingValue: '+0.7%',
+        pacingDescription: 'Overuse',
+      },
+      fiveHour: {
+        label: '5H:',
+        usageLeft: '📊  98% left',
+        resetLabel: '🔄 in',
+        resetTime: '2.8h',
+        resetPercent: '(56%)',
+        pacingLabel: 'Pacing',
+        pacingValue: '-41.9%',
+        pacingDescription: 'Under',
+      },
     },
     {
-      profile: 'backup-account',
-      lastUpdate: '11m',
-      weeklyUsageLeft: '74% left',
-      weeklyTimeToReset: '5.2d',
-      weeklyDelta: '+0.4%',
-      fiveHourUsageLeft: 'n/a',
-      fiveHourTimeToReset: 'n/a',
-      fiveHourDelta: 'n/a',
+      profile: '  jethro-teamt5.org-free',
+      lastUpdate: 'last update: 1.5h ago',
+      weekly: {
+        label: 'W:',
+        usageLeft: '📊   2% left',
+        resetLabel: '🔄 in',
+        resetTime: '5.5d',
+        resetPercent: '(79%)',
+        pacingLabel: 'Pacing',
+        pacingValue: '+77.3%',
+        pacingDescription: 'Overuse',
+      },
+      fiveHour: null,
     },
   ];
 
@@ -36,15 +55,34 @@ test('panel renders all profiles with profile/last first line and aligned detail
   const panel = renderRootDetailPanel(rows, widths);
   const lines = panel.split('\n');
 
-  assert.match(lines[0], /main-account-profile/);
-  assert.match(lines[0], /2m/);
-  assert.match(panel, /backup-account/);
-  assert.match(panel, /W:/);
-  assert.match(panel, /5H:/);
+  assert.equal(
+    lines[0],
+    '▶ comet.jc-gmail.com-plus last update: 2.0h ago',
+  );
+  assert.match(lines[1], /^    W:/);
+  assert.match(lines[2], /^    5H:/);
+  assert.match(panel, /📊  95% left/);
+  assert.doesNotMatch(panel, / \| /);
+  assert.match(panel, /🔄 in\s+6\.7d\s+\(95%\)/);
+  assert.match(panel, /Pacing\s+\+0\.7%\s+Overuse/);
+  assert.match(panel, /Pacing\s+-41\.9%\s+Under/);
+  assert.doesNotMatch(panel, /N\/A|n\/a/);
 
-  const firstWeekly = lines[1];
-  const secondWeekly = lines[4];
-  assert.equal(firstWeekly.indexOf('91% left'), secondWeekly.indexOf('74% left'));
-  assert.equal(firstWeekly.indexOf('6.8d'), secondWeekly.indexOf('5.2d'));
-  assert.equal(firstWeekly.indexOf('-1.6%'), secondWeekly.indexOf('+0.4%'));
+  const secondProfileHeaderIndex = lines.findIndex((line) =>
+    line.includes('jethro-teamt5.org-free'),
+  );
+  assert.equal(lines[secondProfileHeaderIndex + 1].indexOf('📊   2% left'), lines[1].indexOf('📊  95% left'));
+  assert.equal(lines[secondProfileHeaderIndex + 1].indexOf('🔄 in'), lines[1].indexOf('🔄 in'));
+  assert.equal(lines[secondProfileHeaderIndex + 1].indexOf('5.5d'), lines[1].indexOf('6.7d'));
+  assert.equal(lines[secondProfileHeaderIndex + 1].indexOf('(79%)'), lines[1].indexOf('(95%)'));
+  assert.equal(
+    lines[secondProfileHeaderIndex + 1].indexOf('+77.3%') + '+77.3%'.length,
+    lines[1].indexOf('+0.7%') + '+0.7%'.length,
+  );
+  assert.equal(lines[secondProfileHeaderIndex + 1].indexOf('Overuse'), lines[1].indexOf('Overuse'));
+  assert.equal(panel.includes('    5H: 📊'), true);
+  assert.equal(
+    lines.slice(secondProfileHeaderIndex + 1).some((line) => /5H:/.test(line)),
+    false,
+  );
 });
