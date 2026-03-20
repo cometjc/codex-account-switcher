@@ -284,3 +284,85 @@
   `node --test tests/root-table-layout.test.js`
   `node --test tests/workload-tier.test.js`
   `node --test tests/entrypoints.test.js`
+
+# 2026-03-21 workload tier influence hint MVP
+
+- [x] 補 workload tier 測試，鎖住 tier 對應的簡短說明文案
+- [x] 選定共享 status line 作為 hint surface，不把說明塞回 option list
+- [x] 實作 workload tier hint helper 與 status line 文案
+- [x] 更新已落地 spec 並完成驗證
+
+## Review
+
+- 新增一個低噪音的 workload tier hint，會顯示在共享 status line，例如 `Workload Low: conserve short-window capacity`。
+- 這個 MVP 只補充目前 tier 對 routing 偏向的說明，不改動任何 ranking 權重。
+- option list 維持既有極簡設計；`Delta` mode 仍顯示 delta，`Quota` mode 仍只顯示 indicator 與 profile。
+- 驗證：
+  `npm run build`
+  `node --test tests/workload-tier.test.js`
+  `node --test tests/root-option-layout.test.js`
+  `node --test tests/root-panel-layout.test.js`
+  `node --test tests/root-table-layout.test.js`
+  `node --test tests/entrypoints.test.js`
+
+# 2026-03-21 workload influence indicator MVP
+
+- [x] 補 option 測試，鎖住選項列出現 compact influence marker
+- [x] 將 option renderer 接上 `[W]` / `[5H]` influence indicator
+- [x] 保持 `Delta` / `Quota` mode 的 option 語意簡潔，不回帶長說明文字
+- [x] 更新已落地 spec 並完成驗證
+
+## Review
+
+- option list 現在會帶一個 compact `[W]` / `[5H]` marker，讓目前推薦主要受哪個 window 影響更容易掃到。
+- `Delta` mode 仍保留 delta；`Quota` mode 仍不回帶 pacing 百分比，只額外帶 influence marker。
+- 這個 indicator 採極短標記，不會把下方選項重新膨脹成解說區。
+- 驗證：
+  `npm run build`
+  `node --test tests/root-option-layout.test.js`
+  `node --test tests/workload-tier.test.js`
+  `node --test tests/root-panel-layout.test.js`
+  `node --test tests/root-table-layout.test.js`
+  `node --test tests/entrypoints.test.js`
+
+# 2026-03-21 workload tier persistence MVP
+
+- [x] 補 persistence 測試，鎖住 UI state 檔讀寫與 root command 讀取/寫回 tier
+- [x] 新增本機 UI state 檔，將 workload tier 存在 `~/.codex`
+- [x] 啟動時恢復上次 workload tier，切換 `W` 時即時寫回
+- [x] 更新已落地 spec 並完成驗證
+
+## Review
+
+- 新增 `~/.codex/codex-auth-ui-state.json` 作為輕量 UI state 檔，目前先只存 `workloadTier`。
+- root command 啟動時會讀取上次 tier；如果檔案缺失、格式錯誤或值無效，會安全回退到 `Auto`。
+- 使用者按 `W` 切換 tier 時，新的 workload tier 會立即寫回，所以下次啟動會延續上次選擇。
+- 驗證：
+  `npm run build`
+  `node --test tests/ui-state.test.js`
+  `node --test tests/workload-tier.test.js`
+  `node --test tests/root-option-layout.test.js`
+  `node --test tests/root-panel-layout.test.js`
+  `node --test tests/root-table-layout.test.js`
+  `node --test tests/entrypoints.test.js`
+
+# 2026-03-21 table-body influence indicator MVP
+
+- [x] 補 panel / option 測試，鎖住 detail row 的 `W:*` / `5H:*` bottleneck marker
+- [x] 將 full / condensed、Delta / Quota 的 prompt window label 接上 influence marker
+- [x] 保持 marker 極短，不把 detail row 與 quota row 重新拉寬成說明句
+- [x] 更新已落地 spec 並完成驗證
+
+## Review
+
+- detail panel 與 quota rows 現在都會在被採用的影響來源列上顯示 `W:*` 或 `5H:*`。
+- 這讓 option list 的 `[W]` / `[5H]` marker 和 body/panel 內的視覺訊號一致，使用者在上下兩區都能快速對上影響來源。
+- 這次只加最短的 `*` 標記，不增加額外顏色或長文案，所以欄位對齊仍可維持。
+- 驗證：
+  `npm run build`
+  `node --test tests/root-panel-layout.test.js`
+  `node --test tests/root-option-layout.test.js`
+  `node --test tests/workload-tier.test.js`
+  `node --test tests/ui-state.test.js`
+  `node --test tests/root-table-layout.test.js`
+  `node --test tests/entrypoints.test.js`

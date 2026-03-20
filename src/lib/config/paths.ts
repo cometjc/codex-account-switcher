@@ -9,3 +9,7 @@ export const limitCachePath: string = path.join(
   codexDir,
   "codex-auth-limit-cache.json",
 );
+export const uiStatePath: string = path.join(
+  codexDir,
+  "codex-auth-ui-state.json",
+);

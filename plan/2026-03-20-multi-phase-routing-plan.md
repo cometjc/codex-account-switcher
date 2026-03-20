@@ -65,10 +65,65 @@ Decision note:
 - current prompt behavior is accepted as good enough for the user's remote-terminal usage
 - revisit only if future real usage reintroduces wrapping or alignment pain
 
+## Completed Workload Tier Influence Hint MVP
+
+- [x] Add one concise hint that explains the currently active workload tier bias
+- [x] Place the hint in a low-noise shared prompt surface rather than repeating it on every profile row
+- [x] Keep the options list unchanged so `Delta` and `Quota` still scan quickly
+- [x] Verify the hint works in both `Delta` and `Quota` modes without reintroducing prompt clutter
+- [x] Update `spec/` after the hint MVP is implemented and verified
+- [x] Execute the detailed checklist in the workload-tier influence hint plan
+
+Completed MVP notes:
+- workload tier bias is now visible in the shared status line
+- hint wording stays mode-agnostic so it works in both `Delta` and `Quota`
+- option rows remain minimal and do not inherit explanatory text
+
+## Completed Workload Influence Indicator MVP
+
+- [x] Add a compact indicator showing which window most influenced the current recommendation
+- [x] Keep the indicator readable without turning the table or panel back into a verbose explanation surface
+- [x] Ensure the indicator behaves consistently in both `Delta` and `Quota` modes
+- [x] Update `spec/` after the indicator MVP is implemented and verified
+
+Completed MVP notes:
+- option labels now carry a compact `[W]` / `[5H]` influence marker
+- the marker stays short enough to preserve the quick-scan option list
+- `Delta` keeps its delta value while `Quota` stays free of pacing residue
+
+## Completed Workload Tier Persistence MVP
+
+- [x] Evaluate whether workload tier should become per-session persisted state instead of reset-on-launch
+- [x] Decide whether persistence should be opt-in, always-on, or remain intentionally ephemeral
+- [x] Keep the current UX understandable if persistence is added later
+- [x] Update `spec/` after the persistence MVP is implemented and verified
+
+Completed MVP notes:
+- workload tier now persists in local UI state under `~/.codex`
+- invalid or missing persisted state safely falls back to `Auto`
+- the existing help and status surfaces continue to explain the active tier after restore
+
+## Completed Table-Body Influence Indicator MVP
+
+- [x] Add a compact influence indicator in the detailed table/body view, not only in the option list
+- [x] Keep the table/body indicator aligned with existing `Delta` and `Quota` semantics
+- [x] Ensure the extra marker does not reintroduce noisy or overly wide row layouts
+- [x] Update `spec/` after the table-body indicator MVP is implemented and verified
+
+Completed MVP notes:
+- detail rows now use `W:*` / `5H:*` on the adopted bottleneck source
+- option list and prompt body now share the same influence story across two levels of detail
+- the indicator remains short enough to preserve the current row rhythm
+
+## Next MVP: Tier vs Window Influence Differentiation
+
+- [ ] Decide whether the UI should distinguish workload-tier influence from raw window bottleneck influence
+- [ ] Keep any new distinction compact enough for remote-terminal scanning
+- [ ] Avoid duplicating explanation text across the status line, option list, and detail rows
+- [ ] Update `spec/` only after the differentiation MVP is implemented and verified
+
 ## Follow-up Track
 
 - [ ] Keep the Rust plot-mode work in `plan/2026-03-20-ratatui-plot-mode-implementation-plan.md` as the separate visualization stream
 - [ ] Add a visual indicator in the table body showing which workload tier most influenced the current ranking
-- [ ] Evaluate whether workload tier should become per-session persisted state instead of reset-on-launch
-- [ ] Evaluate whether workload tier should surface a short explanatory hint near the current recommendation
 - [ ] Revisit whether prompt density eventually needs more than one condensed level if future real usage shows the current layout is no longer enough

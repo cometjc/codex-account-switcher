@@ -1,5 +1,5 @@
 export interface RootPanelWindowRow {
-  label: "W:" | "5H:";
+  label: string;
   usageLeft: string;
   resetLabel: string;
   resetTime: string;
@@ -17,6 +17,7 @@ export interface RootPanelRow {
 }
 
 export interface RootPanelWidths {
+  label: number;
   usageLeft: number;
   resetLabel: number;
   resetTime: number;
@@ -33,6 +34,7 @@ export function computePanelWidths(rows: RootPanelRow[]): RootPanelWidths {
   const detailRows = rows.flatMap((row) => [row.weekly, row.fiveHour].filter(Boolean) as RootPanelWindowRow[]);
 
   return {
+    label: width(detailRows.map((row) => row.label)),
     usageLeft: width(detailRows.map((row) => row.usageLeft)),
     resetLabel: width(detailRows.map((row) => row.resetLabel)),
     resetTime: width(detailRows.map((row) => row.resetTime)),
@@ -63,7 +65,7 @@ function renderDetailLine(
   row: RootPanelWindowRow,
   widths: RootPanelWidths,
 ): string {
-  return `    ${padRight(row.label, 3)} ${padRight(row.usageLeft, widths.usageLeft)}  ${padRight(row.resetLabel, widths.resetLabel)} ${padLeft(row.resetTime, widths.resetTime)} ${padLeft(row.resetPercent, widths.resetPercent)} ${padRight(row.pacingLabel, widths.pacingLabel)} ${padLeft(row.pacingValue, widths.pacingValue)} ${padRight(row.pacingDescription, widths.pacingDescription)}`;
+  return `    ${padRight(row.label, widths.label)} ${padRight(row.usageLeft, widths.usageLeft)}  ${padRight(row.resetLabel, widths.resetLabel)} ${padLeft(row.resetTime, widths.resetTime)} ${padLeft(row.resetPercent, widths.resetPercent)} ${padRight(row.pacingLabel, widths.pacingLabel)} ${padLeft(row.pacingValue, widths.pacingValue)} ${padRight(row.pacingDescription, widths.pacingDescription)}`;
 }
 
 function padRight(text: string, width: number): string {

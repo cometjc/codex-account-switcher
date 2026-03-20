@@ -42,10 +42,11 @@ Date: 2026-03-20
 - In condensed `Quota` mode, the combined summary line stays quota-only and does not reintroduce delta/drift comparison content.
 - When a profile has no `5H` data, condensed density still keeps a stable two-line block and simply omits the `5H:` segment rather than leaving a dangling separator.
 - `Pacing` background color is only applied to the adopted bottleneck row, not every rendered row.
+- The adopted bottleneck row now also uses a compact `*` marker in the window label, such as `W:*` or `5H:*`, so the current influence source is visible inside the detail panel itself.
 - The selectable options list no longer duplicates the full profile detail block.
 - Each selectable option now only shows:
-  - in `Delta` mode: indicator, profile name, and delta
-  - in `Quota` mode: indicator and profile name
+  - in `Delta` mode: indicator, profile name, delta, and a compact `[W]` / `[5H]` influence marker
+  - in `Quota` mode: indicator, profile name, and a compact `[W]` / `[5H]` influence marker
 - The action area exposes an explicit `[Q]uit` shortcut.
 
 ## UX Notes
@@ -57,6 +58,10 @@ Date: 2026-03-20
 - `Pacing` is visually emphasized with background color intensity when ANSI color is enabled.
 - The option list is shorter and easier to scan on narrow remote terminals because it no longer embeds the full detail table.
 - `Quota` mode options stay free of pacing/delta residue so the lower list remains aligned with quota-only semantics.
+- The option list now also carries a compact `[W]` / `[5H]` marker so the current recommendation influence stays visible without expanding into longer explanatory text.
+- The detail panel and quota rows now mirror that influence signal with `W:*` / `5H:*`, keeping the same source visible in both the option list and the body rows.
+- The shared prompt status line now explains the active workload tier bias in one concise sentence, so the current routing posture is visible without expanding every profile row.
+- The selected workload tier is now persisted in local UI state and restored on the next launch instead of always resetting to `Auto`.
 - Density changes affect only the prompt panel; the option list remains minimal regardless of `full` vs `condensed`.
 
 ## Technical Changes
@@ -79,6 +84,8 @@ Date: 2026-03-20
   - Routes `Delta` mode through the compact text panel and `Quota` mode through the bar-based rows.
   - Restores a dedicated `Q` quit action in the prompt.
   - Adds adaptive prompt density selection based on profile count, terminal height, and current bar mode.
+  - Adds a low-noise workload-tier hint in the shared status line instead of repeating tier explanations in each option row.
+  - Persists the selected workload tier to a local UI state file under `~/.codex` and restores it on startup with safe fallback to `Auto`.
 
 ## Verification
 - Build: `npm run build` passed.

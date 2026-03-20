@@ -14,7 +14,7 @@ test('panel renders profile header, whitespace-aligned detail rows, and hides mi
       profile: '▶ comet.jc-gmail.com-plus',
       lastUpdate: 'last update: 2.0h ago',
       weekly: {
-        label: 'W:',
+        label: 'W:*',
         usageLeft: ' 95% left',
         resetLabel: 'reset',
         resetTime: '6.7d',
@@ -38,7 +38,7 @@ test('panel renders profile header, whitespace-aligned detail rows, and hides mi
       profile: '  jethro-teamt5.org-free',
       lastUpdate: 'last update: 1.5h ago',
       weekly: {
-        label: 'W:',
+        label: 'W:*',
         usageLeft: '  2% left',
         resetLabel: 'reset',
         resetTime: '5.5d',
@@ -59,7 +59,7 @@ test('panel renders profile header, whitespace-aligned detail rows, and hides mi
     lines[0],
     '▶ comet.jc-gmail.com-plus last update: 2.0h ago',
   );
-  assert.match(lines[1], /^    W:/);
+  assert.match(lines[1], /^    W:\*/);
   assert.match(lines[2], /^    5H:/);
   assert.match(panel, / 95% left/);
   assert.doesNotMatch(panel, /📊|🔄/);

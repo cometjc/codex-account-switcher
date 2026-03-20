@@ -14,11 +14,13 @@ test('option label only contains indicator, profile name, and delta', async () =
     indicator: '▶',
     profile: 'main-account-profile',
     delta: '+3.1%',
+    influence: '[5H]',
   });
 
   assert.match(label, /^▶ /);
   assert.match(label, /main-account-profile/);
   assert.match(label, /\+3\.1%/);
+  assert.match(label, /\[5H\]/);
   assert.doesNotMatch(label, /weekly/i);
   assert.doesNotMatch(label, /Usage Left/);
   assert.doesNotMatch(label, /Time to reset/);
@@ -58,6 +60,7 @@ test('delta mode option label uses pacing delta while panel keeps full detail te
   assert.match(optionLabel, /^▶ /);
   assert.match(optionLabel, /main-account-profile/);
   assert.match(optionLabel, /\+3\.1%/);
+  assert.match(optionLabel, /\[5H\]/);
   assert.doesNotMatch(optionLabel, /weekly/i);
   assert.match(panelText, /main-account-profile/);
   assert.match(panelText, /last update: 2m ago/);
@@ -100,8 +103,44 @@ test('quota mode option label does not reuse pacing delta', () => {
 
   assert.match(optionLabel, /^▶ /);
   assert.match(optionLabel, /main-account-profile/);
+  assert.match(optionLabel, /\[5H\]/);
   assert.doesNotMatch(optionLabel, /\+3\.1%|-1\.6%/);
   assert.doesNotMatch(optionLabel, /Overuse|Under/);
+});
+
+test('workload tier hint stays in the shared status line instead of expanding options', () => {
+  const command = Object.create(RootCommand.prototype);
+  command.ansiEnabled = false;
+
+  const item = {
+    isCurrent: true,
+    profileName: 'main-account-profile',
+  };
+  const row = {
+    profile: '▶ main-account-profile',
+    lastUpdate: '2m',
+    status: 'Good',
+    statusValue: null,
+    scoreLabel: 'Good',
+    weeklyBar: '[████░░░░░░░░░░░░░░░░░░░░░░░░]',
+    weeklyTimeToReset: '6.8d',
+    weeklyTimeLeftPercent: '95%',
+    weeklyUsageLeft: '91% left',
+    weeklyDrift: '-1.6% Under',
+    weeklyBottleneck: false,
+    fiveHourBar: '[██████████░░░░░░░░░░░░░░░░░░]',
+    fiveHourTimeToReset: '2.1h',
+    fiveHourTimeLeftPercent: '42%',
+    fiveHourUsageLeft: '68% left',
+    fiveHourDrift: '+3.1% Overuse',
+    fiveHourBottleneck: true,
+  };
+
+  const optionLabel = command.renderSelectionOption(item, row, 'delta');
+  const statusLine = command.renderStatusLine('quota', 'low');
+
+  assert.match(statusLine, /Workload Low: conserve short-window capacity/i);
+  assert.doesNotMatch(optionLabel, /conserve short-window capacity/i);
 });
 
 test('delta panel only colors pacing on the adopted bottleneck row', () => {
@@ -167,7 +206,7 @@ test('quota mode keeps only quota fields under the shared profile header', () =>
 
   assert.match(lines[0], /^▶ main-account-profile last update: 2m ago$/);
   assert.match(lines[1], /^    W:/);
-  assert.match(lines[2], /^    5H:/);
+  assert.match(lines[2], /^    5H:\*/);
   assert.match(panelText, /\[████/);
   assert.doesNotMatch(panelText, /📊|🔄/);
   assert.doesNotMatch(panelText, /Overuse|Under|Bottleneck/);
@@ -217,7 +256,7 @@ test('condensed delta panel merges W and 5H summaries into one detail line', () 
 
   assert.equal(lines.length, 2);
   assert.match(lines[1], /W:/);
-  assert.match(lines[1], /5H:/);
+  assert.match(lines[1], /5H:\*/);
   assert.match(lines[1], /Pacing/);
   assert.doesNotMatch(lines[1], /📊|🔄/);
 });
@@ -251,7 +290,7 @@ test('condensed quota panel keeps quota-only summaries on one detail line', () =
 
   assert.equal(lines.length, 2);
   assert.match(lines[1], /W:/);
-  assert.match(lines[1], /5H:/);
+  assert.match(lines[1], /5H:\*/);
   assert.match(lines[1], /\[████/);
   assert.doesNotMatch(lines[1], /Overuse|Under|Bottleneck/);
 });
@@ -284,7 +323,7 @@ test('condensed delta panel stays two lines without dangling separators when 5H 
   const lines = panelText.split('\n');
 
   assert.equal(lines.length, 2);
-  assert.match(lines[1], /W:/);
+  assert.match(lines[1], /W:\*/);
   assert.doesNotMatch(lines[1], /5H:/);
   assert.doesNotMatch(lines[1], /·\s*$/);
 });
@@ -317,7 +356,7 @@ test('condensed quota panel stays two lines when 5H is missing', () => {
   const lines = panelText.split('\n');
 
   assert.equal(lines.length, 2);
-  assert.match(lines[1], /W:/);
+  assert.match(lines[1], /W:\*/);
   assert.doesNotMatch(lines[1], /5H:/);
   assert.doesNotMatch(lines[1], /·\s*$/);
 });

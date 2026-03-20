@@ -44,6 +44,44 @@ test('actions help text shows workload tier state', async () => {
   assert.match(helpText, /\[W\]orkload: Auto/);
 });
 
+test('workload tiers map to concise routing bias hints', () => {
+  const command = createCommand(RootCommand);
+
+  assert.match(command.workloadTierHint('auto'), /default routing balance/i);
+  assert.match(command.workloadTierHint('low'), /conserve short-window capacity/i);
+  assert.match(command.workloadTierHint('medium'), /balanced short and long window/i);
+  assert.match(command.workloadTierHint('high'), /favor aggressive weekly throughput/i);
+});
+
+test('status line shows the active workload tier hint without changing option semantics', () => {
+  const command = createCommand(RootCommand);
+
+  assert.match(
+    command.renderStatusLine('delta', 'auto'),
+    /Workload Auto: default routing balance/i,
+  );
+  assert.match(
+    command.renderStatusLine('quota', 'high'),
+    /Workload High: favor aggressive weekly throughput/i,
+  );
+});
+
+test('root command reads persisted workload tier and writes updates back', async () => {
+  const command = createCommand(RootCommand);
+  let storedTier = 'medium';
+  command.uiState = {
+    readWorkloadTier: async () => storedTier,
+    writeWorkloadTier: async (nextTier) => {
+      storedTier = nextTier;
+    },
+  };
+
+  assert.equal(await command.readInitialWorkloadTier(), 'medium');
+
+  await command.persistWorkloadTier('high');
+  assert.equal(storedTier, 'high');
+});
+
 test('auto workload remains the default scoring path', async () => {
   const command = createCommand(RootCommand);
   command.nowSeconds = () => 1_700_000_000;

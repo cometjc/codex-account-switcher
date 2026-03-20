@@ -10,6 +10,7 @@ import {
 import { computePanelWidths, renderRootDetailPanel } from "../lib/root-panel-layout";
 import { renderSelectionOptionLabel } from "../lib/root-option-layout";
 import actionSelect, { Separator } from "../lib/prompts/action-select";
+import { uiStateService, type PersistedWorkloadTier } from "../lib/config/ui-state";
 import {
   AccountAlreadyExistsError,
   type AuthSnapshot,
@@ -30,7 +31,7 @@ type ActionKind =
   | "redraw";
 type BarStyle = "quota" | "delta";
 type RefreshScope = "none" | "current" | "all";
-type WorkloadTier = "auto" | "low" | "medium" | "high";
+type WorkloadTier = PersistedWorkloadTier;
 type PromptDensity = "full" | "condensed";
 
 interface LimitAxis {
@@ -108,6 +109,7 @@ export default class RootCommand extends BaseCommand {
   private ansiEnabled = this.defaultAnsiEnabled();
   private stableOrderByKey = new Map<string, number>();
   private nextStableOrder = 0;
+  protected uiState = uiStateService;
 
   async run(): Promise<void> {
     await this.runSafe(async () => {
@@ -115,7 +117,7 @@ export default class RootCommand extends BaseCommand {
       let refreshScope: RefreshScope = "none";
       let refreshTargetAccountId: string | undefined = undefined;
       let barStyle: BarStyle = "delta";
-      let workloadTier: WorkloadTier = "auto";
+      let workloadTier = await this.readInitialWorkloadTier();
       let bootstrapRefreshCurrent = true;
 
       while (true) {
@@ -163,6 +165,7 @@ export default class RootCommand extends BaseCommand {
         }
         if (action === "workload") {
           workloadTier = this.nextWorkloadTier(workloadTier);
+          await this.persistWorkloadTier(workloadTier);
           continue;
         }
         if (action === "color") {
@@ -750,7 +753,7 @@ export default class RootCommand extends BaseCommand {
   }
 
   private renderStatusLine(barStyle: BarStyle, workloadTier: WorkloadTier): string {
-    return "";
+    return `Workload ${this.formatWorkloadTier(workloadTier)}: ${this.workloadTierHint(workloadTier)}`;
   }
 
   private renderPromptPanelText(
@@ -774,7 +777,7 @@ export default class RootCommand extends BaseCommand {
       lastUpdate: this.formatPanelLastUpdate(row.lastUpdate),
       weekly: row.weeklyTimeToReset
         ? {
-            label: "W:" as const,
+            label: this.promptWindowLabel("W:", row.weeklyBottleneck),
             usageLeft: this.formatPanelUsage(row.weeklyUsageLeft),
             ...this.formatPanelTimeToReset(row.weeklyTimeToReset, row.weeklyTimeLeftPercent),
             ...this.formatPanelPacing(row.weeklyDrift, row.weeklyBottleneck),
@@ -782,7 +785,7 @@ export default class RootCommand extends BaseCommand {
         : null,
       fiveHour: row.fiveHourTimeToReset
         ? {
-            label: "5H:" as const,
+            label: this.promptWindowLabel("5H:", row.fiveHourBottleneck),
             usageLeft: this.formatPanelUsage(row.fiveHourUsageLeft),
             ...this.formatPanelTimeToReset(row.fiveHourTimeToReset, row.fiveHourTimeLeftPercent),
             ...this.formatPanelPacing(row.fiveHourDrift, row.fiveHourBottleneck),
@@ -818,14 +821,14 @@ export default class RootCommand extends BaseCommand {
   ): string {
     const header = `${row.profile} ${this.formatPanelLastUpdate(row.lastUpdate)}`;
     const weeklyLine = this.renderQuotaPromptLine(
-      "W:",
+      this.promptWindowLabel("W:", row.weeklyBottleneck),
       row.weeklyBar,
       row.weeklyTimeToReset,
       row.weeklyUsageLeft,
       widths,
     );
     const fiveHourLine = this.renderQuotaPromptLine(
-      "5H:",
+      this.promptWindowLabel("5H:", row.fiveHourBottleneck),
       row.fiveHourBar,
       row.fiveHourTimeToReset,
       row.fiveHourUsageLeft,
@@ -835,20 +838,20 @@ export default class RootCommand extends BaseCommand {
   }
 
   private renderQuotaPromptLine(
-    windowLabel: "W:" | "5H:",
+    windowLabel: string,
     bar: string,
     timeToReset: string,
     usageLeft: string,
     widths: RootTableWidths,
   ): string {
-    return `    ${this.padRight(windowLabel, 3)} ${this.padRight(bar, widths.bar)}  ${this.padLeft(timeToReset, widths.timeToReset)}  ${this.padLeft(usageLeft, widths.usageLeft)}`;
+    return `    ${this.padRight(windowLabel, 4)} ${this.padRight(bar, widths.bar)}  ${this.padLeft(timeToReset, widths.timeToReset)}  ${this.padLeft(usageLeft, widths.usageLeft)}`;
   }
 
   private renderCondensedDeltaPromptBlock(row: RowModel): string {
     const header = `${row.profile} ${this.formatPanelLastUpdate(row.lastUpdate)}`;
     const detailParts = [
       this.renderCondensedDeltaWindow(
-        "W:",
+        this.promptWindowLabel("W:", row.weeklyBottleneck),
         row.weeklyUsageLeft,
         row.weeklyTimeToReset,
         row.weeklyTimeLeftPercent,
@@ -857,7 +860,7 @@ export default class RootCommand extends BaseCommand {
       ),
       row.fiveHourTimeToReset
         ? this.renderCondensedDeltaWindow(
-            "5H:",
+            this.promptWindowLabel("5H:", row.fiveHourBottleneck),
             row.fiveHourUsageLeft,
             row.fiveHourTimeToReset,
             row.fiveHourTimeLeftPercent,
@@ -870,7 +873,7 @@ export default class RootCommand extends BaseCommand {
   }
 
   private renderCondensedDeltaWindow(
-    label: "W:" | "5H:",
+    label: string,
     usageLeft: string,
     timeToReset: string,
     timeLeftPercent: string,
@@ -886,10 +889,15 @@ export default class RootCommand extends BaseCommand {
   private renderCondensedQuotaPromptBlock(row: RowModel): string {
     const header = `${row.profile} ${this.formatPanelLastUpdate(row.lastUpdate)}`;
     const detailParts = [
-      this.renderCondensedQuotaWindow("W:", row.weeklyBar, row.weeklyTimeToReset, row.weeklyUsageLeft),
+      this.renderCondensedQuotaWindow(
+        this.promptWindowLabel("W:", row.weeklyBottleneck),
+        row.weeklyBar,
+        row.weeklyTimeToReset,
+        row.weeklyUsageLeft,
+      ),
       row.fiveHourTimeToReset
         ? this.renderCondensedQuotaWindow(
-            "5H:",
+            this.promptWindowLabel("5H:", row.fiveHourBottleneck),
             row.fiveHourBar,
             row.fiveHourTimeToReset,
             row.fiveHourUsageLeft,
@@ -900,7 +908,7 @@ export default class RootCommand extends BaseCommand {
   }
 
   private renderCondensedQuotaWindow(
-    label: "W:" | "5H:",
+    label: string,
     bar: string,
     timeToReset: string,
     usageLeft: string,
@@ -917,7 +925,18 @@ export default class RootCommand extends BaseCommand {
       indicator: item.isCurrent ? "▶" : " ",
       profile: item.profileName,
       delta: barStyle === "delta" ? this.optionDeltaValue(row) : "",
+      influence: this.optionInfluenceIndicator(row),
     });
+  }
+
+  private optionInfluenceIndicator(row: RowModel): string {
+    if (row.fiveHourBottleneck) return "[5H]";
+    if (row.weeklyBottleneck) return "[W]";
+    return row.fiveHourTimeToReset ? "[5H]" : "[W]";
+  }
+
+  private promptWindowLabel(label: "W:" | "5H:", isBottleneck: boolean): string {
+    return isBottleneck ? `${label}*` : label;
   }
 
   private optionDeltaValue(row: RowModel): string {
@@ -1171,6 +1190,14 @@ export default class RootCommand extends BaseCommand {
     }
   }
 
+  protected async readInitialWorkloadTier(): Promise<WorkloadTier> {
+    return this.uiState.readWorkloadTier();
+  }
+
+  protected async persistWorkloadTier(workloadTier: WorkloadTier): Promise<void> {
+    await this.uiState.writeWorkloadTier(workloadTier);
+  }
+
   private formatWorkloadTier(tier: WorkloadTier): string {
     switch (tier) {
       case "auto":
@@ -1181,6 +1208,19 @@ export default class RootCommand extends BaseCommand {
         return "Medium";
       case "high":
         return "High";
+    }
+  }
+
+  private workloadTierHint(tier: WorkloadTier): string {
+    switch (tier) {
+      case "auto":
+        return "default routing balance";
+      case "low":
+        return "conserve short-window capacity";
+      case "medium":
+        return "balanced short and long window";
+      case "high":
+        return "favor aggressive weekly throughput";
     }
   }
 
