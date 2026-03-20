@@ -238,6 +238,24 @@
   `node --test tests/root-table-layout.test.js`
   `node --test tests/workload-tier.test.js`
   `node --test tests/entrypoints.test.js`
+
+# 2026-03-20 quota option 清除 pacing 殘留
+
+- [x] 補 option 測試，鎖住 `Quota` mode 選項不再重用 pacing delta
+- [x] 將 option renderer 改成 mode-aware，`Delta` 顯示 delta、`Quota` 只留 indicator 與 profile
+- [x] 更新已落地 spec，反映 `Quota` mode 選項不含 pacing/delta
+
+## Review
+
+- 根因：下方 option label 原本不看 `barStyle`，無論 `Delta` 或 `Quota` 都固定走 `optionDeltaValue()`。
+- 修正：`renderSelectionOption(...)` 現在接收 `barStyle`，只有 `Delta` mode 才顯示 delta；`Quota` mode 會收斂成純 `indicator + profile name`。
+- 驗證：
+  `npm run build`
+  `node --test tests/root-option-layout.test.js`
+  `node --test tests/root-panel-layout.test.js`
+  `node --test tests/root-table-layout.test.js`
+  `node --test tests/workload-tier.test.js`
+  `node --test tests/entrypoints.test.js`
   `node --test tests/root-panel-layout.test.js`
   `node --test tests/root-table-layout.test.js`
   `node --test tests/workload-tier.test.js`

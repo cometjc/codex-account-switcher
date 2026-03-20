@@ -8,3 +8,5 @@
 - 重排 prompt hotkeys 或 help text 時，要檢查常用離開路徑還在不在；像 `[Q]uit` 這種明確退出動作不能因重構消失。
 - 使用者用括號或其他符號描述「上色範圍」時，先確認那是實際輸出文案還是只是標註示意，不要把示意符號直接做進 UI。
 - 需要嚴格欄位對齊的 CLI prompt row 不要用 emoji 當欄位標記；像 JuiceSSH 這類終端可能把 Unicode emoji 算成不穩定寬度，連帶弄亂同列後續欄位。
+- 當同一個 UI 有 `Delta` / `Quota` 這類語意不同的 mode 時，連 option label 也要跟著 mode-aware；不能只清 prompt panel，卻讓下方選項殘留另一個 mode 的資訊。
+- 驗證會讀 `dist/` 產物的測試不要和 `npm run build` 並行跑，否則容易撞到 clean/build 中間態，得到假的 `MODULE_NOT_FOUND`。

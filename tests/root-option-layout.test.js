@@ -24,7 +24,7 @@ test('option label only contains indicator, profile name, and delta', async () =
   assert.doesNotMatch(label, /Time to reset/);
 });
 
-test('root command exposes minimal option labels and full prompt panel text separately', () => {
+test('delta mode option label uses pacing delta while panel keeps full detail text', () => {
   const command = Object.create(RootCommand.prototype);
   command.ansiEnabled = false;
 
@@ -52,7 +52,7 @@ test('root command exposes minimal option labels and full prompt panel text sepa
     fiveHourBottleneck: true,
   };
 
-  const optionLabel = command.renderSelectionOption(item, row);
+  const optionLabel = command.renderSelectionOption(item, row, 'delta');
   const panelText = command.renderPromptPanelText([row], 'delta', 'full');
 
   assert.match(optionLabel, /^▶ /);
@@ -66,6 +66,42 @@ test('root command exposes minimal option labels and full prompt panel text sepa
   assert.doesNotMatch(panelText, /📊|🔄/);
   assert.doesNotMatch(panelText, /reset\s{3,}\d/);
   assert.doesNotMatch(panelText, /Pacing\s{3,}[+-]\d/);
+});
+
+test('quota mode option label does not reuse pacing delta', () => {
+  const command = Object.create(RootCommand.prototype);
+  command.ansiEnabled = false;
+
+  const item = {
+    isCurrent: true,
+    profileName: 'main-account-profile',
+  };
+  const row = {
+    profile: '▶ main-account-profile',
+    lastUpdate: '2m',
+    status: 'Good',
+    statusValue: null,
+    scoreLabel: 'Good',
+    weeklyBar: '[████░░░░░░░░░░░░░░░░░░░░░░░░]',
+    weeklyTimeToReset: '6.8d',
+    weeklyTimeLeftPercent: '95%',
+    weeklyUsageLeft: '91% left',
+    weeklyDrift: '-1.6% Under',
+    weeklyBottleneck: false,
+    fiveHourBar: '[██████████░░░░░░░░░░░░░░░░░░]',
+    fiveHourTimeToReset: '2.1h',
+    fiveHourTimeLeftPercent: '42%',
+    fiveHourUsageLeft: '68% left',
+    fiveHourDrift: '+3.1% Overuse',
+    fiveHourBottleneck: true,
+  };
+
+  const optionLabel = command.renderSelectionOption(item, row, 'quota');
+
+  assert.match(optionLabel, /^▶ /);
+  assert.match(optionLabel, /main-account-profile/);
+  assert.doesNotMatch(optionLabel, /\+3\.1%|-1\.6%/);
+  assert.doesNotMatch(optionLabel, /Overuse|Under/);
 });
 
 test('delta panel only colors pacing on the adopted bottleneck row', () => {

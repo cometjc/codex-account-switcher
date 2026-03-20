@@ -44,9 +44,8 @@ Date: 2026-03-20
 - `Pacing` background color is only applied to the adopted bottleneck row, not every rendered row.
 - The selectable options list no longer duplicates the full profile detail block.
 - Each selectable option now only shows:
-  - indicator
-  - profile name
-  - delta
+  - in `Delta` mode: indicator, profile name, and delta
+  - in `Quota` mode: indicator and profile name
 - The action area exposes an explicit `[Q]uit` shortcut.
 
 ## UX Notes
@@ -57,6 +56,7 @@ Date: 2026-03-20
 - Weekly and 5h values are still aligned across profile blocks, but the first line is intentionally non-tabular.
 - `Pacing` is visually emphasized with background color intensity when ANSI color is enabled.
 - The option list is shorter and easier to scan on narrow remote terminals because it no longer embeds the full detail table.
+- `Quota` mode options stay free of pacing/delta residue so the lower list remains aligned with quota-only semantics.
 - Density changes affect only the prompt panel; the option list remains minimal regardless of `full` vs `condensed`.
 
 ## Technical Changes

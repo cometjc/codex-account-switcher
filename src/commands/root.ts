@@ -342,7 +342,7 @@ export default class RootCommand extends BaseCommand {
 
     const renderedItems = items.map((item, index) => ({
       ...item,
-      renderedLine: this.renderSelectionOption(item, rowModels[index]!),
+      renderedLine: this.renderSelectionOption(item, rowModels[index]!, barStyle),
     }));
 
     return {
@@ -911,11 +911,12 @@ export default class RootCommand extends BaseCommand {
   private renderSelectionOption(
     item: Pick<MenuItem, "isCurrent" | "profileName">,
     row: RowModel,
+    barStyle: BarStyle,
   ): string {
     return renderSelectionOptionLabel({
       indicator: item.isCurrent ? "▶" : " ",
       profile: item.profileName,
-      delta: this.optionDeltaValue(row),
+      delta: barStyle === "delta" ? this.optionDeltaValue(row) : "",
     });
   }
 
