@@ -24,7 +24,17 @@ export function renderRootHeaderBlock(widths: RootTableWidths): string {
     padCenter("Pacing Status", widths.status),
   ]);
 
-  const detailHeader = `${" ".repeat(4 + widths.bar + 2)}${padLeft("Time to reset", widths.timeToReset)}  ${padLeft("Usage Left", widths.usageLeft)}  ${padRight("Drift", widths.drift)}`;
+  const detailHeader = renderWindowDetailLine(
+    {
+      windowLabel: "",
+      bar: "",
+      timeToReset: "Time to reset",
+      usageLeft: "Usage Left",
+      drift: "Drift",
+      bottleneck: false,
+    },
+    widths,
+  );
   const line2 = joinColumns([
     padRight("", widths.profile),
     padCenter("", widths.lastUpdate),
