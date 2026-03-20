@@ -23,12 +23,14 @@
 
 ## Next MVP
 
-- [ ] Add quick workload tiers `Low/Medium/High`
-- [ ] Expose current workload tier in the action/help area or another low-noise control surface
-- [ ] Re-rank recommendations based on projected workload impact while keeping current auto mode as default
-- [ ] Verify ranking changes stay stable when workload tier is unset
-- [ ] Update `spec/` with workload-aware routing behavior after MVP lands
+- [x] Add quick workload tiers `Low/Medium/High`
+- [x] Expose current workload tier in the action/help area or another low-noise control surface
+- [x] Re-rank recommendations based on projected workload impact while keeping current auto mode as default
+- [x] Verify ranking changes stay stable when workload tier is unset
+- [x] Update `spec/` with workload-aware routing behavior after MVP lands
 
 ## Follow-up Track
 
 - [ ] Keep the Rust plot-mode work in `plan/2026-03-20-ratatui-plot-mode-implementation-plan.md` as the separate visualization stream
+- [ ] Add a visual indicator in the table body showing which workload tier most influenced the current ranking
+- [ ] Evaluate whether workload tier should become per-session persisted state instead of reset-on-launch

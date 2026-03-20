@@ -32,6 +32,10 @@ Date: 2026-03-19
   - `u`: refresh selected profile only
   - `U`: refresh all profiles
   - `Space`: redraw only (age/bar updates, no API refresh)
+- Added workload-aware routing controls:
+  - `W` cycles workload tier: `Auto` -> `Low` -> `Medium` -> `High` -> `Auto`
+  - current workload tier is shown in the action/help area
+  - routing score adjusts by workload tier while leaving `Auto` as the default path
 
 ## Technical Changes
 - `src/commands/root.ts`
@@ -46,6 +50,7 @@ Date: 2026-03-19
   - Added refresh scope targeting by selected account id.
   - Added per-profile cache-status suffix formatter.
   - Added manual date formatting helpers (`MM/DD HH:MM`).
+  - Added workload-tier state and score-weight switching for routing recommendations.
 - `src/lib/prompts/action-select.ts`
   - Uses boundary-follow scroll behavior (no auto-centering).
   - Added stable rendering without private package subpath imports.
@@ -56,8 +61,12 @@ Date: 2026-03-19
 ## Verification
 - Build: `npm run build` passed.
 - CLI bootstrap: `node dist/index.js --help` passed previously after prompt-layer fix.
+- Automated checks:
+  - `node --test tests/workload-tier.test.js` passed
+  - `node --test tests/entrypoints.test.js` passed
 - Manual TUI behavior validation remains interactive and should be checked in a real terminal:
   - mode cycling with `<B>`
+  - workload tier cycling with `<W>`
   - full/single-line rendering
   - scroll behavior under long lists
   - color fallback with `NO_COLOR=1`

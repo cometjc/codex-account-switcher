@@ -2,6 +2,11 @@ import confirm from "@inquirer/confirm";
 import input from "@inquirer/input";
 import { execFileSync } from "node:child_process";
 import { BaseCommand } from "../lib/base-command";
+import {
+  renderRootHeaderBlock,
+  renderWindowDetailLine,
+  type RootTableWidths,
+} from "../lib/root-table-layout";
 import actionSelect, { Separator } from "../lib/prompts/action-select";
 import {
   AccountAlreadyExistsError,
@@ -15,12 +20,14 @@ type ActionKind =
   | "delete"
   | "rename"
   | "mode"
+  | "workload"
   | "color"
   | "update-current"
   | "update-all"
   | "redraw";
 type BarStyle = "quota" | "delta";
 type RefreshScope = "none" | "current" | "all";
+type WorkloadTier = "auto" | "low" | "medium" | "high";
 
 interface LimitAxis {
   startAt: number;
@@ -102,6 +109,7 @@ export default class RootCommand extends BaseCommand {
       let refreshScope: RefreshScope = "none";
       let refreshTargetAccountId: string | undefined = undefined;
       let barStyle: BarStyle = "delta";
+      let workloadTier: WorkloadTier = "auto";
       let bootstrapRefreshCurrent = true;
 
       while (true) {
@@ -109,6 +117,7 @@ export default class RootCommand extends BaseCommand {
           refreshScope,
           refreshTargetAccountId,
           barStyle,
+          workloadTier,
           bootstrapRefreshCurrent,
         );
         bootstrapRefreshCurrent = false;
@@ -131,6 +140,7 @@ export default class RootCommand extends BaseCommand {
           menu.headerLine,
           menu.elapsedFooter,
           barStyle,
+          workloadTier,
         );
         if (!result) return;
 
@@ -139,6 +149,10 @@ export default class RootCommand extends BaseCommand {
 
         if (action === "mode") {
           barStyle = barStyle === "quota" ? "delta" : "quota";
+          continue;
+        }
+        if (action === "workload") {
+          workloadTier = this.nextWorkloadTier(workloadTier);
           continue;
         }
         if (action === "color") {
@@ -196,6 +210,7 @@ export default class RootCommand extends BaseCommand {
     headerLine: string,
     elapsedFooter: string | null,
     barStyle: BarStyle,
+    workloadTier: WorkloadTier,
   ): Promise<{ answer: MenuItem; action?: ActionKind } | null> {
     try {
       const pageSize = this.computeSelectPageSize();
@@ -210,7 +225,7 @@ export default class RootCommand extends BaseCommand {
 
       return (await actionSelect<ActionKind, MenuItem>({
         message: "Select profile",
-        helpText: this.buildActionsHelpText(barStyle),
+        helpText: this.buildActionsHelpText(barStyle, workloadTier),
         actions: [
           { value: "delete", name: "Delete", key: "d" },
           { value: "delete", name: "Delete", key: "delete" },
@@ -219,6 +234,7 @@ export default class RootCommand extends BaseCommand {
           { value: "update-all", name: "Update All", key: "a" },
           { value: "redraw", name: "Redraw", key: "r" },
           { value: "mode", name: "Bar Style", key: "b" },
+          { value: "workload", name: "Workload", key: "w" },
           { value: "color", name: "Color", key: "c" },
         ],
         choices: promptChoices,
@@ -234,6 +250,7 @@ export default class RootCommand extends BaseCommand {
     refreshScope: RefreshScope,
     refreshTargetAccountId: string | undefined,
     barStyle: BarStyle,
+    workloadTier: WorkloadTier,
     bootstrapRefreshCurrent: boolean,
   ): Promise<{
     items: MenuItem[];
@@ -270,7 +287,7 @@ export default class RootCommand extends BaseCommand {
       ) {
         usageView = await this.readUsageView(saved.snapshot, true);
       }
-      items.push(this.createSavedItem(saved, usageView, currentAccountId));
+      items.push(this.createSavedItem(saved, usageView, currentAccountId, workloadTier));
     }
 
     let currentUnsaved: MenuItem | null = null;
@@ -289,13 +306,13 @@ export default class RootCommand extends BaseCommand {
       ) {
         usageView = await this.readUsageView(currentSnapshot, true);
       }
-      currentUnsaved = this.createUnsavedCurrentItem(currentSnapshot, usageView);
+      currentUnsaved = this.createUnsavedCurrentItem(currentSnapshot, usageView, workloadTier);
       items.push(currentUnsaved);
     }
 
     items.sort((a, b) => this.compareItems(a, b));
     const axes = this.computeAxes(items);
-    const rowModels = items.map((item) => this.buildRowModel(item, axes, barStyle));
+    const rowModels = items.map((item) => this.buildRowModel(item, axes, barStyle, workloadTier));
     const widths = this.computeColumnWidths(rowModels);
     const headerLine = this.renderHeaderLine(widths);
 
@@ -307,7 +324,7 @@ export default class RootCommand extends BaseCommand {
     return {
       items: renderedItems,
       currentUnsaved,
-      statusLine: this.renderStatusLine(barStyle),
+      statusLine: this.renderStatusLine(barStyle, workloadTier),
       headerLine,
       elapsedFooter: this.renderElapsedFooter(barStyle, axes, widths),
     };
@@ -317,6 +334,7 @@ export default class RootCommand extends BaseCommand {
     profile: SavedProfile,
     usageView: UsageView,
     currentAccountId: string | undefined,
+    workloadTier: WorkloadTier,
   ): MenuItem {
     const accountId = this.readAccountId(profile.snapshot);
     const isCurrent = Boolean(currentAccountId && accountId === currentAccountId);
@@ -328,7 +346,7 @@ export default class RootCommand extends BaseCommand {
       accountId,
       isCurrent,
       profileName: profile.name,
-      paceSortKey: this.computePaceSortKey(usageView.usage, isCurrent),
+      paceSortKey: this.computePaceSortKey(usageView.usage, isCurrent, workloadTier),
       stableOrder: this.getStableOrder(`saved:${profile.name}`),
       usageView,
       renderedLine: "",
@@ -338,6 +356,7 @@ export default class RootCommand extends BaseCommand {
   private createUnsavedCurrentItem(
     snapshot: AuthSnapshot,
     usageView: UsageView,
+    workloadTier: WorkloadTier,
   ): MenuItem {
     const base = this.buildDefaultName(usageView.usage, snapshot);
     const accountId = this.readAccountId(snapshot);
@@ -348,7 +367,7 @@ export default class RootCommand extends BaseCommand {
       accountId,
       isCurrent: true,
       profileName: `${base} [UNSAVED]`,
-      paceSortKey: this.computePaceSortKey(usageView.usage, true),
+      paceSortKey: this.computePaceSortKey(usageView.usage, true, workloadTier),
       stableOrder: this.getStableOrder(`unsaved:${accountId ?? base}`),
       usageView,
       renderedLine: "",
@@ -359,10 +378,11 @@ export default class RootCommand extends BaseCommand {
     item: MenuItem,
     axes: { weekly: LimitAxis | null; fiveHour: LimitAxis | null },
     barStyle: BarStyle,
+    workloadTier: WorkloadTier,
   ): RowModel {
     const weekly = this.pickWeeklyWindow(item.usage);
     const fiveHour = this.pickFiveHourWindow(item.usage);
-    const summary = this.computeSummary(item.usage, item.isCurrent);
+    const summary = this.computeSummary(item.usage, item.isCurrent, workloadTier);
     const weeklySummary = summary.windows.find((window) => window.source === "W");
     const fiveHourSummary = summary.windows.find((window) => window.source === "5H");
     const profileLabel = `${item.isCurrent ? "▶ " : "  "}${item.profileName}`;
@@ -507,7 +527,11 @@ export default class RootCommand extends BaseCommand {
     return result;
   }
 
-  private computeSummary(usage: UsageResponse | null, isCurrent: boolean): RecommendationSummary {
+  private computeSummary(
+    usage: UsageResponse | null,
+    isCurrent: boolean,
+    workloadTier: WorkloadTier = "auto",
+  ): RecommendationSummary {
     const windows = [this.pickWeeklyWindow(usage), this.pickFiveHourWindow(usage)].filter(
       (window): window is UsageWindow => Boolean(window),
     );
@@ -559,12 +583,13 @@ export default class RootCommand extends BaseCommand {
     const fiveHourSpikeRisk = fiveHour ? Math.max(0, fiveHour.used - fiveHour.timeUsedPercent) / 100 : 0;
     const switchCost = isCurrent ? 0 : 1;
     const unusedBonus = noActivity ? 0.05 : 0;
+    const scoringProfile = this.getWorkloadScoringProfile(workloadTier);
     const score =
-      0.55 * weeklyNeed +
-      0.2 * fiveHourSlack -
-      0.2 * fiveHourSpikeRisk -
-      0.05 * switchCost +
-      unusedBonus;
+      scoringProfile.weeklyNeedWeight * weeklyNeed +
+      scoringProfile.fiveHourSlackWeight * fiveHourSlack -
+      scoringProfile.fiveHourSpikeRiskWeight * fiveHourSpikeRisk -
+      scoringProfile.switchCostWeight * switchCost +
+      (noActivity ? scoringProfile.unusedBonus : 0);
 
     const statusSource = noActivity
       ? (fiveHour ? "5H" : weekly ? "W" : "-")
@@ -608,33 +633,13 @@ export default class RootCommand extends BaseCommand {
     };
   }
 
-  private renderHeaderLine(widths: {
-    profile: number;
-    lastUpdate: number;
-    status: number;
-    bar: number;
-    timeToReset: number;
-    usageLeft: number;
-    drift: number;
-  }): string {
-    return this.joinColumns([
-      this.padRight("Profile", widths.profile),
-      this.padCenter("Last", widths.lastUpdate),
-      this.padCenter("Pacing Status", widths.status),
-    ]);
+  private renderHeaderLine(widths: RootTableWidths): string {
+    return renderRootHeaderBlock(widths);
   }
 
   private renderRowLine(
     row: RowModel,
-    widths: {
-      profile: number;
-      lastUpdate: number;
-      status: number;
-      bar: number;
-      timeToReset: number;
-      usageLeft: number;
-      drift: number;
-    },
+    widths: RootTableWidths,
   ): string {
     const line1 = this.joinColumns([
       this.padRight(row.profile, widths.profile),
@@ -646,7 +651,17 @@ export default class RootCommand extends BaseCommand {
       this.padRight("", widths.profile),
       this.padCenter("", widths.lastUpdate),
       this.padRight(
-        `W: ${this.padRight(row.weeklyBar, widths.bar)}  Time to reset ${this.padLeft(row.weeklyTimeToReset, widths.timeToReset)}  Usage Left ${this.padLeft(row.weeklyUsageLeft, widths.usageLeft)}  Drift ${this.padRight(row.weeklyDrift, widths.drift)}${row.weeklyBottleneck ? "  <- Bottleneck" : ""}`,
+        renderWindowDetailLine(
+          {
+            windowLabel: "W:",
+            bar: row.weeklyBar,
+            timeToReset: row.weeklyTimeToReset,
+            usageLeft: row.weeklyUsageLeft,
+            drift: row.weeklyDrift,
+            bottleneck: row.weeklyBottleneck,
+          },
+          widths,
+        ),
         widths.status,
       ),
     ]);
@@ -655,7 +670,17 @@ export default class RootCommand extends BaseCommand {
       this.padRight("", widths.profile),
       this.padCenter("", widths.lastUpdate),
       this.padRight(
-        `5H:${this.padRight(row.fiveHourBar, widths.bar)}  Time to reset ${this.padLeft(row.fiveHourTimeToReset, widths.timeToReset)}  Usage Left ${this.padLeft(row.fiveHourUsageLeft, widths.usageLeft)}  Drift ${this.padRight(row.fiveHourDrift, widths.drift)}${row.fiveHourBottleneck ? "  <- Bottleneck" : ""}`,
+        renderWindowDetailLine(
+          {
+            windowLabel: "5H:",
+            bar: row.fiveHourBar,
+            timeToReset: row.fiveHourTimeToReset,
+            usageLeft: row.fiveHourUsageLeft,
+            drift: row.fiveHourDrift,
+            bottleneck: row.fiveHourBottleneck,
+          },
+          widths,
+        ),
         widths.status,
       ),
     ]);
@@ -679,12 +704,13 @@ export default class RootCommand extends BaseCommand {
     return null;
   }
 
-  private renderStatusLine(barStyle: BarStyle): string {
-    return "";
+  private renderStatusLine(barStyle: BarStyle, workloadTier: WorkloadTier): string {
+    return `Bar ${barStyle === "delta" ? "Delta" : "Quota"}  Workload ${this.formatWorkloadTier(workloadTier)}`;
   }
 
-  private buildActionsHelpText(barStyle: BarStyle): string {
+  private buildActionsHelpText(barStyle: BarStyle, workloadTier: WorkloadTier = "auto"): string {
     const barStyleValue = barStyle === "delta" ? "Delta" : "Quota";
+    const workloadValue = this.formatWorkloadTier(workloadTier);
     const colorValue = this.ansiEnabled ? "On" : "Off";
     const actionStyle = "30;106";
     const buttons = [
@@ -694,6 +720,7 @@ export default class RootCommand extends BaseCommand {
       this.renderActionButton("Update [A]ll", actionStyle),
       this.renderActionButton("[R]edraw", actionStyle),
       this.renderActionButton(`[B]ar Style: ${barStyleValue}`, actionStyle),
+      this.renderActionButton(`[W]orkload: ${workloadValue}`, actionStyle),
       this.renderActionButton(`[C]olor: ${colorValue}`, actionStyle),
     ];
     return buttons.join("  ");
@@ -837,9 +864,82 @@ export default class RootCommand extends BaseCommand {
     return left.stableOrder - right.stableOrder;
   }
 
-  private computePaceSortKey(usage: UsageResponse | null, isCurrent: boolean): number {
-    const summary = this.computeSummary(usage, isCurrent);
+  private computePaceSortKey(
+    usage: UsageResponse | null,
+    isCurrent: boolean,
+    workloadTier: WorkloadTier,
+  ): number {
+    const summary = this.computeSummary(usage, isCurrent, workloadTier);
     return summary.score;
+  }
+
+  private nextWorkloadTier(current: WorkloadTier): WorkloadTier {
+    switch (current) {
+      case "auto":
+        return "low";
+      case "low":
+        return "medium";
+      case "medium":
+        return "high";
+      case "high":
+        return "auto";
+    }
+  }
+
+  private formatWorkloadTier(tier: WorkloadTier): string {
+    switch (tier) {
+      case "auto":
+        return "Auto";
+      case "low":
+        return "Low";
+      case "medium":
+        return "Medium";
+      case "high":
+        return "High";
+    }
+  }
+
+  private getWorkloadScoringProfile(tier: WorkloadTier): {
+    weeklyNeedWeight: number;
+    fiveHourSlackWeight: number;
+    fiveHourSpikeRiskWeight: number;
+    switchCostWeight: number;
+    unusedBonus: number;
+  } {
+    switch (tier) {
+      case "low":
+        return {
+          weeklyNeedWeight: 0.35,
+          fiveHourSlackWeight: 0.25,
+          fiveHourSpikeRiskWeight: 0.35,
+          switchCostWeight: 0.08,
+          unusedBonus: 0.02,
+        };
+      case "medium":
+        return {
+          weeklyNeedWeight: 0.55,
+          fiveHourSlackWeight: 0.2,
+          fiveHourSpikeRiskWeight: 0.2,
+          switchCostWeight: 0.05,
+          unusedBonus: 0.05,
+        };
+      case "high":
+        return {
+          weeklyNeedWeight: 0.75,
+          fiveHourSlackWeight: 0.1,
+          fiveHourSpikeRiskWeight: 0.1,
+          switchCostWeight: 0.02,
+          unusedBonus: 0.02,
+        };
+      case "auto":
+        return {
+          weeklyNeedWeight: 0.55,
+          fiveHourSlackWeight: 0.2,
+          fiveHourSpikeRiskWeight: 0.2,
+          switchCostWeight: 0.05,
+          unusedBonus: 0.05,
+        };
+    }
   }
 
   private getStableOrder(key: string): number {
