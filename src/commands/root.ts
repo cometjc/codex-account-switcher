@@ -7,6 +7,8 @@ import {
   renderWindowDetailLine,
   type RootTableWidths,
 } from "../lib/root-table-layout";
+import { computePanelWidths, renderRootDetailPanel } from "../lib/root-panel-layout";
+import { renderSelectionOptionLabel } from "../lib/root-option-layout";
 import actionSelect, { Separator } from "../lib/prompts/action-select";
 import {
   AccountAlreadyExistsError,
@@ -138,6 +140,7 @@ export default class RootCommand extends BaseCommand {
           choices,
           menu.statusLine,
           menu.headerLine,
+          menu.panelText,
           menu.elapsedFooter,
           barStyle,
           workloadTier,
@@ -208,6 +211,7 @@ export default class RootCommand extends BaseCommand {
     choices: Array<{ value: MenuItem; name: string }>,
     statusLine: string,
     headerLine: string,
+    panelText: string,
     elapsedFooter: string | null,
     barStyle: BarStyle,
     workloadTier: WorkloadTier,
@@ -218,7 +222,10 @@ export default class RootCommand extends BaseCommand {
       if (statusLine.trim().length > 0) {
         promptChoices.push(new Separator(` ${statusLine}`));
       }
-      promptChoices.push(new Separator(` ${headerLine}`), ...choices);
+      if (headerLine.trim().length > 0) {
+        promptChoices.push(new Separator(` ${headerLine}`));
+      }
+      promptChoices.push(...choices);
       if (elapsedFooter) {
         promptChoices.push(new Separator(` ${elapsedFooter}`));
       }
@@ -226,6 +233,7 @@ export default class RootCommand extends BaseCommand {
       return (await actionSelect<ActionKind, MenuItem>({
         message: "Select profile",
         helpText: this.buildActionsHelpText(barStyle, workloadTier),
+        panelText,
         actions: [
           { value: "delete", name: "Delete", key: "d" },
           { value: "delete", name: "Delete", key: "delete" },
@@ -257,6 +265,7 @@ export default class RootCommand extends BaseCommand {
     currentUnsaved: MenuItem | null;
     statusLine: string;
     headerLine: string;
+    panelText: string;
     elapsedFooter: string | null;
   }> {
     const savedProfiles = await this.accounts.listSavedProfiles();
@@ -314,11 +323,12 @@ export default class RootCommand extends BaseCommand {
     const axes = this.computeAxes(items);
     const rowModels = items.map((item) => this.buildRowModel(item, axes, barStyle, workloadTier));
     const widths = this.computeColumnWidths(rowModels);
-    const headerLine = this.renderHeaderLine(widths);
+    const headerLine = "";
+    const panelText = this.renderPromptPanelText(rowModels);
 
     const renderedItems = items.map((item, index) => ({
       ...item,
-      renderedLine: this.renderRowLine(rowModels[index]!, widths),
+      renderedLine: this.renderSelectionOption(item, rowModels[index]!),
     }));
 
     return {
@@ -326,6 +336,7 @@ export default class RootCommand extends BaseCommand {
       currentUnsaved,
       statusLine: this.renderStatusLine(barStyle, workloadTier),
       headerLine,
+      panelText,
       elapsedFooter: this.renderElapsedFooter(barStyle, axes, widths),
     };
   }
@@ -688,6 +699,15 @@ export default class RootCommand extends BaseCommand {
     return `${line1}\n${line2}\n${line3}`;
   }
 
+  private renderRowLineForWidth(
+    item: Pick<MenuItem, "isCurrent" | "profileName">,
+    row: RowModel,
+    widths: RootTableWidths,
+    terminalColumns: number,
+  ): string {
+    return this.renderRowLine(row, widths);
+  }
+
   private renderElapsedFooter(
     barStyle: BarStyle,
     axes: { weekly: LimitAxis | null; fiveHour: LimitAxis | null },
@@ -706,6 +726,61 @@ export default class RootCommand extends BaseCommand {
 
   private renderStatusLine(barStyle: BarStyle, workloadTier: WorkloadTier): string {
     return `Bar ${barStyle === "delta" ? "Delta" : "Quota"}  Workload ${this.formatWorkloadTier(workloadTier)}`;
+  }
+
+  private renderPromptPanelText(rows: RowModel[]): string {
+    const panelRows = rows.map((row) => ({
+      profile: row.profile,
+      lastUpdate: row.lastUpdate,
+      weeklyUsageLeft: row.weeklyUsageLeft,
+      weeklyTimeToReset: row.weeklyTimeToReset,
+      weeklyDelta: this.shortDeltaValue(row.weeklyDrift),
+      fiveHourUsageLeft: row.fiveHourUsageLeft || "n/a",
+      fiveHourTimeToReset: row.fiveHourTimeToReset || "n/a",
+      fiveHourDelta: this.shortDeltaValue(row.fiveHourDrift),
+    }));
+    return renderRootDetailPanel(panelRows, computePanelWidths(panelRows));
+  }
+
+  private renderSelectionOption(
+    item: Pick<MenuItem, "isCurrent" | "profileName">,
+    row: RowModel,
+  ): string {
+    return renderSelectionOptionLabel({
+      indicator: item.isCurrent ? "▶" : " ",
+      profile: item.profileName,
+      delta: this.optionDeltaValue(row),
+    });
+  }
+
+  private optionDeltaValue(row: RowModel): string {
+    if (row.fiveHourBottleneck) return this.shortDeltaValue(row.fiveHourDrift);
+    if (row.weeklyBottleneck) return this.shortDeltaValue(row.weeklyDrift);
+    return this.shortDeltaValue(row.fiveHourDrift !== "N/A" ? row.fiveHourDrift : row.weeklyDrift);
+  }
+
+  private shortDeltaValue(value: string): string {
+    const match = value.match(/[+-]?\d+(?:\.\d+)?%/);
+    if (match) return match[0];
+    if (value.startsWith("Unused")) return "Unused";
+    return value;
+  }
+
+  private currentTerminalColumns(): number {
+    const columnCandidates: number[] = [];
+    const pushColumns = (value: number | undefined) => {
+      if (typeof value !== "number" || !Number.isFinite(value)) return;
+      const columns = Math.floor(value);
+      if (columns > 0) columnCandidates.push(columns);
+    };
+
+    pushColumns(process.stdout.columns);
+    pushColumns(process.stderr.columns);
+
+    const envColumns = Number(process.env.COLUMNS);
+    pushColumns(envColumns);
+
+    return columnCandidates.length ? Math.max(...columnCandidates) : 80;
   }
 
   private buildActionsHelpText(barStyle: BarStyle, workloadTier: WorkloadTier = "auto"): string {

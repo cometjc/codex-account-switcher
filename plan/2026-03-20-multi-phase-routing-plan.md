@@ -34,3 +34,5 @@
 - [ ] Keep the Rust plot-mode work in `plan/2026-03-20-ratatui-plot-mode-implementation-plan.md` as the separate visualization stream
 - [ ] Add a visual indicator in the table body showing which workload tier most influenced the current ranking
 - [ ] Evaluate whether workload tier should become per-session persisted state instead of reset-on-launch
+- [ ] Tune the new prompt detail panel for very long profile lists and very narrow remote terminals
+- [ ] Evaluate whether the prompt detail panel should support a condensed middle tier before falling back to the smallest readable layout

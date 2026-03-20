@@ -49,6 +49,7 @@ type ActionSelectConfig<ActionValue, Value> = {
   actions: ReadonlyArray<Action<ActionValue>>;
   choices: ReadonlyArray<Choice<Value> | Separator>;
   helpText?: string;
+  panelText?: string;
   pageSize?: number;
   loop?: boolean;
   default?: unknown;
@@ -349,7 +350,8 @@ export default createPrompt(
       ? `\n${selectedChoice.description}`
       : "";
 
-    return `${[prefix, message, helpTip].filter(Boolean).join(" ")}\n${pageLines}${choiceDescription}${ansiEscapes.cursorHide}`;
+    const panelText = config.panelText ? `\n${config.panelText}` : "";
+    return `${[prefix, message, helpTip].filter(Boolean).join(" ")}${panelText}\n${pageLines}${choiceDescription}${ansiEscapes.cursorHide}`;
   },
 );
 

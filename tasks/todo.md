@@ -32,3 +32,23 @@
   `npm run build`
   `node --test tests/workload-tier.test.js`
   `node --test tests/entrypoints.test.js`
+
+# 2026-03-20 prompt panel layout MVP
+
+- [x] 先補 panel / option layout 測試，鎖住上方詳情面板與下方極簡選項
+- [x] 把 all-profile 詳情改成 prompt-level panel 輸出
+- [x] 把 selectable options 收斂成 indicator、profile name、delta
+- [x] 補上已實作且已驗證的 prompt panel layout spec
+
+## Review
+
+- prompt 上方現在會輸出全部 profiles 的 detail panel。
+- 每組第一行只放 profile 與 last，後續行放對齊過的 weekly / 5h rows。
+- selectable options 不再承載完整表格，而是只保留 indicator、profile name、delta。
+- 驗證：
+  `npm run build`
+  `node --test tests/root-panel-layout.test.js`
+  `node --test tests/root-option-layout.test.js`
+  `node --test tests/root-table-layout.test.js`
+  `node --test tests/workload-tier.test.js`
+  `node --test tests/entrypoints.test.js`
