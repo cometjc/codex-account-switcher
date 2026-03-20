@@ -49,16 +49,41 @@ interface MenuItem {
 }
 
 interface RowModel {
-  current: string;
   profile: string;
   lastUpdate: string;
-  weekly: string;
-  weeklyReset: string;
-  fiveHour: string;
-  fiveHourReset: string;
-  left: string;
-  pace: string;
-  paceValue: number | null;
+  status: string;
+  statusValue: number | null;
+  scoreLabel: string;
+  weeklyBar: string;
+  weeklyTimeLeft: string;
+  weeklyDrift: string;
+  weeklyBottleneck: boolean;
+  fiveHourBar: string;
+  fiveHourTimeLeft: string;
+  fiveHourDrift: string;
+  fiveHourBottleneck: boolean;
+}
+
+interface WindowSummary {
+  source: "W" | "5H";
+  used: number;
+  left: number;
+  totalSeconds: number;
+  remainingSeconds: number;
+  timeUsedPercent: number;
+  timeLeftPercent: number;
+  drift: number;
+}
+
+interface RecommendationSummary {
+  windows: WindowSummary[];
+  leftText: string;
+  statusText: string;
+  statusValue: number | null;
+  statusSource: "W" | "5H" | "-";
+  noActivity: boolean;
+  score: number;
+  scoreLabel: string;
 }
 
 export default class RootCommand extends BaseCommand {
@@ -268,7 +293,6 @@ export default class RootCommand extends BaseCommand {
 
     items.sort((a, b) => this.compareItems(a, b));
     const axes = this.computeAxes(items);
-
     const rowModels = items.map((item) => this.buildRowModel(item, axes, barStyle));
     const widths = this.computeColumnWidths(rowModels);
     const headerLine = this.renderHeaderLine(widths);
@@ -302,7 +326,7 @@ export default class RootCommand extends BaseCommand {
       accountId,
       isCurrent,
       profileName: profile.name,
-      paceSortKey: this.computePaceSortKey(usageView.usage),
+      paceSortKey: this.computePaceSortKey(usageView.usage, isCurrent),
       stableOrder: this.getStableOrder(`saved:${profile.name}`),
       usageView,
       renderedLine: "",
@@ -322,7 +346,7 @@ export default class RootCommand extends BaseCommand {
       accountId,
       isCurrent: true,
       profileName: `${base} [UNSAVED]`,
-      paceSortKey: this.computePaceSortKey(usageView.usage),
+      paceSortKey: this.computePaceSortKey(usageView.usage, true),
       stableOrder: this.getStableOrder(`unsaved:${accountId ?? base}`),
       usageView,
       renderedLine: "",
@@ -336,19 +360,26 @@ export default class RootCommand extends BaseCommand {
   ): RowModel {
     const weekly = this.pickWeeklyWindow(item.usage);
     const fiveHour = this.pickFiveHourWindow(item.usage);
-    const summary = this.computeSummary(item.usage);
+    const summary = this.computeSummary(item.usage, item.isCurrent);
+    const weeklySummary = summary.windows.find((window) => window.source === "W");
+    const fiveHourSummary = summary.windows.find((window) => window.source === "5H");
+    const profileLabel = `${item.isCurrent ? "▶ " : "  "}${item.profileName}`;
+    const statusStyled = this.colorizePace(summary.statusText, summary.statusValue);
 
     return {
-      current: item.isCurrent ? "*" : "",
-      profile: item.profileName,
+      profile: this.colorizeRecommendationProfile(profileLabel, summary.score),
       lastUpdate: this.formatLastUpdate(item.usageView),
-      weekly: this.renderWindowCell(weekly, axes.weekly, barStyle, summary.noActivity),
-      weeklyReset: this.formatTimeLeft(weekly),
-      fiveHour: this.renderWindowCell(fiveHour, axes.fiveHour, barStyle, summary.noActivity),
-      fiveHourReset: this.formatTimeLeft(fiveHour),
-      left: summary.leftText,
-      pace: summary.paceText,
-      paceValue: summary.paceValue,
+      status: `${statusStyled}  ${summary.scoreLabel}`,
+      statusValue: summary.statusValue,
+      scoreLabel: summary.scoreLabel,
+      weeklyBar: this.renderWindowCell(weekly, axes.weekly, barStyle, summary.noActivity, weeklySummary?.drift ?? null),
+      weeklyTimeLeft: this.formatTimeLeftFromSummary(weeklySummary),
+      weeklyDrift: this.formatDrift(weeklySummary, summary.noActivity),
+      weeklyBottleneck: summary.statusSource === "W",
+      fiveHourBar: this.renderWindowCell(fiveHour, axes.fiveHour, barStyle, summary.noActivity, fiveHourSummary?.drift ?? null),
+      fiveHourTimeLeft: this.formatTimeLeftFromSummary(fiveHourSummary),
+      fiveHourDrift: this.formatDrift(fiveHourSummary, summary.noActivity),
+      fiveHourBottleneck: summary.statusSource === "5H",
     };
   }
 
@@ -357,6 +388,7 @@ export default class RootCommand extends BaseCommand {
     axis: LimitAxis | null,
     barStyle: BarStyle,
     noActivity: boolean,
+    driftValue: number | null,
   ): string {
     if (!window) {
       if (barStyle === "delta") {
@@ -368,7 +400,7 @@ export default class RootCommand extends BaseCommand {
 
     const bar =
       barStyle === "delta"
-        ? this.renderDeltaBar(window, noActivity)
+        ? this.renderDeltaBar(window, noActivity, driftValue)
         : this.renderQuotaBar(window);
     return `[${bar}]`;
   }
@@ -384,10 +416,14 @@ export default class RootCommand extends BaseCommand {
     return " ".repeat(28);
   }
 
-  private renderDeltaBar(window: UsageWindow, noActivity: boolean): string {
+  private renderDeltaBar(
+    window: UsageWindow,
+    noActivity: boolean,
+    driftValue: number | null,
+  ): string {
     const width = 28;
     if (noActivity) {
-      return this.renderDeltaNaBar("No activity");
+      return this.colorizeBarByDrift(this.renderDeltaNaBar("No activity"), -999);
     }
 
     const totalSeconds = Math.max(1, window.limit_window_seconds || this.readResetSeconds(window));
@@ -411,7 +447,7 @@ export default class RootCommand extends BaseCommand {
         cells[index] = "█";
       }
     }
-    return cells.join("");
+    return this.colorizeBarByDrift(cells.join(""), driftValue);
   }
 
   private renderDeltaNaBar(label: string): string {
@@ -467,119 +503,169 @@ export default class RootCommand extends BaseCommand {
     return result;
   }
 
-  private computeSummary(usage: UsageResponse | null): {
-    leftText: string;
-    paceText: string;
-    paceValue: number | null;
-    noActivity: boolean;
-  } {
+  private computeSummary(usage: UsageResponse | null, isCurrent: boolean): RecommendationSummary {
     const windows = [this.pickWeeklyWindow(usage), this.pickFiveHourWindow(usage)].filter(
       (window): window is UsageWindow => Boolean(window),
     );
 
     if (!windows.length) {
-      return { leftText: "N/A", paceText: "N/A", paceValue: null, noActivity: false };
+      return {
+        windows: [],
+        leftText: "N/A",
+        statusText: "N/A",
+        statusValue: null,
+        statusSource: "-",
+        noActivity: false,
+        score: Number.NEGATIVE_INFINITY,
+        scoreLabel: "Neutral",
+      };
     }
 
-    const scored = windows.map((window) => {
+    const scored = windows.map((window): WindowSummary => {
+      const source: "W" | "5H" =
+        window.limit_window_seconds === 604_800 ? "W" : "5H";
       const used = this.clampPercent(window.used_percent);
       const left = Math.max(0, 100 - used);
       const remainingSeconds = this.readEffectiveRemainingSeconds(window);
       const totalSeconds = Math.max(1, window.limit_window_seconds || remainingSeconds);
       const elapsedSeconds = Math.max(0, totalSeconds - remainingSeconds);
       const timeUsedPercent = this.clampPercent((elapsedSeconds / totalSeconds) * 100);
+      const timeLeftPercent = Math.max(0, 100 - timeUsedPercent);
       const delta = used - timeUsedPercent;
-      return { left, used, delta };
+      return {
+        source,
+        used,
+        left,
+        totalSeconds,
+        remainingSeconds,
+        timeUsedPercent,
+        timeLeftPercent,
+        drift: delta,
+      };
     });
 
     const bottleneckLeft = scored.reduce((min, row) => (row.left < min.left ? row : min));
-    const worstDelta = scored.reduce((max, row) => (row.delta > max.delta ? row : max));
     const noActivity = scored.every((row) => row.used <= 0);
+    const worstDelta = scored.reduce((max, row) => (row.drift > max.drift ? row : max));
+
+    const weekly = scored.find((row) => row.source === "W");
+    const fiveHour = scored.find((row) => row.source === "5H");
+    const weeklyNeed = weekly ? Math.max(0, weekly.timeUsedPercent - weekly.used) / 100 : 0;
+    const fiveHourSlack = fiveHour ? Math.max(0, fiveHour.timeUsedPercent - fiveHour.used) / 100 : 0;
+    const fiveHourSpikeRisk = fiveHour ? Math.max(0, fiveHour.used - fiveHour.timeUsedPercent) / 100 : 0;
+    const switchCost = isCurrent ? 0 : 1;
+    const unusedBonus = noActivity ? 0.05 : 0;
+    const score =
+      0.55 * weeklyNeed +
+      0.2 * fiveHourSlack -
+      0.2 * fiveHourSpikeRisk -
+      0.05 * switchCost +
+      unusedBonus;
+
+    const statusSource = noActivity
+      ? (fiveHour ? "5H" : weekly ? "W" : "-")
+      : worstDelta.source;
+    const statusText = noActivity
+      ? `Unused, good [${statusSource}]`
+      : `${worstDelta.drift >= 0 ? "+" : ""}${worstDelta.drift.toFixed(1)}% ${worstDelta.drift >= 0 ? "Overuse" : "Under"} [${statusSource}]`;
 
     return {
       leftText: `${Math.round(bottleneckLeft.left).toString().padStart(3, " ")}%`,
-      paceText: noActivity ? "No activity yet" : `${worstDelta.delta >= 0 ? "+" : ""}${worstDelta.delta.toFixed(1)}%`,
-      paceValue: noActivity ? null : worstDelta.delta,
+      statusText,
+      statusValue: noActivity ? null : worstDelta.drift,
+      statusSource,
       noActivity,
+      windows: scored,
+      score,
+      scoreLabel: this.scoreLabel(score),
     };
   }
 
-  private computeColumnWidths(rows: RowModel[]): Record<keyof RowModel, number> {
-    const headers = {
-      current: "",
-      profile: "Profile",
-      lastUpdate: "Last Update",
-      weekly: "Weekly",
-      weeklyReset: "Time Left",
-      fiveHour: "5hr",
-      fiveHourReset: "Time Left",
-      left: "Left",
-      pace: "Delta (vs ideal)",
-    };
-
-    const width = (
-      key:
-        | "current"
-        | "profile"
-        | "lastUpdate"
-        | "weekly"
-        | "weeklyReset"
-        | "fiveHour"
-        | "fiveHourReset"
-        | "left"
-        | "pace",
-    ): number => {
-      const values = [headers[key], ...rows.map((row) => row[key])];
-      return values.reduce((max, value) => Math.max(max, this.visibleLength(value)), 0);
-    };
+  private computeColumnWidths(rows: RowModel[]): {
+    profile: number;
+    lastUpdate: number;
+    status: number;
+    bar: number;
+    timeLeft: number;
+    drift: number;
+  } {
+    const width = (values: string[]): number =>
+      values.reduce((max, value) => Math.max(max, this.visibleLength(value)), 0);
 
     return {
-      current: width("current"),
-      profile: width("profile"),
-      lastUpdate: width("lastUpdate"),
-      weekly: width("weekly"),
-      weeklyReset: width("weeklyReset"),
-      fiveHour: width("fiveHour"),
-      fiveHourReset: width("fiveHourReset"),
-      left: width("left"),
-      pace: width("pace"),
-      paceValue: 0,
+      profile: width(["Profile", ...rows.map((row) => row.profile)]),
+      lastUpdate: width(["Last", ...rows.map((row) => row.lastUpdate)]),
+      status: width(["Pacing Status", ...rows.map((row) => row.status)]),
+      bar: width(["[                            ]", ...rows.flatMap((row) => [row.weeklyBar, row.fiveHourBar])]),
+      timeLeft: width(["100% (7.0d)", ...rows.flatMap((row) => [row.weeklyTimeLeft, row.fiveHourTimeLeft])]),
+      drift: width(["Drift", ...rows.flatMap((row) => [row.weeklyDrift, row.fiveHourDrift])]),
     };
   }
 
-  private renderHeaderLine(widths: Record<keyof RowModel, number>): string {
+  private renderHeaderLine(widths: {
+    profile: number;
+    lastUpdate: number;
+    status: number;
+    bar: number;
+    timeLeft: number;
+    drift: number;
+  }): string {
     return this.joinColumns([
-      this.padCenter("", widths.current),
-      this.padCenter("Profile", widths.profile),
-      this.padCenter("Last Update", widths.lastUpdate),
-      this.padCenter("Weekly", widths.weekly),
-      this.padCenter("Time Left", widths.weeklyReset),
-      this.padCenter("5hr", widths.fiveHour),
-      this.padCenter("Time Left", widths.fiveHourReset),
-      this.padCenter("Left", widths.left),
-      this.padCenter("Delta (vs ideal)", widths.pace),
+      this.padRight("Profile", widths.profile),
+      this.padCenter("Last", widths.lastUpdate),
+      this.padCenter("Pacing Status", widths.status),
     ]);
   }
 
-  private renderRowLine(row: RowModel, widths: Record<keyof RowModel, number>): string {
-    const paceCell = this.colorizePace(this.padCenter(row.pace, widths.pace), row.paceValue);
-    return this.joinColumns([
-      this.padCenter(row.current, widths.current),
-      this.padCenter(row.profile, widths.profile),
+  private renderRowLine(
+    row: RowModel,
+    widths: {
+      profile: number;
+      lastUpdate: number;
+      status: number;
+      bar: number;
+      timeLeft: number;
+      drift: number;
+    },
+  ): string {
+    const line1 = this.joinColumns([
+      this.padRight(row.profile, widths.profile),
       this.padCenter(row.lastUpdate, widths.lastUpdate),
-      this.padRight(row.weekly, widths.weekly),
-      this.padCenter(row.weeklyReset, widths.weeklyReset),
-      this.padRight(row.fiveHour, widths.fiveHour),
-      this.padCenter(row.fiveHourReset, widths.fiveHourReset),
-      this.padCenter(row.left, widths.left),
-      paceCell,
+      this.padCenter(row.status, widths.status),
     ]);
+
+    const line2 = this.joinColumns([
+      this.padRight("", widths.profile),
+      this.padCenter("", widths.lastUpdate),
+      this.padRight(
+        `W: ${this.padRight(row.weeklyBar, widths.bar)}  ${this.padCenter(row.weeklyTimeLeft, widths.timeLeft)}  Drift ${this.padRight(row.weeklyDrift, widths.drift)}${row.weeklyBottleneck ? "  <- Bottleneck" : ""}`,
+        widths.status,
+      ),
+    ]);
+
+    const line3 = this.joinColumns([
+      this.padRight("", widths.profile),
+      this.padCenter("", widths.lastUpdate),
+      this.padRight(
+        `5H:${this.padRight(row.fiveHourBar, widths.bar)}  ${this.padCenter(row.fiveHourTimeLeft, widths.timeLeft)}  Drift ${this.padRight(row.fiveHourDrift, widths.drift)}${row.fiveHourBottleneck ? "  <- Bottleneck" : ""}`,
+        widths.status,
+      ),
+    ]);
+
+    return `${line1}\n${line2}\n${line3}`;
   }
 
   private renderElapsedFooter(
     barStyle: BarStyle,
     axes: { weekly: LimitAxis | null; fiveHour: LimitAxis | null },
-    widths: Record<keyof RowModel, number>,
+    widths: {
+      profile: number;
+      lastUpdate: number;
+      status: number;
+      bar: number;
+      timeLeft: number;
+      drift: number;
+    },
   ): string | null {
     return null;
   }
@@ -742,11 +828,9 @@ export default class RootCommand extends BaseCommand {
     return left.stableOrder - right.stableOrder;
   }
 
-  private computePaceSortKey(usage: UsageResponse | null): number {
-    const summary = this.computeSummary(usage);
-    if (summary.noActivity) return -1000;
-    if (summary.paceValue === null) return Number.NEGATIVE_INFINITY;
-    return Number(summary.paceValue.toFixed(1));
+  private computePaceSortKey(usage: UsageResponse | null, isCurrent: boolean): number {
+    const summary = this.computeSummary(usage, isCurrent);
+    return summary.score;
   }
 
   private getStableOrder(key: string): number {
@@ -799,6 +883,26 @@ export default class RootCommand extends BaseCommand {
     return `${Math.round(leftPercent)}% (${this.formatCompactTime(remaining)})`;
   }
 
+  private formatTimeLeftFromSummary(window: WindowSummary | undefined): string {
+    if (!window) return "";
+    return `${Math.round(window.timeLeftPercent)}% (${this.formatCompactTime(window.remainingSeconds)})`;
+  }
+
+  private formatDrift(window: WindowSummary | undefined, noActivity: boolean): string {
+    if (!window) return "N/A";
+    if (noActivity) return "Unused, good";
+    return `${window.drift >= 0 ? "+" : ""}${window.drift.toFixed(1)}% ${window.drift >= 0 ? "Overuse" : "Under"}`;
+  }
+
+  private scoreLabel(score: number): string {
+    if (!Number.isFinite(score)) return "Neutral";
+    if (score >= 0.45) return "Strong";
+    if (score >= 0.25) return "Good";
+    if (score >= 0.1) return "Neutral";
+    if (score >= -0.05) return "Caution";
+    return "Risky";
+  }
+
   private readEffectiveRemainingSeconds(window: UsageWindow): number {
     const used = this.clampPercent(window.used_percent);
     const fullWindow = Math.max(0, window.limit_window_seconds || 0);
@@ -814,13 +918,35 @@ export default class RootCommand extends BaseCommand {
     const seconds = totalSeconds % 60;
 
     if (totalSeconds >= 86_400) return `${dayFloat.toFixed(1)}d`;
-    if (totalSeconds >= 3_600) return `${hourFloat.toFixed(1).padStart(4, "0")}h`;
-    if (totalSeconds >= 60) return `${minuteFloat.toFixed(1).padStart(4, "0")}m`;
-    return `${this.pad2(seconds)}s`;
+    if (totalSeconds >= 3_600) return `${hourFloat.toFixed(1)}h`;
+    if (totalSeconds >= 60) return `${minuteFloat.toFixed(1)}m`;
+    return `${seconds}s`;
   }
 
   private useColor(): boolean {
     return this.ansiEnabled;
+  }
+
+  private colorizeBarByDrift(bar: string, drift: number | null): string {
+    if (!this.useColor() || drift === null) return bar;
+    const style = this.pickPaceStyle(drift);
+    if (!style) return bar;
+    return `${style}${bar}\u001b[0m`;
+  }
+
+  private colorizeRecommendationProfile(text: string, score: number): string {
+    if (!this.useColor()) return text;
+    const style =
+      score >= 0.45
+        ? "\u001b[42m"
+        : score >= 0.25
+          ? "\u001b[46m"
+          : score >= 0.1
+            ? "\u001b[48;5;240m"
+            : score >= -0.05
+              ? "\u001b[48;5;208m"
+              : "\u001b[41m";
+    return `${style}${text}\u001b[0m`;
   }
 
   private defaultAnsiEnabled(): boolean {
