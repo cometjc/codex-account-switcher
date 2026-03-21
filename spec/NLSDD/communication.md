@@ -73,13 +73,13 @@
 ## Execution Insight Reporting
 
 - Use the execution insights journal for three kinds of runtime learnings:
-  - sub-agent suggestions
-  - coordinator-observed issues
-  - improvement opportunities discovered during execution
+  - actionable execution-local insights, such as sub-agent suggestions, coordinator-observed issues, and improvement opportunities that still affect the current execution
+  - adopted durable global learnings that are ready to graduate into tracked spec or lesson files, after which the runtime copy should be resolved
+  - resolved history, including closed, rejected, or superseded items that remain only as audit trail
 - Insights are append-only runtime artifacts. They preserve dynamic learnings without overloading lane-state JSON or tracked docs.
 - Insights should be concise enough to scan later, but specific enough to support a follow-up decision.
-- When work is during or after an NLSDD stage and the prompt includes `review`, coordinator should inspect and summarize the execution insights journal as part of that pass, then decide whether each open/adopted insight stays exploratory, becomes a lane item, or can be resolved/rejected.
-- Review/autopilot helpers may surface open/adopted insights inline, but they should not auto-close them without an explicit coordinator decision.
+- When work is during or after an NLSDD stage and the prompt includes `review`, coordinator should inspect and summarize the execution insights journal as part of that pass, then decide whether each open/adopted insight stays exploratory, becomes a lane item, graduates into tracked spec/lessons and is resolved in runtime, or can be resolved/rejected.
+- Review/autopilot helpers may surface open/adopted insights inline, but they should not auto-close or graduate them without an explicit coordinator decision.
 
 ## Coordinator Templates
 

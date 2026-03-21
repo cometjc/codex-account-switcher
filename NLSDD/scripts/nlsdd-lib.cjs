@@ -194,14 +194,27 @@ function summarizeExecutionInsights(projectRoot, execution, limit = 5) {
     countsByKind[entry.kind] = (countsByKind[entry.kind] || 0) + 1;
   }
 
-  const actionable = entries.filter((entry) => ['open', 'adopted'].includes(entry.status));
+  const actionable = entries.filter(
+    (entry) => entry.status === 'open' || (entry.status === 'adopted' && entry.lane !== 'global'),
+  );
+  const durableLearnings = entries.filter(
+    (entry) => entry.status === 'adopted' && entry.lane === 'global',
+  );
+  const resolvedHistory = entries.filter((entry) =>
+    ['resolved', 'rejected'].includes(entry.status),
+  );
+
   return {
     execution,
     total: entries.length,
     actionableCount: actionable.length,
+    durableLearningCount: durableLearnings.length,
+    resolvedHistoryCount: resolvedHistory.length,
     countsByStatus,
     countsByKind,
     actionable: actionable.slice(0, limit),
+    durableLearnings: durableLearnings.slice(0, limit),
+    resolvedHistory: resolvedHistory.slice(0, limit),
     latest: entries.slice(0, limit),
   };
 }

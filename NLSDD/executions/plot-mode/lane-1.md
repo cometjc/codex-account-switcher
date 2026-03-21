@@ -35,11 +35,11 @@
 ## Current Lane Status
 
 - [x] Projected phase: parked
-- [x] Current item: Future shell polish only if Rust viewer launch UX changes again
+- [x] Current item: n/a
 - [x] Latest commit: `baa7b8e`
 - [x] Latest event: bootstrap-insight · Lane 1 shell/handoff audit is already satisfied
 - [x] Next expected phase: n/a
-- [x] Next refill target: Re-activate only if plot launch/retry UX changes enough to justify fresh shell work
+- [x] Next refill target: n/a
 - [x] Latest note: Current plot-mode shell and handoff tests already align with the recovery baseline, so the truthful next phase is parked rather than pseudo-active.
 
 ## Refill Order

@@ -969,34 +969,42 @@
 
 # 2026-03-21 NLSDD review findings remediation
 
-- [ ] 修正 reducer 在 replay 時錯讀 canonical root，避免 linked worktree / recovery branch 吃到錯的 lane plan
-- [ ] 修正 parked / noop / resolved-blocker transition 無法清掉舊 `Current item` / `Next refill target` 的問題
-- [ ] 將 `review` / `schedule` / `dispatch-plan` 等讀取入口改成不會順手重寫 tracked scoreboard / lane plan
-- [ ] 補 regression tests，鎖住 root replay、state clearing、read-only helper 三條行為
-- [ ] 跑 NLSDD automation tests 與 helper smoke checks 驗證修正
+- [x] 修正 reducer 在 replay 時錯讀 canonical root，避免 linked worktree / recovery branch 吃到錯的 lane plan
+- [x] 修正 parked / noop / resolved-blocker transition 無法清掉舊 `Current item` / `Next refill target` 的問題
+- [x] 將 `review` / `schedule` / `dispatch-plan` 等讀取入口改成不會順手重寫 tracked scoreboard / lane plan
+- [x] 補 regression tests，鎖住 root replay、state clearing、read-only helper 三條行為
+- [x] 跑 NLSDD automation tests 與 helper smoke checks 驗證修正
 
 ## Review
 
-- 這批是直接承接剛剛的 `NLSDD` review findings，不是新功能線。目標是把目前最容易重新製造 drift 的三個根因一次收斂掉。
-- 第一個 finding 是 reducer 在 replay 時仍有 `resolveProjectRoot()` fallback，會在 linked worktree / recovery branch 下讀錯 next refill item。
-- 第二個 finding 是 state projection 還無法顯式清空舊 item，導致 parked / noop / resolved-blocker 後，舊 `Current item` 和 `Next refill target` 會藉由 `||` fallback 長回來。
-- 第三個 finding 是多個 read-path helper 會先 reduce，然後順手改寫 tracked `scoreboard` 與 lane-plan status，讓單純觀察也變成 tracked mutation。
+- 這批 remediation 已收斂完成，不再只是 review findings 清單。reducer replay 現在會吃 execution `projectRoot`，而不是偷回 `resolveProjectRoot()`；linked worktree replay 也有 regression coverage。
+- `parked / noop-satisfied / resolved-blocker` 會顯式清掉 stale projected fields，空白 scoreboard cells 也會視為無值，避免舊 `Current item` / `Next refill target` 長回來。
+- `review / schedule / dispatch-plan / cycle / launch / autopilot / intake / refill` 等讀取入口現在都會先 reduce canonical envelope state，再以 observational/read-only 模式讀 projection，不再把單純觀察變成 tracked mutation。
+- 驗證：
+  - `node --test tests/nlsdd-automation.test.js`
+  - `node NLSDD/scripts/nlsdd-build-dispatch-plan.cjs --execution nlsdd-self-hosting --dry-run --json`
+  - `node NLSDD/scripts/nlsdd-suggest-schedule.cjs --execution nlsdd-self-hosting --json`
+  - `git diff --check`
 
 # 2026-03-21 execution-insights journal remediation
 
-- [ ] 收斂 execution-insights lifecycle，避免已解決 insight 仍長期停在 adopted/open
-- [ ] 補 supersession / resolution 規則，讓較新的 resolved insight 能正確覆蓋舊的 adopted/open insight
-- [ ] 區分 execution-local actionable insights 與可升級成 tracked lesson/spec 的全域 learnings
-- [ ] 調整 `nlsdd-summarize-insights`，讓 coordinator 可直接看出哪些 insight 仍需規劃，哪些只是歷史/長期 learnings
-- [ ] 補 regression tests，鎖住 duplicate/resolved insight replay 與 summary 行為
-- [ ] 跑 NLSDD insight/automation 驗證
+- [x] 收斂 execution-insights lifecycle，避免已解決 insight 仍長期停在 adopted/open
+- [x] 補 supersession / resolution 規則，讓較新的 resolved insight 能正確覆蓋舊的 adopted/open insight
+- [x] 區分 execution-local actionable insights 與可升級成 tracked lesson/spec 的全域 learnings
+- [x] 調整 `nlsdd-summarize-insights`，讓 coordinator 可直接看出哪些 insight 仍需規劃，哪些只是歷史/長期 learnings
+- [x] 補 regression tests，鎖住 duplicate/resolved insight replay 與 summary 行為
+- [x] 跑 NLSDD insight/automation 驗證
 
 ## Review
 
-- inspection 後目前 `execution-insights` 最大問題不是「沒記錄」，而是 lifecycle 與 read path 還不夠清楚。
-- `plot-mode` 現在共有 14 筆 insight，其中只有 2 筆 actionable，但這 2 筆其實是全域 adopted learnings，不是 lane-local blocker；summary 目前仍把它們和 execution 當下待處理事項放在同一層。
-- `nlsdd-self-hosting` 已收斂到 0 actionable，代表 journal 基本機制可用；真正需要補的是 `plot-mode` 這種混合「歷史 blocker + durable lesson」的情境。
-- 下一步應優先把 insight 的 supersession / graduation 規則做清楚，讓已被 lesson/spec 吸收的 adopted global learnings 不再持續佔據 runtime actionable surface。
+- 這輪把 insight summary 正式拆成三層：actionable execution-local insights、durable global learnings、resolved history。`dispatch-plan` / `review` / `autopilot` 因此不再把全域 adopted learning 誤當成本輪待辦。
+- `plot-mode` 原本 lingering 的兩筆 global adopted learnings 已確認都已 graduate 到 tracked NLSDD guardrails / lessons，因此 runtime copies 已補寫 resolved event；現在 summary 顯示 `actionable 0 / durable 0 / resolved 14`。
+- `nlsdd-summarize-insights` 也補了 grouped output，coordinator 現在能直接分辨哪些 runtime learnings 還需要 lane planning，哪些只是 durable policy，哪些已經只是歷史。
+- 驗證：
+  - `node --test tests/nlsdd-automation.test.js`
+  - `node NLSDD/scripts/nlsdd-summarize-insights.cjs --execution plot-mode`
+  - `node NLSDD/scripts/nlsdd-drive-review-loop.cjs --execution plot-mode`
+  - `node NLSDD/scripts/nlsdd-build-dispatch-plan.cjs --execution plot-mode --dry-run --json`
 
 # 2026-03-21 nlsdd-go remediation round integration
 

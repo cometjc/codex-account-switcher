@@ -113,6 +113,7 @@ function renderDispatchPlan(result) {
     `Idle slots: ${result.idleSlots}`,
     `Action queue: ${result.queue.length}`,
     `Actionable insights: ${result.insightSummary.actionableCount}`,
+    `Durable global learnings: ${result.insightSummary.durableLearningCount}`,
   ];
 
   if (result.queue.length === 0) {

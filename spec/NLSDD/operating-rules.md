@@ -79,6 +79,11 @@
 - Runtime scoreboard generation may expand the tracked scoreboard into a richer derived table, but the tracked scoreboard itself should stay manual-only.
 - Lane journal files are the execution-aware runtime source of truth for phase transitions, latest commit metadata, and next expected gate when those details need to survive across probes, reviews, and worktree-local invocations.
 - Execution insights journals are the append-only runtime source for sub-agent suggestions, coordinator observations, and improvement opportunities discovered during execution. They complement lane journals and must not replace current lane phase/state.
+- Treat execution insights as three lifecycle classes:
+  - actionable execution-local insights: open blockers, suggestions, no-op findings, and workflow issues that still matter to the current execution
+  - adopted durable global learnings: stable, reusable learnings that should graduate into the appropriate spec or rule file, and usually into tracked lessons as well, before the runtime copy is marked resolved
+  - resolved history: closed, rejected, or superseded runtime entries that remain as audit trail but should no longer drive active dispatch decisions
+- Adopted durable global learnings should graduate out of the runtime journal into the appropriate spec or rule file once they are stable and reusable; after that, the runtime copy should be resolved so the journal stays a history of what was learned, not a second writable truth.
 
 ## Review Rules
 

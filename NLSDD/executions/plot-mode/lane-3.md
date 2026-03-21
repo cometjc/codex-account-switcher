@@ -30,11 +30,11 @@
 ## Current Lane Status
 
 - [x] Projected phase: parked
-- [x] Current item: Chart compatibility with richer focus and profile cycling
+- [x] Current item: n/a
 - [x] Latest commit: `c5f6c26`
 - [x] Latest event: bootstrap-insight · Lane 3 compatibility item already satisfied
 - [x] Next expected phase: n/a
-- [x] Next refill target: Only widen beyond compatibility work if plot UX still needs richer chart interaction after Lane 2 lands
+- [x] Next refill target: n/a
 - [x] Latest note: Chart-local behavior and regressions already cover non-Chart focus with divergent selected/current labels; no additional lane-local diff was needed.
 
 ## Refill Order

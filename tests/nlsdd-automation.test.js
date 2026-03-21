@@ -1253,6 +1253,8 @@ test('execution insight summary helper groups actionable insights and converged 
   const summary = summarizeExecutionInsights(root, 'plot-mode');
   assert.equal(summary.total, 3);
   assert.equal(summary.actionableCount, 2);
+  assert.equal(summary.durableLearningCount, 0);
+  assert.equal(summary.resolvedHistoryCount, 1);
   assert.equal(summary.countsByKind.blocker, 1);
   assert.equal(summary.countsByKind['noop-finding'], 1);
   assert.equal(summary.countsByKind['resolved-blocker'], 1);
@@ -1266,8 +1268,52 @@ test('execution insight summary helper groups actionable insights and converged 
 
   const rendered = renderInsightSummary(summary);
   assert.match(rendered, /Actionable insights: 2/);
+  assert.match(rendered, /Durable global learnings: 0/);
+  assert.match(rendered, /Resolved history: 1/);
   assert.match(rendered, /\[adopted\] Lane 3 · noop-finding · Lane 3 follow-up is a real no-op/);
   assert.match(rendered, /\[open\] Lane 2 · blocker · Need render boundary compare payload/);
+});
+
+test('execution insight summary separates durable global learnings from actionable lane work', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-insight-durable-'));
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  const {recordInsight} = freshRequire('NLSDD/scripts/nlsdd-record-insight.cjs');
+  const {summarizeExecutionInsights} = freshRequire('NLSDD/scripts/nlsdd-lib.cjs');
+  const {renderInsightSummary} = freshRequire('NLSDD/scripts/nlsdd-summarize-insights.cjs');
+
+  recordInsight(root, {
+    execution: 'plot-mode',
+    lane: 'global',
+    source: 'coordinator',
+    kind: 'improvement-opportunity',
+    status: 'adopted',
+    summary: 'Keep active slots filled with real work, not stale implementing state',
+    timestamp: '2026-03-21T08:00:00.000Z',
+  });
+  recordInsight(root, {
+    execution: 'plot-mode',
+    lane: '2',
+    source: 'coordinator',
+    kind: 'blocker',
+    status: 'open',
+    summary: 'Lane 2 still needs compare payload seam from Lane 4',
+    timestamp: '2026-03-21T08:01:00.000Z',
+  });
+
+  const summary = summarizeExecutionInsights(root, 'plot-mode');
+  assert.equal(summary.total, 2);
+  assert.equal(summary.actionableCount, 1);
+  assert.equal(summary.durableLearningCount, 1);
+  assert.equal(summary.resolvedHistoryCount, 0);
+  assert.equal(summary.actionable[0].lane, 'Lane 2');
+  assert.equal(summary.durableLearnings[0].lane, 'global');
+
+  const rendered = renderInsightSummary(summary);
+  assert.match(rendered, /Actionable insights: 1/);
+  assert.match(rendered, /Durable global learnings: 1/);
+  assert.match(rendered, /\[adopted\] global · improvement-opportunity · Keep active slots filled with real work, not stale implementing state/);
+  assert.match(rendered, /\[open\] Lane 2 · blocker · Lane 2 still needs compare payload seam from Lane 4/);
 });
 
 test('execution insight summary keeps only the latest status for the same lane+summary key', () => {
@@ -1299,6 +1345,8 @@ test('execution insight summary keeps only the latest status for the same lane+s
   const summary = summarizeExecutionInsights(root, 'plot-mode');
   assert.equal(summary.total, 1);
   assert.equal(summary.actionableCount, 0);
+  assert.equal(summary.durableLearningCount, 0);
+  assert.equal(summary.resolvedHistoryCount, 1);
   assert.equal(summary.latest[0].kind, 'resolved-blocker');
   assert.equal(summary.latest[0].status, 'resolved');
   assert.equal(summary.latest[0].summary, 'Need render-boundary compare payload');

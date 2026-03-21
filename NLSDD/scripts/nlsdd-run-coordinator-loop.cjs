@@ -58,6 +58,7 @@ function renderCoordinatorLoop(result) {
     `Review actions: ${result.reviewLaneCount}`,
     `Commit intakes: ${result.commitLaneCount}`,
     `Actionable insights: ${result.insightSummary.actionableCount}`,
+    `Durable global learnings: ${result.insightSummary.durableLearningCount}`,
   ];
 
   if (result.noDispatchReason) {
@@ -88,6 +89,13 @@ function renderCoordinatorLoop(result) {
   if (result.insightSummary.actionable.length > 0) {
     lines.push('Execution insights:');
     for (const entry of result.insightSummary.actionable) {
+      lines.push(`- [${entry.status}] ${entry.lane}: ${entry.summary}`);
+    }
+  }
+
+  if (result.insightSummary.durableLearnings.length > 0) {
+    lines.push('Durable global learnings:');
+    for (const entry of result.insightSummary.durableLearnings) {
       lines.push(`- [${entry.status}] ${entry.lane}: ${entry.summary}`);
     }
   }

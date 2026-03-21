@@ -24,20 +24,33 @@ function renderInsightSummary(summary) {
     `Execution: ${summary.execution}`,
     `Insights total: ${summary.total}`,
     `Actionable insights: ${summary.actionableCount}`,
+    `Durable global learnings: ${summary.durableLearningCount}`,
+    `Resolved history: ${summary.resolvedHistoryCount}`,
     `Status counts: open=${summary.countsByStatus.open || 0}, adopted=${summary.countsByStatus.adopted || 0}, resolved=${summary.countsByStatus.resolved || 0}, rejected=${summary.countsByStatus.rejected || 0}`,
   ];
 
   if (summary.actionable.length === 0) {
     lines.push('Actionable entries: none');
-    return lines.join('\n');
+  } else {
+    lines.push('Actionable entries:');
+    for (const entry of summary.actionable) {
+      lines.push(
+        `- [${entry.status}] ${entry.lane} · ${entry.kind} · ${entry.summary}`,
+      );
+    }
   }
 
-  lines.push('Actionable entries:');
-  for (const entry of summary.actionable) {
-    lines.push(
-      `- [${entry.status}] ${entry.lane} · ${entry.kind} · ${entry.summary}`,
-    );
+  if (summary.durableLearnings.length === 0) {
+    lines.push('Durable global learnings: none');
+  } else {
+    lines.push('Durable global learnings:');
+    for (const entry of summary.durableLearnings) {
+      lines.push(
+        `- [${entry.status}] ${entry.lane} · ${entry.kind} · ${entry.summary}`,
+      );
+    }
   }
+
   return lines.join('\n');
 }
 

@@ -188,6 +188,13 @@ function renderActions(result) {
     }
   }
 
+  if (insightSummary && insightSummary.durableLearnings.length > 0) {
+    lines.push(`Durable global learnings: ${insightSummary.durableLearningCount}`);
+    for (const entry of insightSummary.durableLearnings) {
+      lines.push(`- [${entry.status}] ${entry.lane} · ${entry.kind} · ${entry.summary}`);
+    }
+  }
+
   return lines.join('\n');
 }
 

@@ -27,11 +27,11 @@
 ## Current Lane Status
 
 - [x] Projected phase: parked
-- [x] Current item: Recovery-baseline README and local run instructions
+- [x] Current item: n/a
 - [x] Latest commit: `25ea3c1`
 - [x] Latest event: bootstrap-insight · Lane 5 regression alignment already satisfied
 - [x] Next expected phase: n/a
-- [x] Next refill target: Investigate whether shell/readme regression alignment can be solved inside docs/test ownership before widening scope
+- [x] Next refill target: n/a
 - [x] Latest note: README and shell/readme regression coverage already match the tracked recovery-baseline workflow within docs/test ownership.
 
 ## Refill Order
