@@ -1,12 +1,12 @@
 # Lane 5 Plan - Plot-Mode Execution Migration
 
 > Ownership family:
-> `plan/NLSDD/executions/plot-mode/*.md`
+> `NLSDD/executions/plot-mode/*.md`
 >
 > NLSDD worktree: `.worktrees/nlsdd-lane-5-plot-mode-docs`
 >
 > Lane-local verification:
-> `rg -n "4-thread|queued|lane pool" plan/NLSDD/executions/plot-mode`
+> `rg -n "4-thread|queued|lane pool" NLSDD/executions/plot-mode`
 
 ## M - Plot-Mode Alignment
 

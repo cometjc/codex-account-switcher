@@ -8,7 +8,7 @@
 > Lane-local verification:
 > `node --test tests/nlsdd-automation.test.js`
 >
-> `node scripts/nlsdd-suggest-schedule.cjs --execution nlsdd-self-hosting`
+> `node NLSDD/scripts/nlsdd-suggest-schedule.cjs --execution nlsdd-self-hosting`
 
 ## M - Fixture Coverage
 

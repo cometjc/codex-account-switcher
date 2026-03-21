@@ -21,7 +21,7 @@ function resolveScoreboardPath(projectRoot = resolveProjectRoot()) {
   if (envScoreboardPath && isPathWithin(projectRoot, envScoreboardPath)) {
     return envScoreboardPath;
   }
-  return path.join(projectRoot, 'plan', 'NLSDD', 'scoreboard.md');
+  return path.join(projectRoot, 'NLSDD', 'scoreboard.md');
 }
 
 function resolveCodexStateDbPath() {
@@ -125,7 +125,7 @@ function lanePlanPath(projectRoot, execution, lane) {
   if (!laneMatch) {
     return null;
   }
-  return path.join(projectRoot, 'plan', 'NLSDD', 'executions', execution, `lane-${laneMatch[1]}.md`);
+  return path.join(projectRoot, 'NLSDD', 'executions', execution, `lane-${laneMatch[1]}.md`);
 }
 
 function parseLanePlan(text) {

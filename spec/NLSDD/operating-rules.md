@@ -21,8 +21,8 @@
   - lane ownership families
   - lane worktree naming convention
   - lane-local verification commands
-- Every execution must keep its lane plans under `plan/NLSDD/executions/<execution-id>/`.
-- Every execution must have one canonical row set in `plan/NLSDD/scoreboard.md`.
+- Every execution must keep its runtime lane plans under `NLSDD/executions/<execution-id>/`.
+- Every execution must have one canonical row set in `NLSDD/scoreboard.md`.
 - Scoreboard rows may contain both manual coordinator fields and auto-derived fields; automation may suggest state, but the coordinator remains the decision-maker for dispatch.
 - Not every lane row has to consume an active thread slot at all times; queued or parked lanes may remain visible in the scoreboard until a slot opens, then the coordinator can promote the next eligible queued lane into that slot.
 
@@ -50,7 +50,7 @@
   - `tasks/todo.md`
   - roadmap status updates
   - execution and lane checklist updates
-  - `plan/NLSDD/scoreboard.md`
+  - `NLSDD/scoreboard.md`
   - cross-lane lessons in `tasks/lessons.md`
 - Implementers and reviewers should not "helpfully" update those files as part of feature work.
 - Auto-refresh tooling may rewrite the scoreboard's derived columns, but must not overwrite manual intent fields such as `Current item`, `Phase`, or `Blocked by`.
@@ -107,5 +107,5 @@
 ## Current Repo Defaults
 
 - `plot-mode` is the first full NLSDD execution.
-- The existing lane worktrees remain valid, but their source of truth moves under `plan/NLSDD/executions/plot-mode/`.
+- The existing lane worktrees remain valid, but their source of truth moves under `NLSDD/executions/plot-mode/`.
 - Future multi-agent streams should start from NLSDD directly rather than cloning earlier fixed-4-lane naming.

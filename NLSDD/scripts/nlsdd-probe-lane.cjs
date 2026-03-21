@@ -90,7 +90,9 @@ function renderProbe(result) {
 function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.execution || !args.lane) {
-    throw new Error('Usage: node scripts/nlsdd-probe-lane.cjs --execution <id> --lane <n> [--json]');
+    throw new Error(
+      'Usage: node NLSDD/scripts/nlsdd-probe-lane.cjs --execution <id> --lane <n> [--json]',
+    );
   }
   const result = probeLane(resolveProjectRoot(), args.execution, args.lane);
   if (args.json) {

@@ -10,3 +10,11 @@
 - 需要嚴格欄位對齊的 CLI prompt row 不要用 emoji 當欄位標記；像 JuiceSSH 這類終端可能把 Unicode emoji 算成不穩定寬度，連帶弄亂同列後續欄位。
 - 當同一個 UI 有 `Delta` / `Quota` 這類語意不同的 mode 時，連 option label 也要跟著 mode-aware；不能只清 prompt panel，卻讓下方選項殘留另一個 mode 的資訊。
 - 驗證會讀 `dist/` 產物的測試不要和 `npm run build` 並行跑，否則容易撞到 clean/build 中間態，得到假的 `MODULE_NOT_FOUND`。
+- 當使用者要求長時間維持多 sub-agent 並行時，不要持續用臨時 refill task 重切地圖；要先固定成不重疊的 lane plan，之後所有 sub-agent 都沿 lane plan 與 lane-local MVC checklist 前進，直到某條 lane 真正耗盡再新增下一條 lane。
+- 多 lane reviewer 若共享 dirty worktree，極易把其他 lane 或既有 WIP 誤判成當前 task 的 scope violation；NLSDD 下 reviewer 必須只看 lane-item commit diff。
+- implementer 不應順手更新 `tasks/todo.md`、lane checklist 或 roadmap 追蹤檔；這些追蹤更新預設由 coordinator 統一回寫。
+- 若某個 lane 的可見輸出其實依賴另一條 lane 的 boundary，應先把 boundary 擴張切成依賴 lane item，再執行可見輸出 lane，不要在 implementer 執行中臨時擴 scope。
+- NLSDD 執行中若 sub-agent 反覆只回 `IN_PROGRESS`，不要只盯 thread 訊號；要直接檢查 lane worktree 的 `HEAD`、source diff 與 lane-local 驗證，避免漏掉其實已完成但未正常回報的 commit。
+- 做多 lane workflow 噪音治理時，先分清楚是「未忽略的 build outputs」還是「已經被 git 追蹤的 artifacts」；前者靠 `.gitignore`，後者還要做 lane-local 的去追蹤清理，不能只加 ignore 就以為會安靜下來。
+- 當 sub-agent 遇到 workflow 層 blocker（例如 reviewer 被 `target` 噪音干擾）時，不要只回 `BLOCKED`；應一併提出狹義 remediation 建議，讓 coordinator 能更快做 lane hygiene 或 dependency 決策。
+- `spec/NLSDD/` 只放已落地且已驗證的 NLSDD 定義；execution、scoreboard、scripts 與執行流程文件應放在 `NLSDD/`，不要把 runtime artifacts 收進 spec。

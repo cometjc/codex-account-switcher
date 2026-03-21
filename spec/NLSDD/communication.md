@@ -37,7 +37,7 @@
 
 ## Coordinator Templates
 
-These templates may be generated through `node scripts/nlsdd-compose-message.cjs ...`, but the coordinator still decides when and how to send them.
+These templates may be generated through `node NLSDD/scripts/nlsdd-compose-message.cjs ...`, but the coordinator still decides when and how to send them.
 
 ### Implementer Assignment
 

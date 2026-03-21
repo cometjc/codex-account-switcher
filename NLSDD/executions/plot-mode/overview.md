@@ -12,19 +12,19 @@
 ## Lanes
 
 - [x] Lane 1: Node Contract and Handoff
-  - Plan: `plan/NLSDD/executions/plot-mode/lane-1.md`
+  - Plan: `NLSDD/executions/plot-mode/lane-1.md`
   - Worktree: `.worktrees/lane-1-node`
 
 - [x] Lane 2: Rust Runtime and State
-  - Plan: `plan/NLSDD/executions/plot-mode/lane-2.md`
+  - Plan: `NLSDD/executions/plot-mode/lane-2.md`
   - Worktree: `.worktrees/lane-2-runtime`
 
 - [x] Lane 3: Rust Chart Surface
-  - Plan: `plan/NLSDD/executions/plot-mode/lane-3.md`
+  - Plan: `NLSDD/executions/plot-mode/lane-3.md`
   - Worktree: `.worktrees/lane-3-chart`
 
 - [x] Lane 4: Rust Panels, Docs, and Regression Surfaces
-  - Plan: `plan/NLSDD/executions/plot-mode/lane-4.md`
+  - Plan: `NLSDD/executions/plot-mode/lane-4.md`
   - Worktree: `.worktrees/lane-4-panels`
 
 ## Current Progress
@@ -33,7 +33,7 @@
 - [x] Lane 2 first-round drawable panel boundary seam landed and passed spec + quality review.
 - [x] Lane 3 first-round `ChartViewModel` extraction landed and passed spec + quality review.
 - [x] Lane 4 first-round visible Summary / Compare panel surface landed and passed spec + quality review.
-- [x] Second-round implementer commits now exist for lanes 1-4 and are tracked in `plan/NLSDD/scoreboard.md`.
+- [x] Second-round implementer commits now exist for lanes 1-4 and are tracked in `NLSDD/scoreboard.md`.
 
 ## Refill Rules
 

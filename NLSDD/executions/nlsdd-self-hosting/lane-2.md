@@ -1,13 +1,13 @@
 # Lane 2 Plan - Scoreboard Integration
 
 > Ownership family:
-> `scripts/nlsdd-refresh-scoreboard.cjs`, `plan/NLSDD/scoreboard.md`
+> `NLSDD/scripts/nlsdd-refresh-scoreboard.cjs`, `NLSDD/scoreboard.md`
 >
 > NLSDD worktree: `.worktrees/nlsdd-lane-2-scoreboard`
 >
 > Lane-local verification:
 > `npm run nlsdd:scoreboard:refresh`
-> `node scripts/nlsdd-suggest-schedule.cjs --execution nlsdd-self-hosting`
+> `node NLSDD/scripts/nlsdd-suggest-schedule.cjs --execution nlsdd-self-hosting`
 
 ## M - Derived Columns
 

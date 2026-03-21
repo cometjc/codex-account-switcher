@@ -60,7 +60,9 @@ function renderSchedule(schedule) {
 function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.execution) {
-    throw new Error('Usage: node scripts/nlsdd-suggest-schedule.cjs --execution <id> [--max-active <n>] [--json]');
+    throw new Error(
+      'Usage: node NLSDD/scripts/nlsdd-suggest-schedule.cjs --execution <id> [--max-active <n>] [--json]',
+    );
   }
   const schedule = computeExecutionSchedule(resolveProjectRoot(), args.execution, args.maxActive);
   if (args.json) {

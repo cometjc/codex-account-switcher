@@ -1,12 +1,12 @@
 # Lane 3 Plan - Rules and Communication
 
 > Ownership family:
-> `plan/NLSDD/operating-rules.md`, `plan/NLSDD/guardrails.md`, `plan/NLSDD/communication.md`
+> `spec/NLSDD/operating-rules.md`, `spec/NLSDD/guardrails.md`, `spec/NLSDD/communication.md`
 >
 > NLSDD worktree: `.worktrees/nlsdd-lane-3-rules`
 >
 > Lane-local verification:
-> `rg -n "active lane count|4LSDD|4 active lanes" plan/NLSDD`
+> `rg -n "active lane count|4LSDD|4 active lanes" spec/NLSDD`
 
 ## M - Operating Model
 

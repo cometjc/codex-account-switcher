@@ -52,9 +52,9 @@ function setupNlsddFixture() {
     'utf8',
   );
 
-  fs.mkdirSync(path.join(root, 'plan', 'NLSDD', 'executions', 'plot-mode'), {recursive: true});
+  fs.mkdirSync(path.join(root, 'NLSDD', 'executions', 'plot-mode'), {recursive: true});
   fs.writeFileSync(
-    path.join(root, 'plan', 'NLSDD', 'executions', 'plot-mode', 'lane-1.md'),
+    path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-1.md'),
     `# Lane 1 Plan - Node Contract and Handoff
 
 > Ownership family:
@@ -82,8 +82,9 @@ function setupNlsddFixture() {
     'utf8',
   );
 
+  fs.mkdirSync(path.join(root, 'NLSDD'), {recursive: true});
   fs.writeFileSync(
-    path.join(root, 'plan', 'NLSDD', 'scoreboard.md'),
+    path.join(root, 'NLSDD', 'scoreboard.md'),
     `# NLSDD Scoreboard
 
 | Execution | Lane | Ownership | Current item | Phase | Effective phase | Item commit | Branch HEAD | Last verification | Last probe | Latest event | Correction count | Last activity | Blocked by | Next refill target | Noise | Notes |
@@ -147,7 +148,7 @@ insert into threads values ('thread-lane-1-fail', '${root.replace(/'/g, "''")}',
 
 function setupSelfHostingScheduleFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-schedule-'));
-  const executionDir = path.join(root, 'plan', 'NLSDD', 'executions', 'nlsdd-self-hosting');
+  const executionDir = path.join(root, 'NLSDD', 'executions', 'nlsdd-self-hosting');
   fs.mkdirSync(executionDir, {recursive: true});
 
   const lanePlans = [
@@ -169,7 +170,7 @@ function setupSelfHostingScheduleFixture() {
       lane: 3,
       worktree: '.worktrees/nlsdd-lane-3-rules',
       title: 'Rules and Communication',
-      verification: 'rg -n "active lane count" plan/NLSDD',
+      verification: 'rg -n "active lane count" spec/NLSDD',
       item: 'Rewrite remaining fixed-lane wording',
     },
     {
@@ -183,7 +184,7 @@ function setupSelfHostingScheduleFixture() {
       lane: 5,
       worktree: '.worktrees/nlsdd-lane-5-docs',
       title: 'Plot-Mode Migration',
-      verification: 'rg -n "lane pool" plan/NLSDD/executions/plot-mode',
+      verification: 'rg -n "lane pool" NLSDD/executions/plot-mode',
       item: 'Adjust plot-mode docs to lane-pool language',
     },
     {
@@ -230,17 +231,18 @@ function setupSelfHostingScheduleFixture() {
     );
   }
 
+  fs.mkdirSync(path.join(root, 'NLSDD'), {recursive: true});
   fs.writeFileSync(
-    path.join(root, 'plan', 'NLSDD', 'scoreboard.md'),
+    path.join(root, 'NLSDD', 'scoreboard.md'),
     `# NLSDD Scoreboard
 
 | Execution | Lane | Ownership | Current item | Phase | Effective phase | Item commit | Branch HEAD | Last verification | Last probe | Latest event | Correction count | Last activity | Blocked by | Next refill target | Noise | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | nlsdd-self-hosting | Lane 1 | Scheduler core | Normalize scheduling phases for multi-lane dispatch | implementing | implementing | \`1a2b3c4\` | \`1a2b3c4\` | \`node --test tests/nlsdd-automation.test.js\` | 2026-03-21 03:10:00Z · HEAD 1a2b3c4 · clean | PASS · Feynman · 2026-03-21 03:10:00Z | 0 | 2026-03-21 03:10:00Z | none | Scheduler edge cases | none | active lane |
 | nlsdd-self-hosting | Lane 2 | Scoreboard integration | Keep scoreboard rows aligned with the active-cap model | spec-review-pending | spec-review-pending | \`2a2b3c4\` | \`2a2b3c4\` | \`npm run nlsdd:scoreboard:refresh\` | 2026-03-21 03:11:00Z · HEAD 2a2b3c4 · clean | PASS · Banach · 2026-03-21 03:11:00Z | 0 | 2026-03-21 03:11:00Z | none | Scoreboard wording polish | none | active lane |
-| nlsdd-self-hosting | Lane 3 | Rules and communication | Rewrite remaining fixed-lane wording | refill-ready | refill-ready | \`3a2b3c4\` | \`3a2b3c4\` | \`rg -n "active lane count" plan/NLSDD\` | 2026-03-21 03:12:00Z · HEAD 3a2b3c4 · clean | PASS · Archimedes · 2026-03-21 03:12:00Z | 0 | 2026-03-21 03:12:00Z | none | Execution wording cleanup | none | ready to refill |
+| nlsdd-self-hosting | Lane 3 | Rules and communication | Rewrite remaining fixed-lane wording | refill-ready | refill-ready | \`3a2b3c4\` | \`3a2b3c4\` | \`rg -n "active lane count" spec/NLSDD; rg -n "4 active lanes" NLSDD\` | 2026-03-21 03:12:00Z · HEAD 3a2b3c4 · clean | PASS · Archimedes · 2026-03-21 03:12:00Z | 0 | 2026-03-21 03:12:00Z | none | Execution wording cleanup | none | ready to refill |
 | nlsdd-self-hosting | Lane 4 | Regression and CLI surface | Add schedule regression coverage | refill-ready | refill-ready | \`4a2b3c4\` | \`4a2b3c4\` | \`node --test tests/nlsdd-automation.test.js\` | 2026-03-21 03:13:00Z · HEAD 4a2b3c4 · clean | PASS · Helmholtz · 2026-03-21 03:13:00Z | 0 | 2026-03-21 03:13:00Z | none | Scoreboard/schedule cross-check coverage | none | ready to refill |
-| nlsdd-self-hosting | Lane 5 | Plot-mode migration | Adjust plot-mode docs to lane-pool language | queued | queued | \`n/a\` | \`n/a\` | \`rg -n "lane pool" plan/NLSDD/executions/plot-mode\` | n/a | n/a | 0 | n/a | wait-slot | Plot-mode overview wording | none | queued lane |
+| nlsdd-self-hosting | Lane 5 | Plot-mode migration | Adjust plot-mode docs to lane-pool language | queued | queued | \`n/a\` | \`n/a\` | \`rg -n "lane pool" NLSDD/executions/plot-mode\` | n/a | n/a | 0 | n/a | wait-slot | Plot-mode overview wording | none | queued lane |
 | nlsdd-self-hosting | Lane 6 | Coordinator follow-up | Capture coordinator ergonomics follow-up | queued | queued | \`n/a\` | \`n/a\` | \`sed -n '1,220p' tasks/todo.md\` | n/a | n/a | 0 | n/a | wait-slot | Coordinator follow-up | none | queued lane |
 `,
     'utf8',
@@ -252,11 +254,11 @@ function setupSelfHostingScheduleFixture() {
 test('scoreboard refresh v2 backfills effective phase and lane event metadata', () => {
   const fixture = setupNlsddFixture();
   process.env.NLSDD_PROJECT_ROOT = fixture.root;
-  process.env.NLSDD_SCOREBOARD_PATH = path.join(fixture.root, 'plan', 'NLSDD', 'scoreboard.md');
+  process.env.NLSDD_SCOREBOARD_PATH = path.join(fixture.root, 'NLSDD', 'scoreboard.md');
   process.env.CODEX_STATE_DB_PATH = fixture.dbPath;
   process.env.CODEX_SESSIONS_ROOT = path.join(fixture.root, '.codex', 'sessions');
 
-  const {updateScoreboard} = freshRequire('scripts/nlsdd-refresh-scoreboard.cjs');
+  const {updateScoreboard} = freshRequire('NLSDD/scripts/nlsdd-refresh-scoreboard.cjs');
   updateScoreboard();
 
   const scoreboardText = fs.readFileSync(process.env.NLSDD_SCOREBOARD_PATH, 'utf8');
@@ -270,7 +272,7 @@ test('scoreboard refresh v2 backfills effective phase and lane event metadata', 
 
 test('probe helper reports source changes, artifact noise, and verification commands', () => {
   const fixture = setupNlsddFixture();
-  const {probeLane} = freshRequire('scripts/nlsdd-probe-lane.cjs');
+  const {probeLane} = freshRequire('NLSDD/scripts/nlsdd-probe-lane.cjs');
 
   const result = probeLane(fixture.root, 'plot-mode', 'Lane 1');
 
@@ -290,7 +292,7 @@ test('probe helper reports source changes, artifact noise, and verification comm
 
 test('refill assistant suggests the next unchecked lane-local item for refill-ready lanes', () => {
   const fixture = setupNlsddFixture();
-  const scoreboardPath = path.join(fixture.root, 'plan', 'NLSDD', 'scoreboard.md');
+  const scoreboardPath = path.join(fixture.root, 'NLSDD', 'scoreboard.md');
   const scoreboardText = fs
     .readFileSync(scoreboardPath, 'utf8')
     .replace('manual-review-needed', 'refill-ready')
@@ -300,7 +302,7 @@ test('refill assistant suggests the next unchecked lane-local item for refill-re
   process.env.NLSDD_PROJECT_ROOT = fixture.root;
   process.env.NLSDD_SCOREBOARD_PATH = scoreboardPath;
 
-  const {suggestRefill} = freshRequire('scripts/nlsdd-suggest-refill.cjs');
+  const {suggestRefill} = freshRequire('NLSDD/scripts/nlsdd-suggest-refill.cjs');
   const suggestion = suggestRefill(fixture.root, 'plot-mode', 'Lane 1');
 
   assert.equal(suggestion.outcome, 'refill-target');
@@ -313,8 +315,8 @@ test('refill assistant suggests the next unchecked lane-local item for refill-re
 
 test('self-hosting schedule keeps the active thread cap at four and dispatches refill-ready lanes first', () => {
   const fixture = setupSelfHostingScheduleFixture();
-  const {computeExecutionSchedule} = freshRequire('scripts/nlsdd-lib.cjs');
-  const {renderSchedule} = freshRequire('scripts/nlsdd-suggest-schedule.cjs');
+  const {computeExecutionSchedule} = freshRequire('NLSDD/scripts/nlsdd-lib.cjs');
+  const {renderSchedule} = freshRequire('NLSDD/scripts/nlsdd-suggest-schedule.cjs');
 
   const schedule = computeExecutionSchedule(fixture.root, 'nlsdd-self-hosting', 4);
   const output = renderSchedule(schedule);
@@ -340,7 +342,7 @@ test('self-hosting schedule keeps the active thread cap at four and dispatches r
 });
 
 test('message helper renders correction-loop text without opening direct reviewer channels', () => {
-  const {composeMessage} = freshRequire('scripts/nlsdd-compose-message.cjs');
+  const {composeMessage} = freshRequire('NLSDD/scripts/nlsdd-compose-message.cjs');
   const message = composeMessage({
     phase: 'correction-loop',
     execution: 'plot-mode',

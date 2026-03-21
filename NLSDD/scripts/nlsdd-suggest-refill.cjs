@@ -72,7 +72,9 @@ function renderSuggestion(suggestion) {
 function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.execution) {
-    throw new Error('Usage: node scripts/nlsdd-suggest-refill.cjs --execution <id> [--lane <n>] [--json]');
+    throw new Error(
+      'Usage: node NLSDD/scripts/nlsdd-suggest-refill.cjs --execution <id> [--lane <n>] [--json]',
+    );
   }
   const result = suggestRefill(resolveProjectRoot(), args.execution, args.lane);
   if (args.json) {

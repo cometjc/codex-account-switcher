@@ -1,13 +1,13 @@
 # Lane 1 Plan - Scheduler Core
 
 > Ownership family:
-> `scripts/nlsdd-lib.cjs`, `scripts/nlsdd-suggest-schedule.cjs`
+> `NLSDD/scripts/nlsdd-lib.cjs`, `NLSDD/scripts/nlsdd-suggest-schedule.cjs`
 >
 > NLSDD worktree: `.worktrees/nlsdd-lane-1-scheduler`
 >
 > Lane-local verification:
 > `node --test tests/nlsdd-automation.test.js`
-> `node scripts/nlsdd-suggest-schedule.cjs --execution nlsdd-self-hosting --json`
+> `node NLSDD/scripts/nlsdd-suggest-schedule.cjs --execution nlsdd-self-hosting --json`
 
 ## M - Scheduling Semantics
 

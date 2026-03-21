@@ -74,7 +74,7 @@ function composeMessage(args) {
       ].join('\n');
     default:
       throw new Error(
-        'Usage: node scripts/nlsdd-compose-message.cjs --phase <implementer-assignment|spec-review|quality-review|correction-loop> ...',
+        'Usage: node NLSDD/scripts/nlsdd-compose-message.cjs --phase <implementer-assignment|spec-review|quality-review|correction-loop> ...',
       );
   }
 }

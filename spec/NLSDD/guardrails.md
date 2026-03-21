@@ -32,7 +32,7 @@ Use this file to keep NLSDD execution predictable, low-conflict, and easy to rev
   - a thread goes quiet longer than expected for the lane item
   - thread status and worktree status appear inconsistent
 - Probe checklist:
-  - `node scripts/nlsdd-probe-lane.cjs --execution <id> --lane <n>`
+  - `node NLSDD/scripts/nlsdd-probe-lane.cjs --execution <id> --lane <n>`
   - or, if the helper is unavailable, fall back to:
     - `git rev-parse --short HEAD`
     - `git status --short`
@@ -69,7 +69,7 @@ Use this file to keep NLSDD execution predictable, low-conflict, and easy to rev
   - spec review
   - quality review
   - correction loop
-- Prefer `node scripts/nlsdd-compose-message.cjs ...` to generate those templates consistently.
+- Prefer `node NLSDD/scripts/nlsdd-compose-message.cjs ...` to generate those templates consistently.
 - If correction loops exceed 2 rounds, escalate to coordinator arbitration.
 
 ## Required Handoff Format

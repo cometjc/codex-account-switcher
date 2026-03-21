@@ -12,27 +12,27 @@
 ## Lane Pool
 
 - [x] Lane 1: Scheduler Core
-  - Plan: `plan/NLSDD/executions/nlsdd-self-hosting/lane-1.md`
+  - Plan: `NLSDD/executions/nlsdd-self-hosting/lane-1.md`
   - Status: initial active set
 
 - [x] Lane 2: Scoreboard Integration
-  - Plan: `plan/NLSDD/executions/nlsdd-self-hosting/lane-2.md`
+  - Plan: `NLSDD/executions/nlsdd-self-hosting/lane-2.md`
   - Status: initial active set
 
 - [x] Lane 3: Rules and Communication
-  - Plan: `plan/NLSDD/executions/nlsdd-self-hosting/lane-3.md`
+  - Plan: `NLSDD/executions/nlsdd-self-hosting/lane-3.md`
   - Status: initial active set
 
 - [x] Lane 4: Regression and CLI Surface
-  - Plan: `plan/NLSDD/executions/nlsdd-self-hosting/lane-4.md`
+  - Plan: `NLSDD/executions/nlsdd-self-hosting/lane-4.md`
   - Status: initial active set
 
 - [x] Lane 5: Plot-Mode Execution Migration
-  - Plan: `plan/NLSDD/executions/nlsdd-self-hosting/lane-5.md`
+  - Plan: `NLSDD/executions/nlsdd-self-hosting/lane-5.md`
   - Status: queued follow-up lane
 
 - [x] Lane 6: Self-Hosting Follow-up and Coordinator Ergonomics
-  - Plan: `plan/NLSDD/executions/nlsdd-self-hosting/lane-6.md`
+  - Plan: `NLSDD/executions/nlsdd-self-hosting/lane-6.md`
   - Status: queued follow-up lane
 
 ## Refill Rules
