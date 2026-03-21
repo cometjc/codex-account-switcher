@@ -23,6 +23,7 @@
   - lane-local verification commands
 - Every execution must keep its runtime lane plans under `NLSDD/executions/<execution-id>/`.
 - Every execution may keep execution-aware lane runtime state under `NLSDD/state/<execution-id>/`.
+- Every execution may keep an append-only execution insights journal under `NLSDD/state/<execution-id>/execution-insights.ndjson`.
 - Every execution must have one canonical tracked row set in `NLSDD/scoreboard.md`.
 - Auto-refreshed runtime scoreboard output should be written under `NLSDD/state/`, not back into the tracked scoreboard.
 - The tracked scoreboard should keep only coordinator-owned manual fields; full auto-derived lane state belongs in the runtime scoreboard.
@@ -66,6 +67,7 @@
 - Auto-refresh tooling may rewrite the scoreboard's derived columns, but must not overwrite manual intent fields such as `Current item`, `Phase`, or `Blocked by`.
 - Runtime scoreboard generation may expand the tracked scoreboard into a richer derived table, but the tracked scoreboard itself should stay manual-only.
 - Lane journal files are the execution-aware runtime source of truth for phase transitions, latest commit metadata, and next expected gate when those details need to survive across probes, reviews, and worktree-local invocations.
+- Execution insights journals are the append-only runtime source for sub-agent suggestions, coordinator observations, and improvement opportunities discovered during execution. They complement lane journals and must not replace current lane phase/state.
 
 ## Review Rules
 
@@ -131,6 +133,24 @@
   - `updatedAt`
 - Scoreboard refresh, schedule suggestion, and lane probes should prefer lane journal state over cross-thread heuristics when the journal exists.
 - If lane plans or worktrees go missing, automation should degrade explicitly rather than silently reusing stale derived values.
+
+## Execution Insights Contract
+
+- Each execution insights entry should record, at minimum:
+  - `timestamp`
+  - `execution`
+  - `lane` or `global`
+  - `source` (`subagent` or `coordinator`)
+  - `kind` (`suggestion`, `observed-issue`, or `improvement-opportunity`)
+  - `status` (`open`, `adopted`, `rejected`, or `resolved`)
+  - `summary`
+- Optional fields may include:
+  - `detail`
+  - `relatedLane`
+  - `relatedCommit`
+  - `relatedAgent`
+  - `recordedBy`
+- Use execution insights to preserve dynamic execution learnings that do not fit cleanly into lane state, such as blocker remediation suggestions, coordination drift, or workflow optimization ideas.
 
 ## Current Repo Defaults
 

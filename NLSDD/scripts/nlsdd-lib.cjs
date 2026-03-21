@@ -51,6 +51,31 @@ function resolveProjectRoot() {
   return process.cwd();
 }
 
+function resolveWorktreePoolRoot(projectRoot = resolveProjectRoot()) {
+  if (process.env.NLSDD_WORKTREE_POOL_ROOT) {
+    return process.env.NLSDD_WORKTREE_POOL_ROOT;
+  }
+
+  try {
+    const commonDir = execFileSync(
+      'git',
+      ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+      {
+        cwd: projectRoot,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    ).trim();
+    if (commonDir) {
+      return path.basename(commonDir) === '.git' ? path.dirname(commonDir) : commonDir;
+    }
+  } catch {
+    // Fall back to the execution root when git metadata is unavailable.
+  }
+
+  return projectRoot;
+}
+
 function isPathWithin(basePath, candidatePath) {
   const resolvedBase = path.resolve(basePath);
   const resolvedCandidate = path.resolve(candidatePath);
@@ -82,6 +107,13 @@ function resolvePreferredScoreboardPath(projectRoot = resolveProjectRoot()) {
     return runtimeScoreboardPath;
   }
   return resolveScoreboardPath(projectRoot);
+}
+
+function executionInsightsPath(projectRoot, execution) {
+  if (!projectRoot || !execution) {
+    return null;
+  }
+  return path.join(projectRoot, 'NLSDD', 'state', execution, 'execution-insights.ndjson');
 }
 
 function resolveCodexStateDbPath() {
@@ -248,11 +280,17 @@ function loadLanePlan(projectRoot, execution, lane) {
   }
   const text = fs.readFileSync(filePath, 'utf8');
   const parsed = parseLanePlan(text);
+  const worktreePoolRoot = resolveWorktreePoolRoot(projectRoot);
+  const worktreePath = !parsed.worktreeRelativePath
+    ? null
+    : path.isAbsolute(parsed.worktreeRelativePath)
+      ? parsed.worktreeRelativePath
+      : path.join(worktreePoolRoot, parsed.worktreeRelativePath);
   return {
     filePath,
     text,
     ...parsed,
-    worktreePath: parsed.worktreeRelativePath ? path.join(projectRoot, parsed.worktreeRelativePath) : null,
+    worktreePath,
   };
 }
 
@@ -711,9 +749,11 @@ function computeExecutionSchedule(projectRoot, execution, maxActiveThreads = 4) 
 module.exports = {
   findNearestNlsddRoot,
   resolveProjectRoot,
+  resolveWorktreePoolRoot,
   resolveScoreboardPath,
   resolveRuntimeScoreboardPath,
   resolvePreferredScoreboardPath,
+  executionInsightsPath,
   resolveCodexStateDbPath,
   resolveCodexSessionsRoot,
   run,

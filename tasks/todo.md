@@ -46,6 +46,21 @@
   - NLSDD subagent：預設不自己 `git commit`，而是交 `READY_TO_COMMIT`
   - 只有 lane 明確標示 self-commit-safe 才能例外
 
+# 2026-03-21 NLSDD execution insights journal
+
+- [x] 新增 execution-level insights journal，記錄 subagent 建議、coordinator/main agent 觀察到的問題，以及執行期間發現的改善機會
+- [x] 新增 `nlsdd-record-insight` helper，將 insight 以 append-only runtime artifact 寫入 `NLSDD/state/<execution>/execution-insights.ndjson`
+- [x] 更新 `spec/NLSDD` 與 `NLSDD/AGENTS.md`，明確區分 lane state 與 execution insights 的責任
+- [x] 補測試，確認 subagent 與 coordinator 都能正確 append insight entries
+
+## Review
+
+- 目前 lane journal 只適合放「現在這條 lane 是什麼狀態」，不適合承接動態建議、觀察到的流程問題、或執行中才浮現的改善方向。
+- 這次補上的 `execution-insights.ndjson` 讓兩種資訊都能留下來：
+  - subagent 的 remediation suggestion
+  - main agent/coordinator 在執行期觀察到的流程或治理問題
+- 它是 append-only runtime artifact，不會和 tracked docs 的穩定定義混在一起，也不會讓 lane state JSON 膨脹成半個事件流。
+
 ## Review
 
 - 根因不是 subagent 卡死，而是 lane item 已經完成到只剩 `git commit`，但執行環境會跳 permission prompt；若這時 subagent 沒先回報，coordinator 只看 thread 會像是「人突然不動了」。

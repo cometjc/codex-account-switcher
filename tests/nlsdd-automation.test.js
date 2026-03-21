@@ -718,6 +718,59 @@ test('lane state recorder writes execution-aware journal files for coordinator t
   assert.equal(state.updatedAt, '2026-03-21T04:20:00.000Z');
 });
 
+test('execution insight recorder appends subagent and coordinator learnings into runtime insights journal', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-insight-'));
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  const {recordInsight} = freshRequire('NLSDD/scripts/nlsdd-record-insight.cjs');
+
+  const first = recordInsight(root, {
+    execution: 'plot-mode',
+    lane: '4',
+    source: 'subagent',
+    kind: 'suggestion',
+    status: 'open',
+    summary: 'Need render-boundary compare payload in Lane 2',
+    detail: 'Lane 4 cannot consume the richer compare seam until render/mod.rs exposes it.',
+    'related-lane': '2',
+    'related-agent': 'Rawls',
+    timestamp: '2026-03-21T07:30:00.000Z',
+  });
+
+  const second = recordInsight(root, {
+    execution: 'plot-mode',
+    lane: 'global',
+    source: 'coordinator',
+    kind: 'observed-issue',
+    status: 'adopted',
+    summary: 'Commit responsibility must be split by role',
+    detail: 'Main agent direct work can auto-commit; NLSDD subagents should default to READY_TO_COMMIT.',
+    'related-commit': 'cd5070c',
+    'recorded-by': 'main-agent',
+    timestamp: '2026-03-21T07:31:00.000Z',
+  });
+
+  assert.equal(first.filePath, second.filePath);
+  const lines = fs.readFileSync(first.filePath, 'utf8').trim().split('\n');
+  assert.equal(lines.length, 2);
+
+  const firstEntry = JSON.parse(lines[0]);
+  assert.equal(firstEntry.execution, 'plot-mode');
+  assert.equal(firstEntry.lane, 'Lane 4');
+  assert.equal(firstEntry.source, 'subagent');
+  assert.equal(firstEntry.kind, 'suggestion');
+  assert.equal(firstEntry.relatedLane, 'Lane 2');
+  assert.equal(firstEntry.relatedAgent, 'Rawls');
+
+  const secondEntry = JSON.parse(lines[1]);
+  assert.equal(secondEntry.lane, 'global');
+  assert.equal(secondEntry.source, 'coordinator');
+  assert.equal(secondEntry.kind, 'observed-issue');
+  assert.equal(secondEntry.status, 'adopted');
+  assert.equal(secondEntry.relatedCommit, 'cd5070c');
+  assert.equal(secondEntry.recordedBy, 'main-agent');
+});
+
 test('active-set replan helper updates tracked phases and lane journals atomically', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-replan-'));
   process.env.NLSDD_PROJECT_ROOT = root;

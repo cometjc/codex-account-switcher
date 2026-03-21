@@ -81,6 +81,7 @@ Use this file to keep NLSDD execution predictable, low-conflict, and easy to rev
 - Prefer `node NLSDD/scripts/nlsdd-compose-message.cjs ...` to generate those templates consistently.
 - If correction loops exceed 2 rounds, escalate to coordinator arbitration.
 - When coordinator records a new lane state after review, correction, or blockage, prefer `node NLSDD/scripts/nlsdd-record-lane-state.cjs ...` over hand-editing journal JSON.
+- When a sub-agent suggests a remediation, or coordinator notices a workflow issue or optimization opportunity during execution, prefer `node NLSDD/scripts/nlsdd-record-insight.cjs ...` over burying that observation only in thread history.
 - When coordinator needs a refreshed scoreboard snapshot, prefer `npm run nlsdd:scoreboard:refresh` and inspect `NLSDD/state/scoreboard.runtime.md` rather than staging runtime churn from the tracked scoreboard.
 - When coordinator changes the active/parked lane set for an execution, prefer `npm run nlsdd:active-set:replan -- --execution <id> --active ... --parked ...` so tracked `Phase` values and lane journals stay aligned.
 - Implementer assignments for NLSDD sub-agents should tell them not to run `git commit` themselves unless the lane explicitly says self-commit is allowed. The default end state is `READY_TO_COMMIT` with verification results and commit-ready handoff details.
@@ -100,6 +101,7 @@ Use this file to keep NLSDD execution predictable, low-conflict, and easy to rev
 - Suggested remediation when blocked or when a recurring workflow problem is detected
 - If commit is pending due to an environment prompt or expected permission gate, say so explicitly instead of remaining silent
 - If coordinator commit is needed, include a proposed commit title/body summary so the coordinator can commit without another clarification round
+- If the handoff includes a broader process suggestion, execution insight, or improvement opportunity, coordinator should also append it into the execution insights journal.
 
 ## Batch Tracking Policy
 

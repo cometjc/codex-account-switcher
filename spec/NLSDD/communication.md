@@ -59,6 +59,16 @@
   - optional fallback suggestions if there is a clearly safer second choice
 - Reviewers may also attach a workflow suggestion when the blocker is not source-code scope but orchestration noise, for example tracked `target/` artifacts making review harder.
 - Coordinator remains the decision-maker; suggestions are advisory, not implicit approval.
+- If the blocker or suggestion reveals a reusable execution insight, coordinator should append it into `NLSDD/state/<execution>/execution-insights.ndjson` so it survives beyond the transient thread.
+
+## Execution Insight Reporting
+
+- Use the execution insights journal for three kinds of runtime learnings:
+  - sub-agent suggestions
+  - coordinator-observed issues
+  - improvement opportunities discovered during execution
+- Insights are append-only runtime artifacts. They preserve dynamic learnings without overloading lane-state JSON or tracked docs.
+- Insights should be concise enough to scan later, but specific enough to support a follow-up decision.
 
 ## Coordinator Templates
 
