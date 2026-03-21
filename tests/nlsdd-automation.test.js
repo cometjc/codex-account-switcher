@@ -775,6 +775,62 @@ test('execution insight recorder appends subagent and coordinator learnings into
   assert.equal(secondEntry.recordedBy, 'main-agent');
 });
 
+test('execution insight summary helper groups actionable insights and converged schema kinds', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-insight-summary-'));
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  const {recordInsight} = freshRequire('NLSDD/scripts/nlsdd-record-insight.cjs');
+  const {summarizeExecutionInsights} = freshRequire('NLSDD/scripts/nlsdd-lib.cjs');
+  const {renderInsightSummary} = freshRequire('NLSDD/scripts/nlsdd-summarize-insights.cjs');
+
+  recordInsight(root, {
+    execution: 'plot-mode',
+    lane: '2',
+    source: 'subagent',
+    kind: 'blocker',
+    status: 'open',
+    summary: 'Need render boundary compare payload',
+    timestamp: '2026-03-21T08:00:00.000Z',
+  });
+  recordInsight(root, {
+    execution: 'plot-mode',
+    lane: '3',
+    source: 'coordinator',
+    kind: 'noop-finding',
+    status: 'adopted',
+    summary: 'Lane 3 follow-up is a real no-op',
+    timestamp: '2026-03-21T08:01:00.000Z',
+  });
+  recordInsight(root, {
+    execution: 'plot-mode',
+    lane: 'global',
+    source: 'coordinator',
+    kind: 'resolved-blocker',
+    status: 'resolved',
+    summary: 'Scheduler truth drift fixed',
+    timestamp: '2026-03-21T08:02:00.000Z',
+  });
+
+  const summary = summarizeExecutionInsights(root, 'plot-mode');
+  assert.equal(summary.total, 3);
+  assert.equal(summary.actionableCount, 2);
+  assert.equal(summary.countsByKind.blocker, 1);
+  assert.equal(summary.countsByKind['noop-finding'], 1);
+  assert.equal(summary.countsByKind['resolved-blocker'], 1);
+  assert.deepEqual(
+    summary.actionable.map((entry) => [entry.lane, entry.kind, entry.status]),
+    [
+      ['Lane 3', 'noop-finding', 'adopted'],
+      ['Lane 2', 'blocker', 'open'],
+    ],
+  );
+
+  const rendered = renderInsightSummary(summary);
+  assert.match(rendered, /Actionable insights: 2/);
+  assert.match(rendered, /\[adopted\] Lane 3 · noop-finding · Lane 3 follow-up is a real no-op/);
+  assert.match(rendered, /\[open\] Lane 2 · blocker · Need render boundary compare payload/);
+});
+
 test('active-set replan helper updates tracked phases and lane journals atomically', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-replan-'));
   process.env.NLSDD_PROJECT_ROOT = root;
@@ -1254,15 +1310,16 @@ test('review loop driver returns coordinator-ready bundles for review and correc
   const {driveReviewLoop} = freshRequire('NLSDD/scripts/nlsdd-drive-review-loop.cjs');
   const result = driveReviewLoop(root, 'plot-mode');
 
-  assert.equal(result.length, 2);
-  assert.equal(result[0].lane, 'Lane 2');
-  assert.equal(result[0].action, 'spec-review');
-  assert.match(result[0].message, /Review target commit: abc1234/);
+  assert.equal(result.actions.length, 2);
+  assert.equal(result.insightSummary.actionableCount, 0);
+  assert.equal(result.actions[0].lane, 'Lane 2');
+  assert.equal(result.actions[0].action, 'spec-review');
+  assert.match(result.actions[0].message, /Review target commit: abc1234/);
 
-  assert.equal(result[1].lane, 'Lane 4');
-  assert.equal(result[1].action, 'correction-loop');
-  assert.match(result[1].message, /Reviewer finding: Compare panel still re-derives label heuristics/);
-  assert.match(result[1].message, /Accepted write scope: rust\/plot-viewer\/src\/render\/panels\.rs/);
+  assert.equal(result.actions[1].lane, 'Lane 4');
+  assert.equal(result.actions[1].action, 'correction-loop');
+  assert.match(result.actions[1].message, /Reviewer finding: Compare panel still re-derives label heuristics/);
+  assert.match(result.actions[1].message, /Accepted write scope: rust\/plot-viewer\/src\/render\/panels\.rs/);
 });
 
 test('ready-to-commit intake helper returns structured coordinator commit bundle', () => {
@@ -1438,6 +1495,17 @@ test('coordinator loop combines launch, review, and commit intake into one summa
     'updated-at': '2026-03-21T11:32:00.000Z',
   });
 
+  const {recordInsight} = freshRequire('NLSDD/scripts/nlsdd-record-insight.cjs');
+  recordInsight(root, {
+    execution: 'plot-mode',
+    lane: '2',
+    source: 'coordinator',
+    kind: 'blocker',
+    status: 'open',
+    summary: 'Lane 4 still needs compare payload seam from Lane 2',
+    timestamp: '2026-03-21T11:33:00.000Z',
+  });
+
   const {runCoordinatorLoop} = freshRequire('NLSDD/scripts/nlsdd-run-coordinator-loop.cjs');
   const result = runCoordinatorLoop(root, 'plot-mode', 4, false);
 
@@ -1445,6 +1513,8 @@ test('coordinator loop combines launch, review, and commit intake into one summa
   assert.equal(result.launch.assignments.length, 1);
   assert.equal(result.reviewLaneCount, 2);
   assert.equal(result.commitLaneCount, 1);
+  assert.equal(result.insightSummary.actionableCount, 1);
+  assert.equal(result.insightSummary.actionable[0].summary, 'Lane 4 still needs compare payload seam from Lane 2');
   assert.equal(result.reviewActions.some((entry) => entry.lane === 'Lane 3' && entry.action === 'spec-review'), true);
   assert.equal(result.reviewActions.some((entry) => entry.lane === 'Lane 5' && entry.action === 'coordinator-commit-needed'), true);
   assert.equal(result.commitIntake[0].lane, 'Lane 5');
@@ -1559,10 +1629,22 @@ test('dispatch plan helper builds a prioritized action queue from autopilot outp
     'updated-at': '2026-03-21T11:42:00.000Z',
   });
 
+  const {recordInsight} = freshRequire('NLSDD/scripts/nlsdd-record-insight.cjs');
+  recordInsight(root, {
+    execution: 'plot-mode',
+    lane: 'global',
+    source: 'coordinator',
+    kind: 'improvement-opportunity',
+    status: 'open',
+    summary: 'Review queue should keep compare-panel blocker visible',
+    timestamp: '2026-03-21T11:43:00.000Z',
+  });
+
   const {buildDispatchPlan} = freshRequire('NLSDD/scripts/nlsdd-build-dispatch-plan.cjs');
   const result = buildDispatchPlan(root, 'plot-mode', 4, false);
 
   assert.equal(result.queue.length, 3);
+  assert.equal(result.insightSummary.actionableCount, 1);
   assert.deepEqual(
     result.queue.map((entry) => [entry.kind, entry.lane]),
     [
@@ -1577,4 +1659,68 @@ test('dispatch plan helper builds a prioritized action queue from autopilot outp
   assert.match(result.queue[0].message, /Proposed commit title: docs\(plot\): 補上 recovery baseline 操作說明/);
   assert.match(result.queue[1].message, /Reviewer finding: Chart wording still needs correction/);
   assert.match(result.queue[2].message, /Lane item intent: Runtime compare seam follow-up/);
+});
+
+test('review helper surfaces actionable execution insights alongside review actions', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-review-insights-'));
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  fs.mkdirSync(path.join(root, 'NLSDD', 'executions', 'plot-mode'), {recursive: true});
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-3.md'),
+    `# Lane 3
+
+> Ownership family:
+> \`rust/plot-viewer/src/render/chart.rs\`
+>
+> NLSDD worktree: \`.worktrees/lane-3-chart\`
+>
+> Lane-local verification:
+> \`cargo check --manifest-path rust/plot-viewer/Cargo.toml\`
+
+## C - Controller
+
+- [ ] Chart compatibility follow-up
+`,
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'scoreboard.md'),
+    `# NLSDD Scoreboard
+
+| Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| plot-mode | Lane 3 | Rust chart surface | Chart compatibility follow-up | correction | \`abc1234\` | \`cargo check --manifest-path rust/plot-viewer/Cargo.toml\` | none | none | review row |
+`,
+    'utf8',
+  );
+  writeLaneState(root, 'plot-mode', 3, {
+    execution: 'plot-mode',
+    lane: 'Lane 3',
+    phase: 'correction',
+    'expected-next-phase': 'spec-review-pending',
+    commit: 'abc1234',
+    verification: ['cargo check --manifest-path rust/plot-viewer/Cargo.toml'],
+    note: 'Chart wording still needs correction',
+    'updated-at': '2026-03-21T11:41:00.000Z',
+  });
+
+  const {recordInsight} = freshRequire('NLSDD/scripts/nlsdd-record-insight.cjs');
+  recordInsight(root, {
+    execution: 'plot-mode',
+    lane: '3',
+    source: 'coordinator',
+    kind: 'observed-issue',
+    status: 'open',
+    summary: 'Review prompts should inspect open execution insights',
+    timestamp: '2026-03-21T11:44:00.000Z',
+  });
+
+  const {driveReviewLoop, renderActions} = freshRequire('NLSDD/scripts/nlsdd-drive-review-loop.cjs');
+  const result = driveReviewLoop(root, 'plot-mode');
+
+  assert.equal(result.actions.length, 1);
+  assert.equal(result.insightSummary.actionableCount, 1);
+  assert.match(renderActions(result), /Actionable insights: 1/);
+  assert.match(renderActions(result), /Review prompts should inspect open execution insights/);
 });

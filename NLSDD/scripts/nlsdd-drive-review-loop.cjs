@@ -7,6 +7,7 @@ const {
   loadLaneState,
   resolvePreferredScoreboardPath,
   resolveProjectRoot,
+  summarizeExecutionInsights,
 } = require('./nlsdd-lib.cjs');
 const {composeMessage} = require('./nlsdd-compose-message.cjs');
 
@@ -131,7 +132,7 @@ function driveReviewLoop(projectRoot, execution, lane = null) {
     (row) => row.Execution === execution && (!lane || row.Lane === lane),
   );
 
-  return rows
+  const actions = rows
     .map((row) => {
       const context = buildContext(projectRoot, execution, row);
       const action = buildAction(context);
@@ -149,20 +150,43 @@ function driveReviewLoop(projectRoot, execution, lane = null) {
       };
     })
     .filter(Boolean);
+
+  return {
+    execution,
+    lane: lane || null,
+    actions,
+    insightSummary: summarizeExecutionInsights(projectRoot, execution),
+  };
 }
 
-function renderActions(actions) {
-  if (actions.length === 0) {
+function renderActions(result) {
+  const actions = Array.isArray(result) ? result : result.actions;
+  const insightSummary = Array.isArray(result) ? null : result.insightSummary;
+  if (actions.length === 0 && (!insightSummary || insightSummary.actionableCount === 0)) {
     return 'Review actions: none';
   }
 
-  return [
-    'Review actions:',
-    ...actions.flatMap((entry) => [
-      `- ${entry.lane} · ${entry.action} · ${entry.item}`,
-      ...entry.message.split('\n').map((line) => `  ${line}`),
-    ]),
-  ].join('\n');
+  const lines = [];
+  if (actions.length === 0) {
+    lines.push('Review actions: none');
+  } else {
+    lines.push(
+      'Review actions:',
+      ...actions.flatMap((entry) => [
+        `- ${entry.lane} · ${entry.action} · ${entry.item}`,
+        ...entry.message.split('\n').map((line) => `  ${line}`),
+      ]),
+    );
+  }
+
+  if (insightSummary && insightSummary.actionable.length > 0) {
+    lines.push(`Actionable insights: ${insightSummary.actionableCount}`);
+    for (const entry of insightSummary.actionable) {
+      lines.push(`- [${entry.status}] ${entry.lane} · ${entry.kind} · ${entry.summary}`);
+    }
+  }
+
+  return lines.join('\n');
 }
 
 function main() {
@@ -173,12 +197,12 @@ function main() {
     );
   }
 
-  const actions = driveReviewLoop(resolveProjectRoot(), args.execution, args.lane);
+  const result = driveReviewLoop(resolveProjectRoot(), args.execution, args.lane);
   if (args.json) {
-    process.stdout.write(`${JSON.stringify(actions, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return;
   }
-  process.stdout.write(`${renderActions(actions)}\n`);
+  process.stdout.write(`${renderActions(result)}\n`);
 }
 
 if (require.main === module) {

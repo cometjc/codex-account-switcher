@@ -99,6 +99,7 @@ function buildDispatchPlan(projectRoot, execution, maxActive = 4, dryRun = false
     maxActiveThreads: maxActive,
     dryRun,
     autopilot,
+    insightSummary: autopilot.insightSummary,
     queue,
     idleSlots: autopilot.idleSlots,
   };
@@ -111,6 +112,7 @@ function renderDispatchPlan(result) {
     `Dry run: ${result.dryRun ? 'yes' : 'no'}`,
     `Idle slots: ${result.idleSlots}`,
     `Action queue: ${result.queue.length}`,
+    `Actionable insights: ${result.insightSummary.actionableCount}`,
   ];
 
   if (result.queue.length === 0) {

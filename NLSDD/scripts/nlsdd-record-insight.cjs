@@ -2,7 +2,13 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const {executionInsightsPath, resolveProjectRoot} = require('./nlsdd-lib.cjs');
+const {
+  INSIGHT_KINDS,
+  INSIGHT_STATUSES,
+  executionInsightsPath,
+  normalizeInsightLane,
+  resolveProjectRoot,
+} = require('./nlsdd-lib.cjs');
 
 function parseArgs(argv) {
   const args = {};
@@ -49,16 +55,6 @@ function parseArgs(argv) {
   return args;
 }
 
-function normalizeLane(value) {
-  if (!value) {
-    return 'global';
-  }
-  if (value === 'global') {
-    return value;
-  }
-  return `Lane ${value}`.replace(/^Lane\s+Lane\s+/, 'Lane ');
-}
-
 function recordInsight(projectRoot, args) {
   if (!args.execution || !args.source || !args.kind || !args.summary) {
     throw new Error(
@@ -71,17 +67,28 @@ function recordInsight(projectRoot, args) {
     throw new Error(`Could not resolve execution insights path for ${args.execution}`);
   }
 
+  if (!INSIGHT_KINDS.includes(args.kind)) {
+    throw new Error(
+      `Unknown insight kind "${args.kind}". Expected one of: ${INSIGHT_KINDS.join(', ')}`,
+    );
+  }
+  if (args.status && !INSIGHT_STATUSES.includes(args.status)) {
+    throw new Error(
+      `Unknown insight status "${args.status}". Expected one of: ${INSIGHT_STATUSES.join(', ')}`,
+    );
+  }
+
   fs.mkdirSync(path.dirname(filePath), {recursive: true});
   const entry = {
     timestamp: args.timestamp || new Date().toISOString(),
     execution: args.execution,
-    lane: normalizeLane(args.lane),
+    lane: normalizeInsightLane(args.lane),
     source: args.source,
     kind: args.kind,
     status: args.status || 'open',
     summary: args.summary,
     detail: args.detail || null,
-    relatedLane: normalizeLane(args['related-lane'] || args.lane || 'global'),
+    relatedLane: normalizeInsightLane(args['related-lane'] || args.lane || 'global'),
     relatedCommit: args['related-commit'] || null,
     relatedAgent: args['related-agent'] || null,
     recordedBy: args['recorded-by'] || 'coordinator',
@@ -94,7 +101,7 @@ function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.execution || !args.source || !args.kind || !args.summary) {
     throw new Error(
-      'Usage: node NLSDD/scripts/nlsdd-record-insight.cjs --execution <id> --source <subagent|coordinator> --kind <suggestion|observed-issue|improvement-opportunity> --summary <text> [--lane <lane|global>] [--status <open|adopted|rejected|resolved>] [--detail <text>] [--related-lane <lane|global>] [--related-commit <sha>] [--related-agent <name>] [--recorded-by <name>] [--timestamp <iso>]',
+      'Usage: node NLSDD/scripts/nlsdd-record-insight.cjs --execution <id> --source <subagent|coordinator> --kind <suggestion|observed-issue|improvement-opportunity|noop-finding|blocker|resolved-blocker> --summary <text> [--lane <lane|global>] [--status <open|adopted|rejected|resolved>] [--detail <text>] [--related-lane <lane|global>] [--related-commit <sha>] [--related-agent <name>] [--recorded-by <name>] [--timestamp <iso>]',
     );
   }
   const {filePath} = recordInsight(resolveProjectRoot(), args);

@@ -70,6 +70,8 @@
   - improvement opportunities discovered during execution
 - Insights are append-only runtime artifacts. They preserve dynamic learnings without overloading lane-state JSON or tracked docs.
 - Insights should be concise enough to scan later, but specific enough to support a follow-up decision.
+- When an NLSDD flow prompt includes `review`, coordinator should inspect and summarize the execution insights journal as part of that pass, then decide whether each open/adopted insight stays exploratory, becomes a lane item, or can be resolved/rejected.
+- Review/autopilot helpers may surface open/adopted insights inline, but they should not auto-close them without an explicit coordinator decision.
 
 ## Coordinator Templates
 

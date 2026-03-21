@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const {resolveProjectRoot} = require('./nlsdd-lib.cjs');
+const {resolveProjectRoot, summarizeExecutionInsights} = require('./nlsdd-lib.cjs');
 const {launchActiveSet} = require('./nlsdd-launch-active-set.cjs');
 const {driveReviewLoop} = require('./nlsdd-drive-review-loop.cjs');
 const {intakeReadyToCommit} = require('./nlsdd-intake-ready-to-commit.cjs');
@@ -26,8 +26,10 @@ function parseArgs(argv) {
 
 function runCoordinatorLoop(projectRoot, execution, maxActive = 4, dryRun = false) {
   const launch = launchActiveSet(projectRoot, execution, maxActive, dryRun);
-  const reviewActions = driveReviewLoop(projectRoot, execution);
+  const reviewResult = driveReviewLoop(projectRoot, execution);
+  const reviewActions = reviewResult.actions;
   const commitIntake = intakeReadyToCommit(projectRoot, execution);
+  const insightSummary = reviewResult.insightSummary || summarizeExecutionInsights(projectRoot, execution);
   return {
     execution,
     maxActiveThreads: maxActive,
@@ -35,6 +37,7 @@ function runCoordinatorLoop(projectRoot, execution, maxActive = 4, dryRun = fals
     launch,
     reviewActions,
     commitIntake,
+    insightSummary,
     idleSlots: launch.idleSlots,
     completedLanes: launch.completedLanes,
     promotedLanes: launch.promoted.map((entry) => entry.lane),
@@ -54,6 +57,7 @@ function renderCoordinatorLoop(result) {
     `Idle slots: ${result.idleSlots}`,
     `Review actions: ${result.reviewLaneCount}`,
     `Commit intakes: ${result.commitLaneCount}`,
+    `Actionable insights: ${result.insightSummary.actionableCount}`,
   ];
 
   if (result.noDispatchReason) {
@@ -78,6 +82,13 @@ function renderCoordinatorLoop(result) {
     lines.push('Commit-ready lanes:');
     for (const entry of result.commitIntake) {
       lines.push(`- ${entry.lane}: ${entry.proposedCommitTitle || 'n/a'}`);
+    }
+  }
+
+  if (result.insightSummary.actionable.length > 0) {
+    lines.push('Execution insights:');
+    for (const entry of result.insightSummary.actionable) {
+      lines.push(`- [${entry.status}] ${entry.lane}: ${entry.summary}`);
     }
   }
 

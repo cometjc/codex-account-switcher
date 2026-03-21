@@ -61,6 +61,20 @@
   - main agent/coordinator 在執行期觀察到的流程或治理問題
 - 它是 append-only runtime artifact，不會和 tracked docs 的穩定定義混在一起，也不會讓 lane state JSON 膨脹成半個事件流。
 
+# 2026-03-21 NLSDD execution insights review integration
+
+- [x] 將 execution-insights schema 與實際 runtime 用法對齊，補上 blocker / noop 類型
+- [x] 新增 `nlsdd-summarize-insights` helper，整理 open / adopted insights 給 coordinator 快速檢視
+- [x] 讓 `nlsdd:review` / `nlsdd:autopilot` / `nlsdd:dispatch-plan` surface execution-insights 摘要
+- [x] 新增規則：NLSDD flow 遇到 `review` prompt 時，要同步檢視並規劃處理 execution-insights journal
+
+## Review
+
+- 根因不是 journal 沒有資料，而是它只有 append path，幾乎沒有 read/use path，導致很多 runtime learnings 雖然被記下來，卻沒有真的進入 coordinator 的日常判斷面。
+- 這次先把 schema 和真實使用收斂：`kind` 正式納入 `noop-finding`、`blocker`、`resolved-blocker`，避免 spec 和 runtime state 繼續漂移。
+- 接著新增 `nlsdd-summarize-insights`，讓 coordinator 可以快速看某個 execution 的 open / adopted insights，而不是直接掃 `ndjson`。
+- 最後把 insight summary 接進 `review`、`autopilot`、`dispatch-plan`，讓 execution insights 不再只是埋在 runtime artifact 裡，而會成為 review 時自然可見的一部分。
+
 # 2026-03-21 plot-mode 4a 執行追蹤同步
 
 - [x] 將 Lane 2 runtime navigation regression `1fd4db4` 的接受結果同步回 tracked execution docs

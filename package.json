@@ -15,6 +15,7 @@
     "nlsdd:probe": "node NLSDD/scripts/nlsdd-probe-lane.cjs",
     "nlsdd:state:record": "node NLSDD/scripts/nlsdd-record-lane-state.cjs",
     "nlsdd:insight:record": "node NLSDD/scripts/nlsdd-record-insight.cjs",
+    "nlsdd:insights:summarize": "node NLSDD/scripts/nlsdd-summarize-insights.cjs",
     "nlsdd:active-set:replan": "node NLSDD/scripts/nlsdd-replan-active-set.cjs",
     "nlsdd:refill:suggest": "node NLSDD/scripts/nlsdd-suggest-refill.cjs",
     "nlsdd:schedule:suggest": "node NLSDD/scripts/nlsdd-suggest-schedule.cjs",

@@ -3,6 +3,17 @@ const os = require('node:os');
 const path = require('node:path');
 const {execFileSync} = require('node:child_process');
 
+const INSIGHT_KINDS = [
+  'suggestion',
+  'observed-issue',
+  'improvement-opportunity',
+  'noop-finding',
+  'blocker',
+  'resolved-blocker',
+];
+
+const INSIGHT_STATUSES = ['open', 'adopted', 'rejected', 'resolved'];
+
 function findNearestNlsddRoot(startPath = process.cwd()) {
   let currentPath = path.resolve(startPath);
 
@@ -114,6 +125,64 @@ function executionInsightsPath(projectRoot, execution) {
     return null;
   }
   return path.join(projectRoot, 'NLSDD', 'state', execution, 'execution-insights.ndjson');
+}
+
+function normalizeInsightLane(value) {
+  if (!value) {
+    return 'global';
+  }
+  if (value === 'global') {
+    return value;
+  }
+  return `Lane ${value}`.replace(/^Lane\s+Lane\s+/, 'Lane ');
+}
+
+function loadExecutionInsights(projectRoot, execution) {
+  const filePath = executionInsightsPath(projectRoot, execution);
+  if (!filePath || !fs.existsSync(filePath)) {
+    return [];
+  }
+
+  return fs
+    .readFileSync(filePath, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        const parsed = JSON.parse(line);
+        return {
+          ...parsed,
+          lane: normalizeInsightLane(parsed.lane),
+          relatedLane: normalizeInsightLane(parsed.relatedLane),
+        };
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .sort((left, right) => new Date(right.timestamp) - new Date(left.timestamp));
+}
+
+function summarizeExecutionInsights(projectRoot, execution, limit = 5) {
+  const entries = loadExecutionInsights(projectRoot, execution);
+  const countsByStatus = Object.fromEntries(INSIGHT_STATUSES.map((status) => [status, 0]));
+  const countsByKind = Object.fromEntries(INSIGHT_KINDS.map((kind) => [kind, 0]));
+
+  for (const entry of entries) {
+    countsByStatus[entry.status] = (countsByStatus[entry.status] || 0) + 1;
+    countsByKind[entry.kind] = (countsByKind[entry.kind] || 0) + 1;
+  }
+
+  const actionable = entries.filter((entry) => ['open', 'adopted'].includes(entry.status));
+  return {
+    execution,
+    total: entries.length,
+    actionableCount: actionable.length,
+    countsByStatus,
+    countsByKind,
+    actionable: actionable.slice(0, limit),
+    latest: entries.slice(0, limit),
+  };
 }
 
 function resolveCodexStateDbPath() {
@@ -819,6 +888,8 @@ function computeExecutionSchedule(projectRoot, execution, maxActiveThreads = 4) 
 }
 
 module.exports = {
+  INSIGHT_KINDS,
+  INSIGHT_STATUSES,
   findNearestNlsddRoot,
   resolveProjectRoot,
   resolveWorktreePoolRoot,
@@ -826,6 +897,9 @@ module.exports = {
   resolveRuntimeScoreboardPath,
   resolvePreferredScoreboardPath,
   executionInsightsPath,
+  normalizeInsightLane,
+  loadExecutionInsights,
+  summarizeExecutionInsights,
   resolveCodexStateDbPath,
   resolveCodexSessionsRoot,
   run,

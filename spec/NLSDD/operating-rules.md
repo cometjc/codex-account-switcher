@@ -152,7 +152,7 @@
   - `execution`
   - `lane` or `global`
   - `source` (`subagent` or `coordinator`)
-  - `kind` (`suggestion`, `observed-issue`, or `improvement-opportunity`)
+  - `kind` (`suggestion`, `observed-issue`, `improvement-opportunity`, `noop-finding`, `blocker`, or `resolved-blocker`)
   - `status` (`open`, `adopted`, `rejected`, or `resolved`)
   - `summary`
 - Optional fields may include:
@@ -161,7 +161,9 @@
   - `relatedCommit`
   - `relatedAgent`
   - `recordedBy`
-- Use execution insights to preserve dynamic execution learnings that do not fit cleanly into lane state, such as blocker remediation suggestions, coordination drift, or workflow optimization ideas.
+- Use execution insights to preserve dynamic execution learnings that do not fit cleanly into lane state, such as blocker remediation suggestions, coordination drift, no-op findings, or workflow optimization ideas.
+- Coordinator-facing automation may summarize execution insights, but it must treat them as assistive input rather than silently mutating lane state.
+- Promote an execution insight into a tracked lane item when the observation implies concrete follow-up work with a bounded write set; keep it in the journal only when it is still exploratory, diagnostic, or primarily about orchestration quality.
 
 ## Current Repo Defaults
 
