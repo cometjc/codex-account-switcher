@@ -61,6 +61,19 @@
   - main agent/coordinator 在執行期觀察到的流程或治理問題
 - 它是 append-only runtime artifact，不會和 tracked docs 的穩定定義混在一起，也不會讓 lane state JSON 膨脹成半個事件流。
 
+# 2026-03-21 plot-mode 4a 執行追蹤同步
+
+- [x] 將 Lane 2 runtime navigation regression `1fd4db4` 的接受結果同步回 tracked execution docs
+- [x] 將 Lane 5 docs/operator-flow commits `888e2d9`、`25ea3c1` 的接受結果同步回 tracked execution docs
+- [x] 將 Lane 4 的真 blocker 收斂成「需要 Lane 2 提供 render-boundary compare payload」，並回寫 scoreboard / lane docs
+- [x] 將這輪 4a execution 的動態 learning append 到 execution insights journal
+
+## Review
+
+- 這輪最大的 planning 收斂不是某一顆 commit，而是把「誰真的還在 active、誰其實只是 stale implementing state、誰有真 blocker」從 thread 記憶拉回到 tracked execution surface。
+- Lane 4 的 correction 已經證明：光把 model seam cherry-pick 進 panel lane 還不夠，真正缺的是 `render/mod.rs` 的 compare payload handoff；因此現在應由 Lane 2 先補 boundary seam，而不是讓 Lane 4 持續假性 implementing。
+- Lane 5 也已經不是「新 lane 尚未開始」，而是有三個連續 docs-only MVC steps 落地；下一步該查的是 shell/readme regression alignment 是否仍在 docs ownership 內，而不是再重複描述 recovery baseline。
+
 ## Review
 
 - 根因不是 subagent 卡死，而是 lane item 已經完成到只剩 `git commit`，但執行環境會跳 permission prompt；若這時 subagent 沒先回報，coordinator 只看 thread 會像是「人突然不動了」。
@@ -721,3 +734,19 @@
 - 根因是 `loadLanePlan()` 先正確讀到了 recovery branch 自己的 lane docs，但仍把 `NLSDD worktree: .worktrees/...` 相對於 execution root 解析，導致 recovery branch 下的 probe/schedule 看到 `missing-worktree`。
 - 修正後新增 `resolveWorktreePoolRoot()`，讓 execution docs 仍取自當前 worktree，但 `.worktrees/...` 會回到 git common-dir 對應的 canonical repo root 解析。
 - 這讓 linked worktree / recovery branch 具備正確的雙 root 模型：`execution root` 負責文件與 scoreboard，`worktree pool root` 負責 lane worktree 實體位置。
+
+# 2026-03-21 NLSDD anti-convergence guardrail
+
+- [x] 找出為什麼 4a execution 仍可能在實務上收束成單一 critical lane，讓其他 slot 只是在等待
+- [x] 將「避免單一 lane blocking 偽飽和」寫進 `spec/NLSDD/operating-rules.md`
+- [x] 將 convergence warning、replan trigger 與多 plan/execution 並行策略寫進 `spec/NLSDD/guardrails.md`
+- [x] 將執行側提醒同步到 `NLSDD/AGENTS.md` 與 `tasks/lessons.md`
+
+## Review
+
+- `NLSDD` 現在明確把「單一 lane 收束導致 2-3 個 slot 空等」定義成 smell，而不是可接受的 4-active 狀態。
+- coordinator 遇到這種情況時，優先順序改成：
+  - 切出新的獨立 lane
+  - 或改成同時推進 2-3 個 plans/executions
+  - 只有在沒有 truthful parallel work 時，才接受暫時降到低併行度。
+- 這條 guardrail 直接來自本輪 `plot-mode` 觀察：Lane 4 一度成為唯一有真實前進的 lane，而 Lane 1/3/5 多次回到 `NOOP` 或 clean probe。

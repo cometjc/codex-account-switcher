@@ -29,6 +29,22 @@ Use this file to keep NLSDD execution predictable, low-conflict, and easy to rev
 - If refill work would overlap an active lane's ownership, do not dispatch it yet.
 - If the lane that freed a slot has no safe refill item, use the next queued lane rather than leaving the slot idle.
 - Only create a new lane plan when an existing lane family is genuinely exhausted.
+- Do not fake saturation with pseudo-active lanes. If one blocker or one nearly-finished lane is causing 2-3 slots to wait, treat that as a replan trigger.
+- Preferred remediation order for convergence:
+  - cut the next honest independent lane inside the same execution
+  - if that is not available, advance 2-3 plans/executions in parallel instead of forcing all slots to stay on one execution
+  - only accept temporary under-utilization when no truthful parallel work exists
+
+## Anti-Convergence Heuristic
+
+- A convergence warning exists when:
+  - one lane is the only lane with real forward motion
+  - other active lanes are repeatedly returning `NOOP`, `BLOCKED`, or clean probes
+  - 3 slots are effectively waiting for 1 lane to finish before anything meaningful can continue
+- When convergence warning triggers, coordinator should:
+  - record the observation in execution insights
+  - decide whether to cut another lane, park exhausted lanes, or bring a different plan/execution forward
+  - avoid preserving a 4-active illusion in tracked docs if only 1 lane is truly advancing
 
 ## Lane Status Probe
 
