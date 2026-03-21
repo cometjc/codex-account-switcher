@@ -3,9 +3,32 @@ const os = require('node:os');
 const path = require('node:path');
 const {execFileSync} = require('node:child_process');
 
+function findNearestNlsddRoot(startPath = process.cwd()) {
+  let currentPath = path.resolve(startPath);
+
+  while (true) {
+    const scoreboardPath = path.join(currentPath, 'NLSDD', 'scoreboard.md');
+    const executionsPath = path.join(currentPath, 'NLSDD', 'executions');
+    if (fs.existsSync(scoreboardPath) || fs.existsSync(executionsPath)) {
+      return currentPath;
+    }
+
+    const parentPath = path.dirname(currentPath);
+    if (parentPath === currentPath) {
+      return null;
+    }
+    currentPath = parentPath;
+  }
+}
+
 function resolveProjectRoot() {
   if (process.env.NLSDD_PROJECT_ROOT) {
     return process.env.NLSDD_PROJECT_ROOT;
+  }
+
+  const localNlsddRoot = findNearestNlsddRoot();
+  if (localNlsddRoot) {
+    return localNlsddRoot;
   }
 
   try {
@@ -686,6 +709,7 @@ function computeExecutionSchedule(projectRoot, execution, maxActiveThreads = 4) 
 }
 
 module.exports = {
+  findNearestNlsddRoot,
   resolveProjectRoot,
   resolveScoreboardPath,
   resolveRuntimeScoreboardPath,

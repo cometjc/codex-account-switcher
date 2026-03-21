@@ -294,14 +294,17 @@ test('scoreboard refresh v2 backfills effective phase and lane event metadata', 
   assert.match(runtimeText, /## Recent Codex Threads/);
 });
 
-test('resolveProjectRoot returns the canonical repo root when called from a linked worktree', () => {
+test('resolveProjectRoot prefers the current linked worktree when it has its own NLSDD surface', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-root-'));
   fs.mkdirSync(path.join(root, '.worktrees'), {recursive: true});
   run('git', ['init', '-q'], root);
   run('git', ['config', 'user.name', 'Codex Test'], root);
   run('git', ['config', 'user.email', 'codex@example.com'], root);
   fs.writeFileSync(path.join(root, 'tracked.txt'), 'root\n', 'utf8');
+  fs.mkdirSync(path.join(root, 'NLSDD'), {recursive: true});
+  fs.writeFileSync(path.join(root, 'NLSDD', 'scoreboard.md'), '# root scoreboard\n', 'utf8');
   run('git', ['add', 'tracked.txt'], root);
+  run('git', ['add', 'NLSDD/scoreboard.md'], root);
   run('git', ['commit', '-m', 'init'], root);
   run('git', ['worktree', 'add', path.join(root, '.worktrees', 'lane-1-node'), '-b', 'lane-1-node'], root);
 
@@ -309,10 +312,93 @@ test('resolveProjectRoot returns the canonical repo root when called from a link
   const modulePath = path.join(originalCwd, 'NLSDD', 'scripts', 'nlsdd-lib.cjs');
   delete process.env.NLSDD_PROJECT_ROOT;
   try {
-    process.chdir(path.join(root, '.worktrees', 'lane-1-node'));
+    const worktreeRoot = path.join(root, '.worktrees', 'lane-1-node');
+    fs.writeFileSync(path.join(worktreeRoot, 'NLSDD', 'scoreboard.md'), '# worktree scoreboard\n', 'utf8');
+    process.chdir(worktreeRoot);
     delete require.cache[require.resolve(modulePath)];
     const {resolveProjectRoot} = require(modulePath);
-    assert.equal(resolveProjectRoot(), root);
+    assert.equal(resolveProjectRoot(), worktreeRoot);
+  } finally {
+    process.chdir(originalCwd);
+  }
+});
+
+test('schedule helper prefers the current linked worktree NLSDD surface over the canonical repo root', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-worktree-'));
+  fs.mkdirSync(path.join(root, '.worktrees'), {recursive: true});
+  run('git', ['init', '-q'], root);
+  run('git', ['config', 'user.name', 'Codex Test'], root);
+  run('git', ['config', 'user.email', 'codex@example.com'], root);
+  fs.mkdirSync(path.join(root, 'NLSDD', 'executions', 'plot-mode'), {recursive: true});
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'scoreboard.md'),
+    `# NLSDD Scoreboard
+
+| Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| plot-mode | Lane 1 | root ownership | Root row | parked | \`root000\` | \`root verify\` | none | none | root |
+`,
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-1.md'),
+    `# Lane 1
+
+> NLSDD worktree: \`.worktrees/lane-1-node\`
+>
+> Lane-local verification:
+> \`echo root\`
+
+## M - Model
+
+- [ ] Root item
+`,
+    'utf8',
+  );
+  run('git', ['add', '.'], root);
+  run('git', ['commit', '-m', 'init'], root);
+  run('git', ['worktree', 'add', path.join(root, '.worktrees', 'lane-1-node'), '-b', 'lane-1-node'], root);
+
+  const worktreeRoot = path.join(root, '.worktrees', 'lane-1-node');
+  fs.writeFileSync(
+    path.join(worktreeRoot, 'NLSDD', 'scoreboard.md'),
+    `# NLSDD Scoreboard
+
+| Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| plot-mode | Lane 1 | worktree ownership | Worktree row | refill-ready | \`tree111\` | \`tree verify\` | none | Worktree item | worktree |
+`,
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(worktreeRoot, 'NLSDD', 'executions', 'plot-mode', 'lane-1.md'),
+    `# Lane 1
+
+> NLSDD worktree: \`.worktrees/lane-1-node\`
+>
+> Lane-local verification:
+> \`echo worktree\`
+
+## M - Model
+
+- [ ] Worktree item
+`,
+    'utf8',
+  );
+
+  const originalCwd = process.cwd();
+  const modulePath = path.join(originalCwd, 'NLSDD', 'scripts', 'nlsdd-lib.cjs');
+  try {
+    delete process.env.NLSDD_PROJECT_ROOT;
+    delete process.env.NLSDD_SCOREBOARD_PATH;
+    delete process.env.NLSDD_RUNTIME_SCOREBOARD_PATH;
+    process.chdir(worktreeRoot);
+    delete require.cache[require.resolve(modulePath)];
+    const {computeExecutionSchedule, resolveProjectRoot} = require(modulePath);
+    const schedule = computeExecutionSchedule(resolveProjectRoot(), 'plot-mode', 4);
+    assert.equal(schedule.refillReadyRows.some((row) => row['Current item'] === 'Worktree row'), true);
+    assert.equal(schedule.refillReadyRows.some((row) => row['Current item'] === 'Root row'), false);
+    assert.equal(schedule.dispatchSuggestions[0].nextItem, 'Worktree item');
   } finally {
     process.chdir(originalCwd);
   }

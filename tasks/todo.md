@@ -623,3 +623,15 @@
 - [`spec/NLSDD/operating-rules.md`](/home/jethro/repo/side-projects/codex-account-switcher/spec/NLSDD/operating-rules.md) 現在以 `lane pool size + active subagent cap` 取代舊的固定 `active lane count`。
 - [`NLSDD/scripts/nlsdd-suggest-schedule.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-suggest-schedule.cjs) 會彙整 active lanes、refill-ready lanes、queued lanes 與 dispatch suggestions。
 - [`NLSDD/scoreboard.md`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scoreboard.md) 補了建議 phase vocabulary，讓超過 4 條 lane 時仍能用 `queued` / `parked` 管理非 active lanes。
+
+# 2026-03-21 NLSDD worktree-local root 解析修正
+
+- [x] 找出為什麼在 recovery branch 執行 `nlsdd-refresh-scoreboard` / `schedule` / `refill` 仍會吃到主 repo root 的 NLSDD surface
+- [x] 將 root 解析改成先找目前 worktree 自己的 `NLSDD` surface，再回退到 canonical repo root
+- [x] 補 linked worktree 測試，鎖住 worktree-local scoreboard / lane plan 會優先被讀取
+
+## Review
+
+- 根因是 `resolveProjectRoot()` 先用 git common-dir 把 linked worktree 收斂回主 repo root，導致 recovery branch 內的 manual scoreboard 與 execution docs 即使不同，也會被 `refresh` / `schedule` / `refill` 忽略。
+- 修正後改成優先從 `cwd` 往上找最近的 `NLSDD/scoreboard.md` 或 `NLSDD/executions/`；只有找不到時才回退到原本的 canonical repo root 邏輯。
+- 這樣 `NLSDD` tooling 在 recovery branch / linked worktree 中會先吃當前 branch 的 execution surface，不再跨 branch 漂移。
