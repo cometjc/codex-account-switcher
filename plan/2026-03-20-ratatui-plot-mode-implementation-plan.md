@@ -25,6 +25,13 @@
   - Lane 1: tighten plot snapshot builder semantics for real 7d history and 5h band math
   - Lane 3: add 5h band, axis labels, and unavailable-band fallback
   - Lane 4: add panel-specific regression coverage for the visible Summary / Compare structure
+- [x] Land the third-round Lane 1 refill (`baa7b8e`) and pass spec + quality review
+- [x] Close Lane 2's current correction as a no-op and park the lane unless another lane proves nested `usage` decoding is necessary
+- [x] Land the third-round Lane 3 refill (`585317d`) and pass spec + quality review
+- [x] Land the third-round Lane 4 refill (`abd8b10`) and pass spec + quality review
+- [x] Land the fourth-round Lane 3 wording refinement (`35c8351`) and keep it chart-local
+- [x] Land the fourth-round Lane 4 field-mapping refactor (`b24f12a`) without changing visible panel output
+- [x] Build a clean integration branch from shared baseline `d19d319` and merge the accepted Lane 1 / 3 / 4 stacks there
 
 ---
 

@@ -13,13 +13,13 @@
 
 - [x] Build focused-profile summary mapping inside the panels lane
 - [x] Build compare-skeleton mapping for selected/current routing context
-- [ ] Add panel-specific regression coverage once panel wording and structure settle
+- [x] Add panel-specific regression coverage once panel wording and structure settle
 
 ## V - View / Panel Rendering
 
 - [x] Replace the pure no-op panels renderer with a visible summary panel after Lane 2 exposes the required render boundary
 - [x] Add a compare skeleton that can later host routing recommendation details after the same boundary item lands
-- [ ] Keep the panel structure extensible for future side-panel richness
+- [x] Keep the panel structure extensible for future side-panel richness
 
 ## C - Controller / Docs and Verification Surfaces
 
@@ -32,11 +32,14 @@
 
 - [x] First-round visible Summary / Compare panel surface landed and passed review
 - [x] Second-round panel docs / README regression implementer commit landed
-- [ ] Close the current correction / re-review loop for second-round commit `12785d1`
+- [x] Close the current correction / re-review loop for second-round commit `12785d1`
+- [x] Third-round panel regression commit `abd8b10` landed and passed spec + quality review
+- [x] Fourth-round panel field-mapping refactor commit `b24f12a` landed with stable visible output
 - [x] This lane occupies one active slot in the execution's lane pool; queued lanes may wait until a slot opens.
 
 ## Refill Order
 
 - [x] First refill target after the current item: panel-specific regression coverage for the visible Summary / Compare structure
-- [ ] Then consume README/doc polish that reflects newly visible panel behavior
+- [x] Then keep the panel structure extensible through a lane-local field-mapping refactor
+- [ ] Then consume README/doc polish only if newly visible panel behavior changes again
 - [ ] Then extend panel structure only if a later execution item truly needs richer side-panel content

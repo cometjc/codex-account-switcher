@@ -33,19 +33,25 @@
 - [x] Lane 2 first-round drawable panel boundary seam landed and passed spec + quality review.
 - [x] Lane 3 first-round `ChartViewModel` extraction landed and passed spec + quality review.
 - [x] Lane 4 first-round visible Summary / Compare panel surface landed and passed spec + quality review.
-- [x] Second-round implementer commits now exist for lanes 1-4 and are tracked in `NLSDD/scoreboard.md`.
+- [x] Second-round implementer commits for lanes 1-4 were reviewed and either superseded by a third-round refill or parked as no-op evidence.
+- [x] Lane 1 third-round snapshot semantics commit `baa7b8e` landed and passed spec + quality review.
+- [x] Lane 3 third-round chart surface commit `585317d` landed and passed spec + quality review.
+- [x] Lane 4 third-round panel regression commit `abd8b10` landed and passed spec + quality review.
+- [x] Lane 3 fourth-round chart focus wording commit `35c8351` landed and passed review.
+- [x] Lane 4 fourth-round panel field-mapping refactor commit `b24f12a` landed with stable visible output.
+- [x] Lane 2 correction closed as a no-op: stronger nested `usage` decoding is still not required, so the lane is now parked by default.
+- [x] Accepted Lane 1 / Lane 3 / Lane 4 stacks now merge cleanly on top of the shared plot baseline `d19d319` in `.worktrees/plot-integration-base`.
 
 ## Current 4-Active-Lane Plan
 
-- [x] Keep plot-mode on a 4-lane active set while the current second-round correction / re-review loop is still open for lanes 1-4.
-- [x] Treat Lane 1, Lane 3, and Lane 4 as the post-correction refill priorities:
-  - Lane 1 -> tighten plot snapshot builder semantics for real 7d history and 5h band math
-  - Lane 3 -> add 5h band, axis labels, and unavailable-band fallback
-  - Lane 4 -> add panel-specific regression coverage for the visible Summary / Compare surface
-- [x] Treat Lane 2 as conditional after the current correction closes:
-  - keep the lane active only while the current correction/re-review loop remains open
-  - park it after closure unless another lane proves the stronger nested `usage` decode path is necessary
-- [x] Do not invent Lane 5 yet; exhaust the current 4-lane pool first, because Lane 1/3/4 still have clearly reviewable lane-local refill items.
+- [x] The third-round 4-active-lane refill has now closed for Lane 1, Lane 3, and Lane 4 with accepted lane-local commits.
+- [x] Lane 2 no longer needs an active slot by default:
+  - keep it parked unless chart/panels work later proves that nested `usage` decoding became a real runtime blocker
+- [x] Do not invent Lane 5 just to keep four slots busy; refill only when a lane has a real reviewable next item.
+- [x] Prefer the next queued work in this order:
+  - Lane 3 -> later left/right profile cycling or richer focus behavior only if plot UX still needs it
+  - Lane 4 -> README/doc polish only if panel wording changes again
+  - Lane 1 -> future shell polish only if Rust viewer launch UX changes again
 
 ## Refill Rules
 

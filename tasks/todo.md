@@ -1,5 +1,28 @@
 # 2026-03-20 limits 欄位 header 修正
 
+# 2026-03-21 plot-mode integration branch 收斂
+
+- [x] 找出 accepted Lane 1 / 3 / 4 commits 的 shared plot baseline
+- [x] 改用 whole-lane merge，而不是在太新的 `main` 文書線上做單顆 cherry-pick
+- [x] 建立 `.worktrees/plot-integration-base`，從 `d19d319` 整合 Lane 1 / 3 / 4 的 accepted stacks
+- [x] 驗證整合分支上的 Node handoff / snapshot / README 測試與 Rust chart/panels 驗證
+- [x] 將 Lane 3 / Lane 4 的最新 accepted commits 與 integration branch 狀態回寫到 NLSDD tracking
+
+## Review
+
+- 前一條 `plot-integration` 失敗，不是因為 lane commits 本身壞掉，而是把它們硬套到過新的 `main` 文書線，造成單顆 cherry-pick 和 lane stack 依賴脫鉤。
+- 這次改從 shared baseline `d19d319` 建立 `.worktrees/plot-integration-base`，並直接 merge whole-lane branches，Lane 1 / 3 / 4 就能保留 provenance 並乾淨整合。
+- Lane 3 也趁這輪多完成了一個小切片 `35c8351`，把 focus 狀態更明確地帶進 chart header；Lane 4 則完成 `b24f12a`，將 Summary / Compare 的欄位建構收斂成 helper，但維持可見輸出不變。
+- 驗證：
+  - in `.worktrees/plot-integration-base`
+    - `npm run build`
+    - `npm run plot:viewer:build`
+    - `node --test tests/plot-handoff.test.js tests/plot-readme.test.js tests/plot-snapshot.test.js`
+    - `cargo test --manifest-path rust/plot-viewer/Cargo.toml render::chart -- --nocapture`
+    - `cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path rust/plot-viewer/Cargo.toml`
+    - `cargo test render_panels_locks_visible_summary_compare_copy_and_shape --manifest-path rust/plot-viewer/Cargo.toml`
+    - `cargo check --manifest-path rust/plot-viewer/Cargo.toml`
+
 # 2026-03-21 NLSDD commit gate 誤判修正
 
 - [x] 找出 subagent 在 lane 尾端看似沒反應的根因，確認是 commit permission prompt 而不是純 stalled thread
