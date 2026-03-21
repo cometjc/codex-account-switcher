@@ -25,6 +25,15 @@
 - `PASS`
 - `FAIL`
 
+## Required Phase Hint
+
+- Every reviewer or implementer handoff that changes lane state should include the next expected phase whenever it is knowable.
+- Examples:
+  - implementer `DONE` => `next expected phase: spec-review-pending`
+  - spec `PASS` => `next expected phase: quality-review-pending`
+  - quality `PASS` => `next expected phase: refill-ready`
+  - `BLOCKED` => `next expected phase: blocked`
+
 ## Blocker Reporting
 
 - When an implementer or reviewer reports `BLOCKED` or `NEEDS_CONTEXT`, it should include:
@@ -67,6 +76,7 @@ These templates may be generated through `node NLSDD/scripts/nlsdd-compose-messa
 - forward the exact reviewer finding
 - restate accepted write scope
 - require a new commit sha plus verification results
+- restate the next expected phase after the correction lands
 
 ### Blocker Escalation
 

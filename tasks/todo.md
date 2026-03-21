@@ -1,5 +1,26 @@
 # 2026-03-20 limits 欄位 header 修正
 
+# 2026-03-21 NLSDD meta-optimization lane
+
+- [x] 新增一條 `nlsdd-self-hosting` lane，專門 review 並優化 `NLSDD` 本身
+- [x] 併行檢視 `spec/NLSDD/`、`NLSDD/`、scripts、scoreboard 與 execution flow
+- [x] 結合 `plan/2026-03-20-multi-phase-routing-plan.md` 與 `plan/2026-03-20-ratatui-plot-mode-implementation-plan.md` 的後續工作一起評估
+- [x] 觀察 subagents 的實際執行動態，不只看靜態文件
+- [x] 選出單一最高槓桿改善點，與 main agent 對齊後落地實作
+- [ ] 驗證、提交 branch，最後 merge 回 `main`
+
+## Review
+
+- 靜態 review 與動態觀察收斂出同一個核心問題：NLSDD 缺少 execution-aware 的 lane runtime state source of truth，導致 phase drift、cross-execution lane number bleed，以及從 linked worktree 執行時的 root/path 解析錯位。
+- 已補上 `NLSDD/state/<execution>/lane-<n>.json` journal 機制，並讓 `nlsdd-lib`、`scoreboard refresh`、`schedule suggest` 優先吃 journal，再回退到 thread/session heuristics。
+- 同步修正 canonical project-root 解析，讓從 linked worktree 執行 `probe` / `schedule` / `refresh` 時仍會回到同一個 repo root 找 lane plans、state 與 scoreboard。
+- 新增 `NLSDD/scripts/nlsdd-record-lane-state.cjs`，讓 coordinator 可用正式 helper 寫入 lane journal，而不是手改 JSON。
+- 驗證：
+  - `node --test tests/nlsdd-automation.test.js`
+  - `node NLSDD/scripts/nlsdd-suggest-schedule.cjs --execution nlsdd-self-hosting`
+  - `npm run nlsdd:scoreboard:refresh`
+  - `npm run build`
+
 - [x] 確認 `Usage Left`、`Time to reset`、`Drift` 目前被渲染成每列 label 的根因
 - [x] 先補回歸測試，鎖住三個欄位名只出現在 header
 - [x] 抽出並接回表格排版 helper，讓 row 只顯示值不重複印欄位名

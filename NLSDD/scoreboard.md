@@ -4,6 +4,8 @@
 >
 > Auto-refresh fields: `Effective phase`, `Branch HEAD`, `Last probe`, `Latest event`, `Correction count`, `Last activity`, `Noise`, plus the `Recent Codex Threads` appendix via `npm run nlsdd:scoreboard:refresh`
 >
+> When `NLSDD/state/<execution-id>/lane-<n>.json` exists, refresh tooling treats that lane journal as the primary runtime state source before falling back to thread/session heuristics.
+>
 > Recommended manual lane phases for multi-lane scheduling: `queued`, `implementing`, `spec-review-pending`, `quality-review-pending`, `correction`, `refill-ready`, `blocked`, `parked`
 >
 > `nlsdd-self-hosting` uses lanes 1-4 as the initial 4-thread active set; lanes 5-6 are queued follow-up lanes that only enter the active set when a slot opens.

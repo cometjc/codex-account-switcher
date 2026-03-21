@@ -23,6 +23,16 @@ function run(command, args, cwd) {
   }).trimEnd();
 }
 
+function writeLaneState(root, execution, laneNumber, state) {
+  const stateDir = path.join(root, 'NLSDD', 'state', execution);
+  fs.mkdirSync(stateDir, {recursive: true});
+  fs.writeFileSync(
+    path.join(stateDir, `lane-${laneNumber}.json`),
+    `${JSON.stringify(state, null, 2)}\n`,
+    'utf8',
+  );
+}
+
 function setupTempGitRepo(dir) {
   fs.mkdirSync(dir, {recursive: true});
   run('git', ['init', '-q'], dir);
@@ -270,8 +280,42 @@ test('scoreboard refresh v2 backfills effective phase and lane event metadata', 
   assert.match(scoreboardText, /## Recent Codex Threads/);
 });
 
+test('resolveProjectRoot returns the canonical repo root when called from a linked worktree', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-root-'));
+  fs.mkdirSync(path.join(root, '.worktrees'), {recursive: true});
+  run('git', ['init', '-q'], root);
+  run('git', ['config', 'user.name', 'Codex Test'], root);
+  run('git', ['config', 'user.email', 'codex@example.com'], root);
+  fs.writeFileSync(path.join(root, 'tracked.txt'), 'root\n', 'utf8');
+  run('git', ['add', 'tracked.txt'], root);
+  run('git', ['commit', '-m', 'init'], root);
+  run('git', ['worktree', 'add', path.join(root, '.worktrees', 'lane-1-node'), '-b', 'lane-1-node'], root);
+
+  const originalCwd = process.cwd();
+  const modulePath = path.join(originalCwd, 'NLSDD', 'scripts', 'nlsdd-lib.cjs');
+  delete process.env.NLSDD_PROJECT_ROOT;
+  try {
+    process.chdir(path.join(root, '.worktrees', 'lane-1-node'));
+    delete require.cache[require.resolve(modulePath)];
+    const {resolveProjectRoot} = require(modulePath);
+    assert.equal(resolveProjectRoot(), root);
+  } finally {
+    process.chdir(originalCwd);
+  }
+});
+
 test('probe helper reports source changes, artifact noise, and verification commands', () => {
   const fixture = setupNlsddFixture();
+  writeLaneState(fixture.root, 'plot-mode', 1, {
+    execution: 'plot-mode',
+    lane: 'Lane 1',
+    phase: 'quality-review-pending',
+    expectedNextPhase: 'refill-ready',
+    latestCommit: 'feedbee',
+    lastReviewerResult: 'PASS',
+    correctionCount: 2,
+    updatedAt: '2026-03-21T03:30:00.000Z',
+  });
   const {probeLane} = freshRequire('NLSDD/scripts/nlsdd-probe-lane.cjs');
 
   const result = probeLane(fixture.root, 'plot-mode', 'Lane 1');
@@ -284,10 +328,39 @@ test('probe helper reports source changes, artifact noise, and verification comm
     true,
   );
   assert.equal(result.noise, 'mixed');
+  assert.equal(result.laneState.phase, 'quality-review-pending');
+  assert.equal(result.laneState.expectedNextPhase, 'refill-ready');
   assert.deepEqual(
     result.verificationResults.map((entry) => entry.command),
     ['git status --short', 'git rev-parse --short HEAD'],
   );
+});
+
+test('lane automation prefers execution-aware lane state journal over shared lane-number heuristics', () => {
+  const fixture = setupNlsddFixture();
+  process.env.NLSDD_PROJECT_ROOT = fixture.root;
+  process.env.CODEX_STATE_DB_PATH = fixture.dbPath;
+  process.env.CODEX_SESSIONS_ROOT = path.join(fixture.root, '.codex', 'sessions');
+
+  writeLaneState(fixture.root, 'plot-mode', 1, {
+    execution: 'plot-mode',
+    lane: 'Lane 1',
+    phase: 'quality-review-pending',
+    expectedNextPhase: 'refill-ready',
+    latestCommit: 'feedbee',
+    lastVerification: ['git status --short'],
+    lastReviewerResult: 'PASS',
+    correctionCount: 7,
+    updatedAt: '2026-03-21T03:30:00.000Z',
+  });
+
+  const {computeLaneAutomation} = freshRequire('NLSDD/scripts/nlsdd-lib.cjs');
+  const automation = computeLaneAutomation(fixture.root, 'plot-mode', 'Lane 1', 'spec-review-pending');
+
+  assert.equal(automation.effectivePhase, 'quality-review-pending');
+  assert.equal(automation.latestEventText, 'PASS · journal · 2026-03-21 03:30:00Z');
+  assert.equal(automation.correctionCount, 7);
+  assert.equal(automation.lastActivityText, '2026-03-21 03:30:00Z');
 });
 
 test('refill assistant suggests the next unchecked lane-local item for refill-ready lanes', () => {
@@ -341,6 +414,26 @@ test('self-hosting schedule keeps the active thread cap at four and dispatches r
   assert.ok(output.indexOf('Refill-ready lanes:') < output.indexOf('Queued lanes:'));
 });
 
+test('schedule suggestion prefers lane journal phase over stale scoreboard phase', () => {
+  const fixture = setupSelfHostingScheduleFixture();
+  writeLaneState(fixture.root, 'nlsdd-self-hosting', 5, {
+    execution: 'nlsdd-self-hosting',
+    lane: 'Lane 5',
+    phase: 'refill-ready',
+    expectedNextPhase: 'implementing',
+    latestCommit: 'ab12cd3',
+    lastReviewerResult: 'PASS',
+    correctionCount: 0,
+    updatedAt: '2026-03-21T04:00:00.000Z',
+  });
+
+  const {computeExecutionSchedule} = freshRequire('NLSDD/scripts/nlsdd-lib.cjs');
+  const schedule = computeExecutionSchedule(fixture.root, 'nlsdd-self-hosting', 4);
+
+  assert.equal(schedule.refillReadyRows.some((row) => row.Lane === 'Lane 5'), true);
+  assert.equal(schedule.queuedRows.some((row) => row.Lane === 'Lane 5'), false);
+});
+
 test('message helper renders correction-loop text without opening direct reviewer channels', () => {
   const {composeMessage} = freshRequire('NLSDD/scripts/nlsdd-compose-message.cjs');
   const message = composeMessage({
@@ -361,4 +454,37 @@ test('message helper renders correction-loop text without opening direct reviewe
   assert.match(message, /Reviewer finding: FAIL \[src\/commands\/root\.ts:10\] missing retry hint/);
   assert.match(message, /Return a new commit sha and verification results/);
   assert.doesNotMatch(message, /talk directly to reviewer/i);
+});
+
+test('lane state recorder writes execution-aware journal files for coordinator tooling', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-record-'));
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  const {recordLaneState} = freshRequire('NLSDD/scripts/nlsdd-record-lane-state.cjs');
+  const filePath = recordLaneState(root, {
+    execution: 'plot-mode',
+    lane: 'Lane 2',
+    phase: 'quality-review-pending',
+    'expected-next-phase': 'refill-ready',
+    commit: 'abc1234',
+    reviewer: 'PASS',
+    'correction-count': 3,
+    verification: ['cargo test', 'cargo check'],
+    'blocked-by': 'none',
+    note: 'ready for quality review',
+    'updated-at': '2026-03-21T04:20:00.000Z',
+  });
+
+  const state = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  assert.equal(state.execution, 'plot-mode');
+  assert.equal(state.lane, 'Lane 2');
+  assert.equal(state.phase, 'quality-review-pending');
+  assert.equal(state.expectedNextPhase, 'refill-ready');
+  assert.equal(state.latestCommit, 'abc1234');
+  assert.equal(state.lastReviewerResult, 'PASS');
+  assert.deepEqual(state.lastVerification, ['cargo test', 'cargo check']);
+  assert.equal(state.blockedBy, 'none');
+  assert.equal(state.note, 'ready for quality review');
+  assert.equal(state.correctionCount, 3);
+  assert.equal(state.updatedAt, '2026-03-21T04:20:00.000Z');
 });

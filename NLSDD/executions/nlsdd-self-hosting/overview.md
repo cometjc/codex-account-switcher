@@ -35,6 +35,10 @@
   - Plan: `NLSDD/executions/nlsdd-self-hosting/lane-6.md`
   - Status: queued follow-up lane
 
+- [x] Lane 7: NLSDD Meta-Optimization
+  - Plan: `NLSDD/executions/nlsdd-self-hosting/lane-7.md`
+  - Status: queued follow-up lane
+
 ## Refill Rules
 
 - [x] Keep 4 active subagent slots saturated whenever 4 safe lane items exist

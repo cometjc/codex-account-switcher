@@ -4,7 +4,28 @@ const path = require('node:path');
 const {execFileSync} = require('node:child_process');
 
 function resolveProjectRoot() {
-  return process.env.NLSDD_PROJECT_ROOT || process.cwd();
+  if (process.env.NLSDD_PROJECT_ROOT) {
+    return process.env.NLSDD_PROJECT_ROOT;
+  }
+
+  try {
+    const commonDir = execFileSync(
+      'git',
+      ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+      {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    ).trim();
+    if (commonDir) {
+      return path.basename(commonDir) === '.git' ? path.dirname(commonDir) : commonDir;
+    }
+  } catch {
+    // Fall back to cwd when not in a git worktree.
+  }
+
+  return process.cwd();
 }
 
 function isPathWithin(basePath, candidatePath) {
@@ -196,6 +217,33 @@ function loadLanePlan(projectRoot, execution, lane) {
   };
 }
 
+function laneStatePath(projectRoot, execution, lane) {
+  const laneMatch = /^Lane\s+(\d+)$/.exec(lane);
+  if (!laneMatch) {
+    return null;
+  }
+  return path.join(projectRoot, 'NLSDD', 'state', execution, `lane-${laneMatch[1]}.json`);
+}
+
+function loadLaneState(projectRoot, execution, lane) {
+  const filePath = laneStatePath(projectRoot, execution, lane);
+  if (!filePath || !fs.existsSync(filePath)) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    return {
+      ...parsed,
+      filePath,
+      execution: parsed.execution || execution,
+      lane: parsed.lane || lane,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function classifyNoise(statusOutput) {
   const lines = statusOutput.split('\n').map((line) => line.trimEnd()).filter(Boolean);
   if (lines.length === 0) {
@@ -258,7 +306,7 @@ function refreshProbe(head, statusOutput) {
 }
 
 function listExecutionLanes(projectRoot, execution) {
-  const executionDir = path.join(projectRoot, 'plan', 'NLSDD', 'executions', execution);
+  const executionDir = path.join(projectRoot, 'NLSDD', 'executions', execution);
   if (!fs.existsSync(executionDir)) {
     return [];
   }
@@ -494,7 +542,29 @@ function formatLatestEvent(latestStatusEvent) {
   return `${latestStatusEvent.status} · ${latestStatusEvent.nickname || 'n/a'} · ${formatIsoTimestamp(latestStatusEvent.timestamp)}`;
 }
 
+function laneStateLatestEventText(laneState) {
+  if (!laneState) {
+    return 'n/a';
+  }
+  const result = laneState.lastReviewerResult || laneState.phase || 'n/a';
+  return `${result} · journal · ${formatIsoTimestamp(laneState.updatedAt)}`;
+}
+
 function computeLaneAutomation(projectRoot, execution, lane, manualPhase) {
+  const laneState = loadLaneState(projectRoot, execution, lane);
+  if (laneState) {
+    return {
+      laneThreads: [],
+      latestStatusEvent: null,
+      correctionCount: Number(laneState.correctionCount || 0),
+      effectivePhase: laneState.phase || manualPhase || 'manual-review-needed',
+      nextExpectedPhase: laneState.expectedNextPhase || null,
+      latestEventText: laneStateLatestEventText(laneState),
+      lastActivityText: formatIsoTimestamp(laneState.updatedAt),
+      laneState,
+    };
+  }
+
   const threads = readRecentThreads(projectRoot, 20);
   const indexedFiles = indexSessionFiles(resolveCodexSessionsRoot());
   const parsedThreads = threads.map((thread) => parseThreadSession(thread, indexedFiles));
@@ -514,8 +584,10 @@ function computeLaneAutomation(projectRoot, execution, lane, manualPhase) {
     latestStatusEvent,
     correctionCount,
     effectivePhase: deriveEffectivePhase(manualPhase, latestStatusEvent),
+    nextExpectedPhase: null,
     latestEventText: formatLatestEvent(latestStatusEvent),
     lastActivityText: lastActivityEpoch ? formatIsoTimestamp(lastActivityEpoch) : 'n/a',
+    laneState: null,
   };
 }
 
@@ -550,11 +622,14 @@ function computeExecutionSchedule(projectRoot, execution, maxActiveThreads = 4) 
   const rows = table.objects.filter((row) => row.Execution === execution);
 
   const enrichedRows = rows.map((row) => {
-    const schedulingPhase = phaseForScheduling(row);
+    const laneState = loadLaneState(projectRoot, execution, row.Lane);
+    const schedulingPhase = laneState?.phase || phaseForScheduling(row);
     const nextItem = findNextRefillItem(projectRoot, execution, row.Lane);
     return {
       ...row,
+      laneState,
       schedulingPhase,
+      nextExpectedPhase: laneState?.expectedNextPhase || null,
       nextItem: nextItem ? nextItem.text : null,
       nextItemSection: nextItem ? nextItem.section : null,
     };
@@ -575,6 +650,7 @@ function computeExecutionSchedule(projectRoot, execution, maxActiveThreads = 4) 
       slot: activeRows.length + index + 1,
       lane: row.Lane,
       phase: row.schedulingPhase,
+      nextExpectedPhase: row.nextExpectedPhase,
       currentItem: row['Current item'],
       nextItem: row.nextItem,
       nextItemSection: row.nextItemSection,
@@ -604,6 +680,8 @@ module.exports = {
   lanePlanPath,
   parseLanePlan,
   loadLanePlan,
+  laneStatePath,
+  loadLaneState,
   classifyNoise,
   splitStatusEntries,
   refreshProbe,

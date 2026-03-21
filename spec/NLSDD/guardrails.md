@@ -40,6 +40,7 @@ Use this file to keep NLSDD execution predictable, low-conflict, and easy to rev
     - `git log --oneline -n 1`
     - the lane-local verification command from the lane plan
 - Probe results override thread assumptions and must be reflected in the scoreboard.
+- When a lane journal exists, probes should treat it as the primary execution-aware state surface and only use thread/session heuristics as fallback.
 
 ## Blocker Suggestions
 
@@ -71,12 +72,14 @@ Use this file to keep NLSDD execution predictable, low-conflict, and easy to rev
   - correction loop
 - Prefer `node NLSDD/scripts/nlsdd-compose-message.cjs ...` to generate those templates consistently.
 - If correction loops exceed 2 rounds, escalate to coordinator arbitration.
+- When coordinator records a new lane state after review, correction, or blockage, prefer `node NLSDD/scripts/nlsdd-record-lane-state.cjs ...` over hand-editing journal JSON.
 
 ## Required Handoff Format
 
 - Lane name
 - MVC step completed
 - Commit SHA for the lane item
+- Next expected phase
 - Files changed
 - What was implemented
 - What was intentionally stubbed or deferred

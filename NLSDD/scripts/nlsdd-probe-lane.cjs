@@ -3,6 +3,7 @@
 const {execFileSync} = require('node:child_process');
 const {
   loadLanePlan,
+  loadLaneState,
   resolveProjectRoot,
   tryRun,
   splitStatusEntries,
@@ -31,6 +32,7 @@ function probeLane(projectRoot, execution, lane) {
   if (!lanePlan || !lanePlan.worktreePath) {
     throw new Error(`Could not resolve lane plan or worktree for ${execution} ${lane}`);
   }
+  const laneState = loadLaneState(projectRoot, execution, lane);
 
   const head = tryRun('git', ['rev-parse', '--short', 'HEAD'], lanePlan.worktreePath) || 'n/a';
   const branch = tryRun('git', ['rev-parse', '--abbrev-ref', 'HEAD'], lanePlan.worktreePath) || 'n/a';
@@ -57,6 +59,7 @@ function probeLane(projectRoot, execution, lane) {
     execution,
     lane,
     worktreePath: lanePlan.worktreePath,
+    laneState,
     branch,
     head,
     latestCommit,
@@ -73,6 +76,8 @@ function renderProbe(result) {
     `Execution: ${result.execution}`,
     `Lane: ${result.lane}`,
     `Worktree: ${result.worktreePath}`,
+    `Lane journal phase: ${result.laneState?.phase || 'n/a'}`,
+    `Next expected phase: ${result.laneState?.expectedNextPhase || 'n/a'}`,
     `Branch: ${result.branch}`,
     `HEAD: ${result.head}`,
     `Latest commit: ${result.latestCommit}`,

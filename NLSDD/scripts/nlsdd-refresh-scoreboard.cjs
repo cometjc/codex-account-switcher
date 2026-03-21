@@ -50,20 +50,24 @@ function updateScoreboard() {
   for (const row of table.objects) {
     const lanePlan = loadLanePlan(projectRoot, row.Execution, row.Lane);
     const worktree = lanePlan?.worktreePath;
-    if (!worktree || !fs.existsSync(worktree)) {
-      continue;
-    }
-    const head = tryRun('git', ['rev-parse', '--short', 'HEAD'], worktree) || 'n/a';
-    const statusOutput = tryRun('git', ['status', '--short'], worktree);
-    row['Branch HEAD'] = `\`${head}\``;
-    row['Noise'] = classifyNoise(statusOutput);
-    row['Last probe'] = refreshProbe(head, statusOutput);
-
     const automation = computeLaneAutomation(projectRoot, row.Execution, row.Lane, row.Phase);
     row['Effective phase'] = automation.effectivePhase;
     row['Latest event'] = automation.latestEventText;
     row['Correction count'] = String(automation.correctionCount);
     row['Last activity'] = automation.lastActivityText;
+
+    if (!worktree || !fs.existsSync(worktree)) {
+      row['Branch HEAD'] = '`n/a`';
+      row['Noise'] = lanePlan ? 'missing-worktree' : 'missing-lane-plan';
+      row['Last probe'] = lanePlan ? 'missing-worktree' : 'missing-lane-plan';
+      continue;
+    }
+
+    const head = tryRun('git', ['rev-parse', '--short', 'HEAD'], worktree) || 'n/a';
+    const statusOutput = tryRun('git', ['status', '--short'], worktree);
+    row['Branch HEAD'] = `\`${head}\``;
+    row['Noise'] = classifyNoise(statusOutput);
+    row['Last probe'] = refreshProbe(head, statusOutput);
   }
 
   const renderedRows = table.objects.map((row) =>

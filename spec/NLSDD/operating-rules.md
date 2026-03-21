@@ -22,9 +22,11 @@
   - lane worktree naming convention
   - lane-local verification commands
 - Every execution must keep its runtime lane plans under `NLSDD/executions/<execution-id>/`.
+- Every execution may keep execution-aware lane runtime state under `NLSDD/state/<execution-id>/`.
 - Every execution must have one canonical row set in `NLSDD/scoreboard.md`.
 - Scoreboard rows may contain both manual coordinator fields and auto-derived fields; automation may suggest state, but the coordinator remains the decision-maker for dispatch.
 - Not every lane row has to consume an active thread slot at all times; queued or parked lanes may remain visible in the scoreboard until a slot opens, then the coordinator can promote the next eligible queued lane into that slot.
+- Runtime tooling must resolve the canonical repo root even when invoked from a linked worktree, so lane plans, worktrees, and state files always point back to the same execution root.
 
 ## Lane Worktree Rules
 
@@ -51,9 +53,11 @@
   - roadmap status updates
   - execution and lane checklist updates
   - `NLSDD/scoreboard.md`
+  - `NLSDD/state/<execution-id>/lane-<n>.json`
   - cross-lane lessons in `tasks/lessons.md`
 - Implementers and reviewers should not "helpfully" update those files as part of feature work.
 - Auto-refresh tooling may rewrite the scoreboard's derived columns, but must not overwrite manual intent fields such as `Current item`, `Phase`, or `Blocked by`.
+- Lane journal files are the execution-aware runtime source of truth for phase transitions, latest commit metadata, and next expected gate when those details need to survive across probes, reviews, and worktree-local invocations.
 
 ## Review Rules
 
@@ -103,6 +107,21 @@
 7. If spec review passes, run code quality review against the same diff.
 8. If quality review fails, return to the same implementer for correction and re-review.
 9. After both pass, coordinator marks the lane as `refill-ready`, updates tracking docs in batch, and either refills the same lane or allocates the freed slot to another queued lane.
+
+## Lane Journal Contract
+
+- Each lane journal file should record, at minimum:
+  - `execution`
+  - `lane`
+  - `phase`
+  - `expectedNextPhase`
+  - `latestCommit`
+  - `lastReviewerResult`
+  - `lastVerification`
+  - `blockedBy`
+  - `updatedAt`
+- Scoreboard refresh, schedule suggestion, and lane probes should prefer lane journal state over cross-thread heuristics when the journal exists.
+- If lane plans or worktrees go missing, automation should degrade explicitly rather than silently reusing stale derived values.
 
 ## Current Repo Defaults
 
