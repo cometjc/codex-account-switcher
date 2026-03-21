@@ -1,5 +1,41 @@
 # 2026-03-20 limits 欄位 header 修正
 
+# 2026-03-21 NLSDD commit gate 誤判修正
+
+- [x] 找出 subagent 在 lane 尾端看似沒反應的根因，確認是 commit permission prompt 而不是純 stalled thread
+- [x] 將 commit gate 場景寫入 `spec/NLSDD/guardrails.md` 與 `spec/NLSDD/communication.md`
+- [x] 將 `READY_TO_COMMIT` 納入 NLSDD 的正式狀態語彙與 handoff 要求
+- [x] 在 `NLSDD/AGENTS.md` 與 `tasks/lessons.md` 補上對應守則，避免 coordinator 再誤判 agent 無回應
+
+## Review
+
+- 根因不是 subagent 卡死，而是 lane item 已經完成到只剩 `git commit`，但執行環境會跳 permission prompt；若這時 subagent 沒先回報，coordinator 只看 thread 會像是「人突然不動了」。
+- 修正方向不是放寬 probe，而是把這種狀態正式命名成 `READY_TO_COMMIT`，並要求 implementer 在 commit 前主動回報 commit scope、驗證結果與預期 gate。
+- 這樣 coordinator 之後在 probe lane 時，就會把「可能在等 commit gate」當成一級判斷，而不是直接把 lane 標成 stalled / unresponsive。
+
+# 2026-03-21 plot-mode 4a NLSDD execution round
+
+- [x] 以 4 個 active subagents 啟動 plot-mode 的下一輪 lane-local refill / review
+- [x] 完成 Lane 1 的 snapshot semantics tightening，並通過 spec + quality review
+- [x] 完成 Lane 3 的 chart surface 5h band / axis labels / fallback，並通過 spec + quality review
+- [x] 完成 Lane 4 的 panel-specific regression coverage，並通過 spec + quality review
+- [x] 以 lane-local evidence 關閉 Lane 2 的 correction loop，確認目前不需要更強的 nested `usage` decode
+- [x] 更新 NLSDD manual scoreboard、plot-mode lane docs 與主 plan，反映這輪 execution 結果
+
+## Review
+
+- 這輪 4a NLSDD 的實作面已收斂：Lane 1 (`baa7b8e`)、Lane 3 (`585317d`)、Lane 4 (`abd8b10`) 都完成 lane-local commit，並先後通過 spec + quality review。
+- Lane 2 沒有產出新 code；lane-local probe、cargo 驗證與 reviewer 結論一致指出：目前 chart/panels lane 還沒有證明 nested `usage` decode 是真 blocker，因此這條 lane 應改為 `parked`，而不是為了維持 4 active 而硬找工作。
+- 這也讓 plot-mode execution docs 與 scoreboard 回到同一個真相來源：Lane 1/3/4 是已接受的第三輪 refill 成果，Lane 2 是條件式 parked lane，之後只在 runtime blocker 真正出現時再喚醒。
+- 驗證：
+  - `npm run build` in `.worktrees/lane-1-node`
+  - `node --test tests/plot-snapshot.test.js tests/plot-handoff.test.js` in `.worktrees/lane-1-node`
+  - `cargo test --manifest-path rust/plot-viewer/Cargo.toml render::chart -- --nocapture` in `.worktrees/lane-3-chart`
+  - `cargo check --manifest-path rust/plot-viewer/Cargo.toml` in `.worktrees/lane-3-chart`
+  - Lane 4 agent verification:
+    - `cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path rust/plot-viewer/Cargo.toml`
+    - `cargo test render_panels_locks_visible_summary_compare_copy_and_shape --manifest-path rust/plot-viewer/Cargo.toml`
+
 # 2026-03-21 plot-mode 4-active-lane re-plan
 
 - [x] 盤點 plot-mode lane docs、manual scoreboard、runtime scoreboard 與 lane worktrees 的目前狀態

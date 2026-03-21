@@ -20,6 +20,7 @@
 - `IN_PROGRESS`
 - `DONE`
 - `DONE_WITH_CONCERNS`
+- `READY_TO_COMMIT`
 - `BLOCKED`
 - `NEEDS_CONTEXT`
 - `PASS`
@@ -30,9 +31,20 @@
 - Every reviewer or implementer handoff that changes lane state should include the next expected phase whenever it is knowable.
 - Examples:
   - implementer `DONE` => `next expected phase: spec-review-pending`
+  - implementer `READY_TO_COMMIT` => `next expected phase: commit-confirmation`
   - spec `PASS` => `next expected phase: quality-review-pending`
   - quality `PASS` => `next expected phase: refill-ready`
   - `BLOCKED` => `next expected phase: blocked`
+
+## Commit-Gate Reporting
+
+- If an implementer has finished the code and verification but expects a permission prompt, confirmation prompt, or environment gate before `git commit`, it should not remain silent.
+- In that case the implementer should report `READY_TO_COMMIT` and include:
+  - the intended commit scope
+  - verification already completed
+  - whether the worktree is otherwise clean
+  - the exact gate it expects to hit
+- Coordinator should treat `READY_TO_COMMIT` as a live lane state, not as an unresponsive thread.
 
 ## Blocker Reporting
 

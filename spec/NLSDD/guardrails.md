@@ -31,6 +31,7 @@ Use this file to keep NLSDD execution predictable, low-conflict, and easy to rev
   - a sub-agent reports `IN_PROGRESS` more than once without a commit SHA
   - a thread goes quiet longer than expected for the lane item
   - thread status and worktree status appear inconsistent
+  - a lane item is expected to end in a commit and the sub-agent may be waiting on a permission or confirmation prompt instead of actively coding
 - Probe checklist:
   - `node NLSDD/scripts/nlsdd-probe-lane.cjs --execution <id> --lane <n>`
   - or, if the helper is unavailable, fall back to:
@@ -42,6 +43,7 @@ Use this file to keep NLSDD execution predictable, low-conflict, and easy to rev
 - Probe results override thread assumptions and must be reflected in the scoreboard.
 - Runtime probe/refresh output belongs under `NLSDD/state/`; do not use auto-refresh to rewrite the tracked `NLSDD/scoreboard.md`.
 - When a lane journal exists, probes should treat it as the primary execution-aware state surface and only use thread/session heuristics as fallback.
+- If a lane appears stalled near the end of implementation, coordinator should explicitly consider whether the sub-agent may be blocked on a commit/permission prompt before classifying it as unresponsive.
 
 ## Blocker Suggestions
 
@@ -75,6 +77,7 @@ Use this file to keep NLSDD execution predictable, low-conflict, and easy to rev
 - If correction loops exceed 2 rounds, escalate to coordinator arbitration.
 - When coordinator records a new lane state after review, correction, or blockage, prefer `node NLSDD/scripts/nlsdd-record-lane-state.cjs ...` over hand-editing journal JSON.
 - When coordinator needs a refreshed scoreboard snapshot, prefer `npm run nlsdd:scoreboard:refresh` and inspect `NLSDD/state/scoreboard.runtime.md` rather than staging runtime churn from the tracked scoreboard.
+- If the environment may show permission prompts for `git commit` or similar lane-finalizing steps, implementer assignments should ask the sub-agent to report `READY_TO_COMMIT` with verification results rather than waiting silently at the end of the lane item.
 
 ## Required Handoff Format
 
@@ -88,6 +91,7 @@ Use this file to keep NLSDD execution predictable, low-conflict, and easy to rev
 - Verification run
 - Open concerns or dependency assumptions
 - Suggested remediation when blocked or when a recurring workflow problem is detected
+- If commit is pending due to an environment prompt or expected permission gate, say so explicitly instead of remaining silent
 
 ## Batch Tracking Policy
 

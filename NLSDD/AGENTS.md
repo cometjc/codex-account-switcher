@@ -6,3 +6,4 @@
 - `scoreboard.md` 是 repo 內唯一正式的 tracked lane 狀態板；lane phase、latest commit、blocked 狀態與 queued/active set 應優先在此維護，auto-derived 欄位則輸出到 runtime scoreboard。
 - `scripts/` 放 `NLSDD` 執行輔助腳本；若路徑或輸出格式變更，需同步更新 `package.json` scripts、tests 與相關文件。
 - `NLSDD/` 只放實際執行所需 artefacts；通用定義、規格與不依賴單次 execution 的治理文件應維護在 `spec/NLSDD/`。
+- 若執行環境對 `git commit` 或其他 lane-finalizing 動作會跳 permission/confirmation prompt，subagent 不應默默卡住；應先回報 `READY_TO_COMMIT` 與已完成的驗證，讓 coordinator 接手判斷。
