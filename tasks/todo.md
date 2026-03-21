@@ -882,3 +882,16 @@
 - 根因不是單一 script 出錯，而是 `record-lane-state`、`record-insight`、tracked scoreboard、lane plan status 都能各自落筆，導致同一個 execution 同時存在多套可寫 state surface。
 - 這次先把「寫入」集中到單一 canonical interface：`lane handoff envelope`。不論是 lane state、insight、READY_TO_COMMIT、review result，最後都先進 `NLSDD/state/<execution>/events.ndjson`，再由 reducer 投影到其他 surfaces。
 - 目前 `launch/review/intake/autopilot` 還是讀既有 projection surfaces，但因為這些 surfaces 已改成同一條 reducer 產物，狀態差異已大幅收斂；後續可以再把讀取端逐步改成直接吃 reducer snapshot。
+
+# 2026-03-21 plot-mode Lane 4 stale runtime state cleanup
+
+- [x] 檢查 `plot-mode Lane 4` 為何在 envelope/reducer 上線後仍殘留 `stale-implementing`
+- [x] 將 tracked lane plan / scoreboard 收斂成 honest parked state，不再把已完成的 adopted-target emphasis 當成 current implementing item
+- [x] 以 canonical envelope 寫入 Lane 4 的 parked transition，重建 reducer 投影
+- [x] 驗證 `dispatch-plan` 不再把 Lane 4 列為 stale implementing
+
+## Review
+
+- 根因不是 reducer 壞掉，而是 `plot-mode Lane 4` 的歷史 bootstrapped event 仍把 `6bb1fba` 投影成 `implementing`，而 tracked lane plan / scoreboard 也還停留在舊 wording，導致 reducer 每次重播都忠實重建同一個假 active state。
+- 這次先把 tracked planning surface 收斂成 honest truth：`6bb1fba` 已完成 adopted-target emphasis，所以 Lane 4 的 current item 改成等待下一個 fresh panel-local item，phase 改為 `parked`。
+- 接著再用 canonical envelope 寫入同一個 parked transition，讓 runtime journal、tracked scoreboard、lane plan `Current Lane Status` 與後續 `dispatch-plan` 全部由同一條事件鏈收斂到一致狀態。

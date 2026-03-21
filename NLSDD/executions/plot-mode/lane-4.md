@@ -24,22 +24,23 @@
 ## C - Controller / Docs and Verification Surfaces
 
 - [x] Keep visible panel copy aligned with the current plot-mode semantics
-- [ ] Surface routing recommendation details inside the Compare panel without stealing layout ownership from the runtime lane
-- [ ] Highlight the adopted routing target more clearly once compare-panel data becomes meaningful
+- [x] Surface routing recommendation details inside the Compare panel without stealing layout ownership from the runtime lane
+- [x] Highlight the adopted routing target more clearly once compare-panel data becomes meaningful
 
 ## Current Lane Status
 
-- [x] First-round visible Summary / Compare panel surface landed and passed review
-- [x] Second-round panel docs / README regression implementer commit landed
-- [x] Close the current correction / re-review loop for second-round commit `12785d1`
-- [x] Third-round panel regression commit `abd8b10` landed and passed spec + quality review
-- [x] Fourth-round panel field-mapping refactor commit `b24f12a` landed with stable visible output
-- [ ] Next active refill should enrich the visible Compare panel with recommendation/bottleneck details on top of the recovery baseline
-- [x] This lane occupies one active slot in the execution's lane pool; queued lanes may wait until a slot opens.
+- [x] Projected phase: parked
+- [x] Current item: Wait for a fresh panel-local item after adopted-target emphasis landed
+- [x] Latest commit: `6bb1fba`
+- [x] Latest event: state-update · Lane 4 adopted-target emphasis already landed in 6bb1fba
+- [x] Next expected phase: n/a
+- [x] Next refill target: Extend panel structure only if later plot UX still needs richer side-panel content
+- [x] Latest note: The adopted-target emphasis shipped in 6bb1fba; keep Lane 4 parked until a fresh panel-local item appears.
 
 ## Refill Order
 
 - [x] First refill target after the current item: panel-specific regression coverage for the visible Summary / Compare structure
 - [x] Then keep the panel structure extensible through a lane-local field-mapping refactor
-- [ ] Next active refill: add recommendation/bottleneck-rich Compare content with stable visible output
+- [x] Next active refill: add recommendation/bottleneck-rich Compare content with stable visible output after Lane 2 exposes the render-boundary payload
+- [x] Current refill: highlight the adopted routing target more clearly once compare data is present
 - [ ] Then extend panel structure only if a later execution item truly needs richer side-panel content

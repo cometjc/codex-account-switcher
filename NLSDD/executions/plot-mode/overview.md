@@ -45,6 +45,10 @@
 - [x] Lane 4 fourth-round panel field-mapping refactor commit `b24f12a` landed with stable visible output.
 - [x] Lane 2 correction closed as a no-op: stronger nested `usage` decoding is still not required, so the lane is now parked by default.
 - [x] Accepted Lane 1 / Lane 3 / Lane 4 stacks now merge cleanly on top of the shared plot baseline `d19d319` in `.worktrees/plot-integration-base`.
+- [x] Lane 2 fifth-round runtime navigation regression commit `1fd4db4` landed and passed spec + quality review.
+- [x] Lane 5 first two docs/operator-flow commits `888e2d9` and `25ea3c1` landed with README regression coverage.
+- [x] Lane 4 correction surfaced a real dependency: the render boundary still needs to expose compare recommendation/bottleneck payload, so the lane is blocked until Lane 2 lands that seam.
+- [x] Lane 4 adopted-target emphasis is now also proven complete in `6bb1fba`; the lane should stay parked until a fresh panel-local follow-up exists rather than lingering as stale implementing.
 
 ## Current 4-Active-Lane Plan
 
@@ -59,16 +63,21 @@
   - use it to surface real routing recommendation details rather than only the first visible skeleton
 - [x] Lane 5 enters the lane pool as the fourth active slot:
   - use it for README/operator-flow/run-instruction cleanup once the recovery baseline becomes the trusted local workflow
+- [x] Runtime execution evidence tightened the next refill order:
+  - Lane 2 owns the next seam because Lane 4 cannot finish compare-panel richness until `render/mod.rs` exposes compare payload
+  - Lane 4 should remain blocked rather than pretending to implement against missing boundary data
+  - Lane 5 can continue taking docs/test-only cleanup as long as it stays inside README and README regression ownership
 - [x] Prefer the next queued work in this order:
-  - Lane 2 -> focus/navigation flow that updates chart and panel details together
+  - Lane 2 -> render-boundary compare payload seam for Lane 4, then return to focus/navigation flow if another runtime item still exists
   - Lane 3 -> chart compatibility with richer focus and profile cycling
-  - Lane 4 -> recommendation / compare-panel richness with stable visible copy
-  - Lane 5 -> README and local run instructions for the recovery-baseline workflow
+  - Lane 4 -> recommendation / compare-panel richness with stable visible copy after the Lane 2 seam lands
+  - Lane 5 -> README and local run instructions for the recovery-baseline workflow, then shell/readme alignment if still docs-owned
 
 ## Runtime-State Note
 
 - [x] Manual lane planning now diverges from the currently recorded lane journals for lanes 2-4.
 - [x] Before dispatching the next 4a execution round, refresh or rewrite the lane journals so runtime tooling reflects the new manual active set instead of the stale recovery-branch dispatch state.
+- [x] During the current 4a round, repeated probe evidence showed that clean worktrees plus stale `implementing` journals should trigger re-assignment rather than be treated as real active progress.
 
 ## Refill Rules
 
