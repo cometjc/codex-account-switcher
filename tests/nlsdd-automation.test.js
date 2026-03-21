@@ -97,9 +97,9 @@ function setupNlsddFixture() {
     path.join(root, 'NLSDD', 'scoreboard.md'),
     `# NLSDD Scoreboard
 
-| Execution | Lane | Ownership | Current item | Phase | Effective phase | Item commit | Branch HEAD | Last verification | Last probe | Latest event | Correction count | Last activity | Blocked by | Next refill target | Noise | Notes |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| plot-mode | Lane 1 | Node contract + handoff | Viewer launch confidence / shell messaging | spec-review-pending | manual-review-needed | \`abc1234\` | \`n/a\` | \`git status --short\` | n/a | n/a | 0 | n/a | none | Tighten snapshot builder semantics when real 7d history evolves | none | test row |
+| Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| plot-mode | Lane 1 | Node contract + handoff | Viewer launch confidence / shell messaging | spec-review-pending | \`abc1234\` | \`git status --short\` | none | Tighten snapshot builder semantics when real 7d history evolves | test row |
 `,
     'utf8',
   );
@@ -246,14 +246,14 @@ function setupSelfHostingScheduleFixture() {
     path.join(root, 'NLSDD', 'scoreboard.md'),
     `# NLSDD Scoreboard
 
-| Execution | Lane | Ownership | Current item | Phase | Effective phase | Item commit | Branch HEAD | Last verification | Last probe | Latest event | Correction count | Last activity | Blocked by | Next refill target | Noise | Notes |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| nlsdd-self-hosting | Lane 1 | Scheduler core | Normalize scheduling phases for multi-lane dispatch | implementing | implementing | \`1a2b3c4\` | \`1a2b3c4\` | \`node --test tests/nlsdd-automation.test.js\` | 2026-03-21 03:10:00Z · HEAD 1a2b3c4 · clean | PASS · Feynman · 2026-03-21 03:10:00Z | 0 | 2026-03-21 03:10:00Z | none | Scheduler edge cases | none | active lane |
-| nlsdd-self-hosting | Lane 2 | Scoreboard integration | Keep scoreboard rows aligned with the active-cap model | spec-review-pending | spec-review-pending | \`2a2b3c4\` | \`2a2b3c4\` | \`npm run nlsdd:scoreboard:refresh\` | 2026-03-21 03:11:00Z · HEAD 2a2b3c4 · clean | PASS · Banach · 2026-03-21 03:11:00Z | 0 | 2026-03-21 03:11:00Z | none | Scoreboard wording polish | none | active lane |
-| nlsdd-self-hosting | Lane 3 | Rules and communication | Rewrite remaining fixed-lane wording | refill-ready | refill-ready | \`3a2b3c4\` | \`3a2b3c4\` | \`rg -n "active lane count" spec/NLSDD; rg -n "4 active lanes" NLSDD\` | 2026-03-21 03:12:00Z · HEAD 3a2b3c4 · clean | PASS · Archimedes · 2026-03-21 03:12:00Z | 0 | 2026-03-21 03:12:00Z | none | Execution wording cleanup | none | ready to refill |
-| nlsdd-self-hosting | Lane 4 | Regression and CLI surface | Add schedule regression coverage | refill-ready | refill-ready | \`4a2b3c4\` | \`4a2b3c4\` | \`node --test tests/nlsdd-automation.test.js\` | 2026-03-21 03:13:00Z · HEAD 4a2b3c4 · clean | PASS · Helmholtz · 2026-03-21 03:13:00Z | 0 | 2026-03-21 03:13:00Z | none | Scoreboard/schedule cross-check coverage | none | ready to refill |
-| nlsdd-self-hosting | Lane 5 | Plot-mode migration | Adjust plot-mode docs to lane-pool language | queued | queued | \`n/a\` | \`n/a\` | \`rg -n "lane pool" NLSDD/executions/plot-mode\` | n/a | n/a | 0 | n/a | wait-slot | Plot-mode overview wording | none | queued lane |
-| nlsdd-self-hosting | Lane 6 | Coordinator follow-up | Capture coordinator ergonomics follow-up | queued | queued | \`n/a\` | \`n/a\` | \`sed -n '1,220p' tasks/todo.md\` | n/a | n/a | 0 | n/a | wait-slot | Coordinator follow-up | none | queued lane |
+| Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| nlsdd-self-hosting | Lane 1 | Scheduler core | Normalize scheduling phases for multi-lane dispatch | implementing | \`1a2b3c4\` | \`node --test tests/nlsdd-automation.test.js\` | none | Scheduler edge cases | active lane |
+| nlsdd-self-hosting | Lane 2 | Scoreboard integration | Keep scoreboard rows aligned with the active-cap model | spec-review-pending | \`2a2b3c4\` | \`npm run nlsdd:scoreboard:refresh\` | none | Scoreboard wording polish | active lane |
+| nlsdd-self-hosting | Lane 3 | Rules and communication | Rewrite remaining fixed-lane wording | refill-ready | \`3a2b3c4\` | \`rg -n "active lane count" spec/NLSDD; rg -n "4 active lanes" NLSDD\` | none | Execution wording cleanup | ready to refill |
+| nlsdd-self-hosting | Lane 4 | Regression and CLI surface | Add schedule regression coverage | refill-ready | \`4a2b3c4\` | \`node --test tests/nlsdd-automation.test.js\` | none | Scoreboard/schedule cross-check coverage | ready to refill |
+| nlsdd-self-hosting | Lane 5 | Plot-mode migration | Adjust plot-mode docs to lane-pool language | queued | \`n/a\` | \`rg -n "lane pool" NLSDD/executions/plot-mode\` | wait-slot | Plot-mode overview wording | queued lane |
+| nlsdd-self-hosting | Lane 6 | Coordinator follow-up | Capture coordinator ergonomics follow-up | queued | \`n/a\` | \`sed -n '1,220p' tasks/todo.md\` | wait-slot | Coordinator follow-up | queued lane |
 `,
     'utf8',
   );

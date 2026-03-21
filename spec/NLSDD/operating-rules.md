@@ -25,7 +25,8 @@
 - Every execution may keep execution-aware lane runtime state under `NLSDD/state/<execution-id>/`.
 - Every execution must have one canonical tracked row set in `NLSDD/scoreboard.md`.
 - Auto-refreshed runtime scoreboard output should be written under `NLSDD/state/`, not back into the tracked scoreboard.
-- Scoreboard rows may contain both manual coordinator fields and auto-derived fields; automation may suggest state, but the coordinator remains the decision-maker for dispatch.
+- The tracked scoreboard should keep only coordinator-owned manual fields; full auto-derived lane state belongs in the runtime scoreboard.
+- Runtime scoreboard rows may contain both manual coordinator fields and auto-derived fields; automation may suggest state, but the coordinator remains the decision-maker for dispatch.
 - Not every lane row has to consume an active thread slot at all times; queued or parked lanes may remain visible in the scoreboard until a slot opens, then the coordinator can promote the next eligible queued lane into that slot.
 - Runtime tooling must resolve the canonical repo root even when invoked from a linked worktree, so lane plans, worktrees, and state files always point back to the same execution root.
 
@@ -59,6 +60,7 @@
   - cross-lane lessons in `tasks/lessons.md`
 - Implementers and reviewers should not "helpfully" update those files as part of feature work.
 - Auto-refresh tooling may rewrite the scoreboard's derived columns, but must not overwrite manual intent fields such as `Current item`, `Phase`, or `Blocked by`.
+- Runtime scoreboard generation may expand the tracked scoreboard into a richer derived table, but the tracked scoreboard itself should stay manual-only.
 - Lane journal files are the execution-aware runtime source of truth for phase transitions, latest commit metadata, and next expected gate when those details need to survive across probes, reviews, and worktree-local invocations.
 
 ## Review Rules

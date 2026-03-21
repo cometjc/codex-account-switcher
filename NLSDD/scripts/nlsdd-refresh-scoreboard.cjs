@@ -18,6 +18,25 @@ const {
 const projectRoot = resolveProjectRoot();
 const scoreboardPath = resolveScoreboardPath(projectRoot);
 const runtimeScoreboardPath = resolveRuntimeScoreboardPath(projectRoot);
+const runtimeColumns = [
+  'Execution',
+  'Lane',
+  'Ownership',
+  'Current item',
+  'Phase',
+  'Effective phase',
+  'Item commit',
+  'Branch HEAD',
+  'Last verification',
+  'Last probe',
+  'Latest event',
+  'Correction count',
+  'Last activity',
+  'Blocked by',
+  'Next refill target',
+  'Noise',
+  'Notes',
+];
 
 function escapeTableCell(value) {
   return String(value).replace(/\|/g, '\\|');
@@ -72,13 +91,13 @@ function updateScoreboard() {
   }
 
   const renderedRows = table.objects.map((row) =>
-    joinRow(table.columns.map((column) => escapeTableCell(row[column] || ''))),
+    joinRow(runtimeColumns.map((column) => escapeTableCell(row[column] || ''))),
   );
   const recentThreadsSection = buildRecentThreadsSection(readRecentThreads(projectRoot, 8));
   const nextLines = [
     ...table.lines.slice(0, table.headerIndex),
-    table.header,
-    table.separator,
+    joinRow(runtimeColumns),
+    joinRow(runtimeColumns.map(() => '---')),
     ...renderedRows,
     '',
     recentThreadsSection,

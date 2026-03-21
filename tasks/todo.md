@@ -7,6 +7,7 @@
 - [x] 更新 NLSDD 定義與執行文件，明確區分 tracked scoreboard 與 runtime scoreboard
 - [x] 補回歸測試，確認 refresh 會保留 tracked scoreboard 並改寫 runtime scoreboard
 - [x] 讓 schedule / refill helper 優先讀取 runtime scoreboard，缺席時才回退到 tracked scoreboard
+- [x] 將 tracked scoreboard 收斂成 manual-only 表格，讓 runtime scoreboard 承接完整 auto 欄位
 
 ## Review
 
@@ -14,6 +15,7 @@
 - 修正：新增 ignored runtime scoreboard 邊界，refresh 現在改寫 `NLSDD/state/scoreboard.runtime.md`；tracked 的 `NLSDD/scoreboard.md` 只保留 coordinator 維護的 canonical row set 與說明。
 - 一併把 [`NLSDD/state/`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/state/) 納入 [`.gitignore`](/home/jethro/repo/side-projects/codex-account-switcher/.gitignore)，讓 lane journal 與 runtime scoreboard 同屬執行期狀態，不再污染 tracked tree。
 - 補上 `schedule` / `refill` 讀取鏈路，現在會優先使用 runtime scoreboard；只有 runtime 檔不存在時，才回退到 tracked scoreboard，避免 source of truth 再次分裂。
+- 再進一步將 tracked scoreboard 表格收斂為 manual-only 欄位；runtime refresh 會從這份人工欄位表擴張出完整的 derived table，讓 tracked 與 runtime 的責任分界更乾淨。
 - 驗證：
   - `node --test tests/nlsdd-automation.test.js`
   - `npm run nlsdd:scoreboard:refresh`
