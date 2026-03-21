@@ -1,0 +1,46 @@
+# Lane 1 Plan - Node Contract and Handoff
+
+> Ownership family:
+> `src/commands/root.ts`, `src/lib/plot/**`, `package.json`, `tests/plot-mode-shell.test.js`, `tests/plot-snapshot.test.js`, `tests/plot-handoff.test.js`
+>
+> NLSDD worktree: `.worktrees/lane-1-node`
+>
+> Lane-local verification:
+> `npm run build`
+> `node --test tests/plot-handoff.test.js`
+> `node --test tests/plot-mode-shell.test.js`
+
+## M - Model / Contract
+
+- [x] Define the TypeScript plot snapshot contract and barrel export
+- [x] Add stable JSON serialization for Rust handoff
+- [x] Add regression tests for snapshot builder and serializer
+- [ ] Tighten snapshot builder semantics when real 7d history or 5h band math evolves
+
+## V - View / Shell Surface
+
+- [x] Add `plot` as a visible mode in the Node shell
+- [x] Keep help text and mode cycle regression-tested
+- [x] Refine plot-mode shell messaging once Rust viewer becomes reliably launchable
+
+## C - Controller / Handoff
+
+- [x] Build a temp snapshot from current menu state
+- [x] Write the snapshot to `/tmp` and preserve the path when viewer launch is unavailable
+- [x] Add cargo-backed `plot:viewer:build` and `plot:viewer:run` scripts
+- [x] Add a Node handoff regression test for temp snapshot preparation
+- [x] Switch from fallback logging to full viewer launch confidence once Rust runtime is stable
+- [x] Add end-to-end handoff verification against the real Rust binary
+
+## Current Lane Status
+
+- [x] First-round handoff verification landed and passed review
+- [x] Second-round shell confidence / retry messaging implementer commit landed
+- [ ] Review second-round commit `1d29843`
+- [x] This lane occupies one active slot in the execution's lane pool; additional plot-mode lanes may remain queued or parked outside this lane.
+
+## Refill Order
+
+- [x] First refill target after the current item: remaining Controller items
+- [ ] Then consume remaining Model items
+- [ ] Only then touch future View polish

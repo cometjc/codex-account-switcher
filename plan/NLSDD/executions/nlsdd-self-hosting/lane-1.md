@@ -1,0 +1,33 @@
+# Lane 1 Plan - Scheduler Core
+
+> Ownership family:
+> `scripts/nlsdd-lib.cjs`, `scripts/nlsdd-suggest-schedule.cjs`
+>
+> NLSDD worktree: `.worktrees/nlsdd-lane-1-scheduler`
+>
+> Lane-local verification:
+> `node --test tests/nlsdd-automation.test.js`
+> `node scripts/nlsdd-suggest-schedule.cjs --execution nlsdd-self-hosting --json`
+
+## M - Scheduling Semantics
+
+- [ ] Normalize scoreboard rows into explicit scheduling phases without conflating manual and derived fields
+- [ ] Ensure active-thread counting is stable for `implementing`, review-pending, and correction phases
+
+## V - Schedule Output
+
+- [ ] Render schedule suggestions that prefer `refill-ready` lanes before `queued` lanes
+- [ ] Surface enough schedule metadata for coordinator-side dispatch decisions
+
+## C - CLI Glue
+
+- [ ] Keep `nlsdd:schedule:suggest` usable for executions with lane pools larger than the active subagent cap
+
+## Current Lane Status
+
+- [ ] Active lane item: finish and verify the first multi-lane / 4-thread schedule helper pass in the initial active set
+
+## Refill Order
+
+- [ ] First refill target: scheduler edge cases
+- [ ] Then widen into phase heuristics only if the tests expose a real gap

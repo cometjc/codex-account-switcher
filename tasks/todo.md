@@ -182,6 +182,29 @@
   `node --test tests/workload-tier.test.js`
   `node --test tests/entrypoints.test.js`
 
+# 2026-03-21 NLSDD self-hosting 多 lane / 4 active threads
+
+- [x] 為 `NLSDD` 自身建立一個 self-hosting execution，使用 lane pool > 4 與 active cap = 4 的模型
+- [x] 補齊 schedule helper 與相關共用函式，讓 `queued` / `refill-ready` / active thread usage 可被一致推導
+- [x] 將 scoreboard 與 execution docs 對齊新的 scheduling model，能顯示 queued lanes 與下一個 dispatch 建議
+- [x] 補 NLSDD scheduler regression tests 與 CLI smoke checks
+- [x] 用 NLSDD 派出 4 個 active subagents，沿著 self-hosting lanes 實作上述變更
+- [x] 執行建置、NLSDD tooling tests 與 schedule/scoreboard 指令驗證
+
+## Review
+
+- 新增 `nlsdd-self-hosting` execution，lane pool 共有 6 條，但 scheduler 與 scoreboard 以 4 個 active thread slots 為上限；Lane 1-4 是 initial active set，Lane 5-6 保持 queued follow-up。
+- `scripts/nlsdd-lib.cjs` 現在支援 schedule-aware phase 推導、4-thread dispatch suggestion，以及 markdown table row 在 backtick code span 內含 `|` 時的安全解析。
+- `scripts/nlsdd-refresh-scoreboard.cjs` 會在重寫 scoreboard row 前 escape table cell 內的 `|`，避免 refresh 後再把 scheduler parser 餵壞。
+- `plan/NLSDD/scoreboard.md` 現在明確標示 self-hosting execution 的 initial active set、queued follow-up lanes 與 dispatch 順序。
+- `plan/NLSDD/executions/nlsdd-self-hosting/` 與 `plan/NLSDD/executions/plot-mode/` 都已改成 lane-pool + active-cap 語言，不再把 lane 數量和 active thread 數量綁死。
+- 這輪實際用 4 個 active subagents 跑了 scheduler、scoreboard、rules/docs、tests 4 條線，並在 slot 釋放後用 queued lanes 做 refill，驗證 `NLSDD` 可以用來開發 `NLSDD` 本身。
+- 驗證：
+  `node --test tests/nlsdd-automation.test.js`
+  `node scripts/nlsdd-suggest-schedule.cjs --execution nlsdd-self-hosting`
+  `npm run nlsdd:scoreboard:refresh`
+  `npm run build`
+
 # 2026-03-20 delta 欄距與 pacing 拆欄修正
 
 - [x] 收緊 `🔄 in` 區段欄距，避免時間值前方出現過寬空白
@@ -366,3 +389,118 @@
   `node --test tests/ui-state.test.js`
   `node --test tests/root-table-layout.test.js`
   `node --test tests/entrypoints.test.js`
+
+# 2026-03-21 plot mode 固定 lane orchestration 規劃
+
+- [x] 盤點目前 plot mode roadmap 與已落地的 sub-agent workstream
+- [x] 將並行協作收斂成 4 條固定、不重疊的 lane family
+- [x] 為每條 lane 寫出 lane-local MVC checklist 與 refill 順序
+- [x] 更新 sub-agent 守則，要求後續 agent 沿 lane plan 指派並回報 MVC 進度
+
+## Review
+
+- 新增 [`plan/NLSDD/executions/plot-mode/overview.md`](/home/jethro/repo/side-projects/codex-account-switcher/plan/NLSDD/executions/plot-mode/overview.md) 作為總覽，固定 plot-mode execution 的 lanes 與各自 ownership family。
+- 新增 4 份 lane plan：
+  `plan/NLSDD/executions/plot-mode/lane-1.md`
+  `plan/NLSDD/executions/plot-mode/lane-2.md`
+  `plan/NLSDD/executions/plot-mode/lane-3.md`
+  `plan/NLSDD/executions/plot-mode/lane-4.md`
+- [`plan/NLSDD/guardrails.md`](/home/jethro/repo/side-projects/codex-account-switcher/plan/NLSDD/guardrails.md) 現在明確要求：sub-agent 應先從 lane plan 指派，回報要帶 `Lane + MVC step`，且 refill 應優先消耗同 lane 的下一個 unchecked item。
+- [`plan/2026-03-20-multi-phase-routing-plan.md`](/home/jethro/repo/side-projects/codex-account-switcher/plan/2026-03-20-multi-phase-routing-plan.md) 也同步記錄這次 lane-based orchestration 決策。
+
+# 2026-03-21 NLSDD operating rules 落地
+
+- [x] 將 lane-based workflow 正式收斂為 repo-native `NLSDD`
+- [x] 新增 `NLSDD` 核心 operating rules 文件
+- [x] 將 overview、guardrails、lane plans 改成集中於 `plan/NLSDD/`
+- [x] 明確規範 per-lane worktree、per-item commit、commit-diff review、coordinator-owned tracking
+- [x] 將 Lane 4 對 Lane 2 render boundary 的依賴寫回 lane plan，避免再用執行中 scope expansion 硬撐
+- [x] 新增 repo 內 scoreboard、communication 通道文件與 autopilot / probe 規則
+- [x] 將 Rust `target/` 噪音治理拆成 `.gitignore` + lane-local 去追蹤清理
+
+## Review
+
+- 新增 [`plan/NLSDD/operating-rules.md`](/home/jethro/repo/side-projects/codex-account-switcher/plan/NLSDD/operating-rules.md)，作為 repo 內建的 NLSDD workflow 定義。
+- 新增 [`plan/NLSDD/guardrails.md`](/home/jethro/repo/side-projects/codex-account-switcher/plan/NLSDD/guardrails.md)、[`plan/NLSDD/communication.md`](/home/jethro/repo/side-projects/codex-account-switcher/plan/NLSDD/communication.md)、[`plan/NLSDD/scoreboard.md`](/home/jethro/repo/side-projects/codex-account-switcher/plan/NLSDD/scoreboard.md)。
+- plot-mode lane docs 現在集中在 `plan/NLSDD/executions/plot-mode/`，不再散落於 `plan/` 根目錄。
+- `.gitignore` 現在忽略 `rust/plot-viewer/target/`，後續再配合 lane-local cleanup 去掉已進索引的 artifacts。
+
+# 2026-03-21 plot mode NLSDD 第一輪執行
+
+- [x] 為 Lane 1-4 建立 lane-local worktrees，避免 reviewer 被 shared dirty worktree 汙染
+- [x] 讓 Lane 1 完成 real Rust viewer handoff 驗證，並走完 spec / quality review
+- [x] 讓 Lane 2 完成 panel boundary seam 擴張與 drawable layout 修正，並走完 spec / quality review
+- [x] 讓 Lane 3 完成 `chart.rs` 的 local view-model 抽離，並走完 spec / quality review
+- [x] 讓 Lane 4 消費 Lane 2 seam，做出第一個可見 Summary / Compare panel surface，並走完 spec / quality review
+- [x] 由 coordinator 回寫 lane plans、overview plan 與主線 progress
+
+## Review
+
+- Lane 1 在 [`.worktrees/lane-1-node`](/home/jethro/repo/side-projects/codex-account-switcher/.worktrees/lane-1-node) 完成 real-binary handoff test，修正後綁回 `RootCommand.prototype.launchPlotViewer`，不再只是旁路測試。
+- Lane 2 在 [`.worktrees/lane-2-runtime`](/home/jethro/repo/side-projects/codex-account-switcher/.worktrees/lane-2-runtime) 先做 panel boundary expansion，再補一次 correction，把 `PanelRenderContext` 分清楚 outer `area` 與實際 drawable `content_area/layout`。
+- Lane 3 在 [`.worktrees/lane-3-chart`](/home/jethro/repo/side-projects/codex-account-switcher/.worktrees/lane-3-chart) 將 `chart.rs` 抽成私有 `ChartViewModel`，把 focused profile、7d bounds、5h band availability 的推導邏輯留在 chart lane 內。
+- Lane 4 在 [`.worktrees/lane-4-panels`](/home/jethro/repo/side-projects/codex-account-switcher/.worktrees/lane-4-panels) 消費 Lane 2 seam，補上 `Selected / Current / Focus / Pairing` 這類真正可見的 Summary / Compare body 內容。
+- 這輪證明 `NLSDD` 可實際運作：每個 lane item 都有 lane-local commit，reviewer 只看該 item diff，correction loop 也能留在原 lane 內處理。
+- 驗證：
+  - `node --test tests/plot-handoff.test.js` in `.worktrees/lane-1-node`
+  - `cargo test --manifest-path rust/plot-viewer/Cargo.toml` in `.worktrees/lane-2-runtime`
+  - `cargo check --manifest-path rust/plot-viewer/Cargo.toml` in `.worktrees/lane-2-runtime`
+  - `cargo test --manifest-path rust/plot-viewer/Cargo.toml` in `.worktrees/lane-3-chart`
+  - `cargo test --manifest-path rust/plot-viewer/Cargo.toml` in `.worktrees/lane-4-panels`
+
+# 2026-03-21 NLSDD 集中化與 noise cleanup
+
+- [x] 建立 `plan/NLSDD/` 並集中 operating rules、guardrails、communication、scoreboard 與 execution docs
+- [x] 將 plot-mode lane docs 搬進 `plan/NLSDD/executions/plot-mode/`
+- [x] 加入 `autopilot refill`、`lane status probe`、`coordinator sidecar` 溝通規則
+- [x] 以 `.gitignore` 管理未追蹤的 Rust `target/` 輸出
+- [x] 在含有 tracked artifacts 的 lane worktree 上做 lane-local 去追蹤清理
+
+## Review
+
+- `plan/NLSDD/` 現在是 NLSDD 的唯一正式文件區，不再讓 4LSDD 規則散落在 `plan/` 根目錄。
+- [`plan/NLSDD/scoreboard.md`](/home/jethro/repo/side-projects/codex-account-switcher/plan/NLSDD/scoreboard.md) 集中記錄 execution、lane、phase、latest commit、next refill target 與 noise 狀態。
+- [`plan/NLSDD/communication.md`](/home/jethro/repo/side-projects/codex-account-switcher/plan/NLSDD/communication.md) 將 reviewer / implementer / coordinator 的 sidecar 通道與 arbitration 規則固定化。
+- 噪音治理現在明確分成兩層：`.gitignore` 處理未追蹤 `target/`，lane worktree 再各自清掉已進索引的 `target/**`。
+
+# 2026-03-21 NLSDD scoreboard 半自動化第一版
+
+- [x] 新增 scoreboard refresh script，從 lane worktrees 自動回填 `Branch HEAD`、`Last probe`、`Noise`
+- [x] 從 `~/.codex/state_5.sqlite` 補 recent Codex threads 附錄，作為 agent activity sidecar
+- [x] 將 scoreboard 調整成手動欄位與自動欄位並存
+- [x] 補 npm script 接線並完成實際 refresh 驗證
+
+## Review
+
+- 新增 [`scripts/nlsdd-refresh-scoreboard.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/scripts/nlsdd-refresh-scoreboard.cjs)，會讀取 `plan/NLSDD/scoreboard.md`、lane plans、lane worktrees，以及 `~/.codex/state_5.sqlite`。
+- scoreboard 現在保留 `Current item`、`Phase`、`Item commit`、`Blocked by`、`Next refill target`、`Notes` 這些人工決策欄位，同時自動更新 `Branch HEAD`、`Last probe`、`Noise`。
+- 自動附錄的 `Recent Codex Threads` 會列出最近在這個 repo cwd 活動的 subagent nickname、role、thread id 與 updated time，讓 coordinator 不用手動去 `.codex` 查。
+- 驗證：
+  - `node scripts/nlsdd-refresh-scoreboard.cjs`
+
+# 2026-03-21 NLSDD v2 自動化
+
+- [x] 升級 scoreboard refresh，從 `sessions/*.jsonl` 推導 lane-level `Effective phase`、`Latest event`、`Correction count`、`Last activity`
+- [x] 新增 lane probe helper，將 source diff、artifact noise 與 lane-local verification 集中輸出
+- [x] 新增 refill assistant，為 `refill-ready` lane 建議下一個 lane-local item
+- [x] 新增 sidecar message helper，產生 implementer / reviewer / correction 模板草稿
+- [x] 更新 NLSDD docs 與 scoreboard 欄位，明確區分人工欄位與自動欄位
+
+## Review
+
+- 新增 [`scripts/nlsdd-lib.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/scripts/nlsdd-lib.cjs) 集中處理 scoreboard 表格、lane plan、thread/session event、phase 推導與 refill item 抽取。
+- 新增 [`scripts/nlsdd-probe-lane.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/scripts/nlsdd-probe-lane.cjs)、[`scripts/nlsdd-suggest-refill.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/scripts/nlsdd-suggest-refill.cjs)、[`scripts/nlsdd-compose-message.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/scripts/nlsdd-compose-message.cjs)。
+- [`plan/NLSDD/scoreboard.md`](/home/jethro/repo/side-projects/codex-account-switcher/plan/NLSDD/scoreboard.md) 現在同時承載 manual `Phase` 與 auto-derived `Effective phase`，避免 automation 直接覆寫 coordinator 意圖。
+- `autopilot refill` 在 v2 仍維持 assistive 模式：腳本只建議下一個 item，不直接派工或改 checklist。
+
+# 2026-03-21 NLSDD 多 lane / 4 active threads 模型
+
+- [x] 將 NLSDD 規則改成 lane pool 可超過 4，但同時只維持 4 個 active subagents
+- [x] 補上 scheduler helper，讓 coordinator 能看到 active thread 使用量、可用 slot 與下一批 dispatch 建議
+- [x] 更新 scoreboard / overview 文件，明確區分 queued / parked lane 與 active lane
+
+## Review
+
+- [`plan/NLSDD/operating-rules.md`](/home/jethro/repo/side-projects/codex-account-switcher/plan/NLSDD/operating-rules.md) 現在以 `lane pool size + active subagent cap` 取代舊的固定 `active lane count`。
+- [`scripts/nlsdd-suggest-schedule.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/scripts/nlsdd-suggest-schedule.cjs) 會彙整 active lanes、refill-ready lanes、queued lanes 與 dispatch suggestions。
+- [`plan/NLSDD/scoreboard.md`](/home/jethro/repo/side-projects/codex-account-switcher/plan/NLSDD/scoreboard.md) 補了建議 phase vocabulary，讓超過 4 條 lane 時仍能用 `queued` / `parked` 管理非 active lanes。
