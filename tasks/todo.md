@@ -780,3 +780,15 @@
   - `Idle slots`
   - `No dispatch reason`
 - regression 在 [tests/nlsdd-automation.test.js](/home/jethro/repo/side-projects/codex-account-switcher/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-run-cycle.cjs --execution plot-mode --json` 已通過。
+
+# 2026-03-21 NLSDD launch-active-set bridge
+
+- [x] 在 cycle helper 之上新增一層 launch bridge，讓單次指令除了 reconcile/promote，也能回傳 coordinator-ready assignment bundles
+- [x] 讓 assignment bundle 直接吃 lane plan 的 ownership family、verification commands 與 next actionable item
+- [x] 補 regression test，鎖住 promoted lane 會產出 implementer-assignment 文案與對應 scope/verification
+
+## Review
+
+- 新增 [`NLSDD/scripts/nlsdd-launch-active-set.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-launch-active-set.cjs) 與 `npm run nlsdd:launch`，讓 coordinator 用一個指令就能拿到 `completed lanes`、`promoted lanes`、`idle slots` 與每條 promoted lane 的 handoff message。
+- [`NLSDD/scripts/nlsdd-lib.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-lib.cjs) 的 lane plan parser 現在會保留 `Ownership family`，避免 assignment bundle 只能回 generic scope。
+- regression 在 [tests/nlsdd-automation.test.js](/home/jethro/repo/side-projects/codex-account-switcher/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-launch-active-set.cjs --execution plot-mode --json --dry-run` 已通過。

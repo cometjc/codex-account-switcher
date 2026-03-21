@@ -959,6 +959,9 @@ test('dispatch cycle reconciles stale lanes and promotes next queued work', () =
     path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-1.md'),
     `# Lane 1
 
+> Ownership family:
+> \`src/commands/root.ts\`
+>
 > NLSDD worktree: \`.worktrees/lane-1-node\`
 >
 > Lane-local verification:
@@ -974,6 +977,9 @@ test('dispatch cycle reconciles stale lanes and promotes next queued work', () =
     path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-2.md'),
     `# Lane 2
 
+> Ownership family:
+> \`rust/plot-viewer/src/render/mod.rs\`
+>
 > NLSDD worktree: \`.worktrees/lane-2-runtime\`
 >
 > Lane-local verification:
@@ -1044,4 +1050,113 @@ test('dispatch cycle reconciles stale lanes and promotes next queued work', () =
   const finalSchedule = result.finalSchedule;
   assert.deepEqual(finalSchedule.activeRows.map((row) => row.Lane), ['Lane 2']);
   assert.deepEqual(finalSchedule.staleRows.map((row) => row.Lane), []);
+});
+
+test('launch helper returns assignment bundles for newly promoted lanes', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-launch-'));
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  const lane1Worktree = path.join(root, '.worktrees', 'lane-1-node');
+  const lane2Worktree = path.join(root, '.worktrees', 'lane-2-runtime');
+  setupTempGitRepo(lane1Worktree);
+  setupTempGitRepo(lane2Worktree);
+
+  const lane1Head = run('git', ['rev-parse', '--short', 'HEAD'], lane1Worktree);
+  const lane2Head = run('git', ['rev-parse', '--short', 'HEAD'], lane2Worktree);
+
+  fs.mkdirSync(path.join(root, 'NLSDD', 'executions', 'plot-mode'), {recursive: true});
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-1.md'),
+    `# Lane 1
+
+> Ownership family:
+> \`src/commands/root.ts\`
+>
+> NLSDD worktree: \`.worktrees/lane-1-node\`
+>
+> Lane-local verification:
+> \`git status --short\`
+
+## C - Controller
+
+- [ ] Future shell audit
+`,
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-2.md'),
+    `# Lane 2
+
+> Ownership family:
+> \`rust/plot-viewer/src/render/mod.rs\`
+>
+> NLSDD worktree: \`.worktrees/lane-2-runtime\`
+>
+> Lane-local verification:
+> \`git status --short\`
+> \`cargo check --manifest-path rust/plot-viewer/Cargo.toml\`
+
+## V - View
+
+- [ ] Runtime compare seam follow-up
+`,
+    'utf8',
+  );
+
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'scoreboard.md'),
+    `# NLSDD Scoreboard
+
+| Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| plot-mode | Lane 1 | Node contract + handoff | Future shell audit | parked | \`${lane1Head}\` | \`git status --short\` | none | none | parked truth |
+| plot-mode | Lane 2 | Rust runtime + boundary | Runtime compare seam follow-up | queued | \`${lane2Head}\` | \`git status --short\` | none | next runtime step | queued truth |
+`,
+    'utf8',
+  );
+
+  writeLaneState(root, 'plot-mode', 1, {
+    execution: 'plot-mode',
+    lane: 'Lane 1',
+    phase: 'implementing',
+    expectedNextPhase: 'spec-review-pending',
+    latestCommit: lane1Head,
+    lastReviewerResult: null,
+    lastVerification: ['git status --short'],
+    blockedBy: null,
+    note: 'stale implementing lane',
+    correctionCount: 0,
+    updatedAt: '2020-01-01T00:00:00.000Z',
+  });
+  writeLaneState(root, 'plot-mode', 2, {
+    execution: 'plot-mode',
+    lane: 'Lane 2',
+    phase: 'queued',
+    expectedNextPhase: 'implementing',
+    latestCommit: lane2Head,
+    lastReviewerResult: null,
+    lastVerification: ['git status --short'],
+    blockedBy: null,
+    note: 'next lane ready',
+    correctionCount: 0,
+    updatedAt: '2026-03-21T10:00:00.000Z',
+  });
+
+  const {launchActiveSet} = freshRequire('NLSDD/scripts/nlsdd-launch-active-set.cjs');
+  const result = launchActiveSet(root, 'plot-mode', 2, false);
+
+  assert.deepEqual(result.completedLanes, ['Lane 1']);
+  assert.deepEqual(result.promoted.map((entry) => entry.lane), ['Lane 2']);
+  assert.equal(result.assignments.length, 1);
+  assert.equal(result.assignments[0].lane, 'Lane 2');
+  assert.equal(result.assignments[0].nextItem, 'Runtime compare seam follow-up');
+  assert.deepEqual(result.assignments[0].verification, [
+    'git status --short',
+    'cargo check --manifest-path rust/plot-viewer/Cargo.toml',
+  ]);
+  assert.match(result.assignments[0].scope, /rust\/plot-viewer\/src\/render\/mod\.rs/);
+  assert.match(result.assignments[0].message, /Execution: plot-mode/);
+  assert.match(result.assignments[0].message, /Lane: Lane 2/);
+  assert.match(result.assignments[0].message, /Lane item intent: Runtime compare seam follow-up/);
+  assert.match(result.assignments[0].message, /Write scope: rust\/plot-viewer\/src\/render\/mod\.rs/);
 });

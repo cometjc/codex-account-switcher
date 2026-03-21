@@ -9,6 +9,7 @@
 - 若要記錄執行期 insight，優先使用 `NLSDD/scripts/nlsdd-record-insight.cjs`；不要把這類動態觀察只留在 thread history 裡。
 - 若要重排某個 execution 的 active/parked lane set，優先使用 `NLSDD/scripts/nlsdd-replan-active-set.cjs`，不要只改 tracked scoreboard 而忘記同步 lane journal。
 - 若只是要跑一輪低判斷成本的 lane 調度，優先使用 `NLSDD/scripts/nlsdd-run-cycle.cjs`；它應一次完成 stale lane 收尾、runtime refresh、下一批 lane promotion，並回傳完成/派送/閒置 slot 狀態。
+- 若要把同一輪 cycle 的 promotion 直接轉成 coordinator-ready implementer assignment，優先使用 `NLSDD/scripts/nlsdd-launch-active-set.cjs`；它應在 cycle 之後回傳每條 promoted lane 的 scope、verification 與可直接轉發的 handoff 文案。
 - `NLSDD/` 只放實際執行所需 artefacts；通用定義、規格與不依賴單次 execution 的治理文件應維護在 `spec/NLSDD/`。
 - 只要一個 lane-local MVC step 已完成且驗證通過，就應預設立即收斂成 lane-item commit；不要把多個已完成 MVC step 疊在同一個未提交狀態裡。
 - 若某個 execution 開始收束成單一 critical lane，導致其他 slot 只是在等它完成，就應視為需要 replan 的訊號；優先切出新的獨立 lane，或改成同時推進 2-3 個 plans/executions，而不是維持假的 4-active 表象。

@@ -74,6 +74,8 @@
 
 These templates may be generated through `node NLSDD/scripts/nlsdd-compose-message.cjs ...`, but the coordinator still decides when and how to send them.
 
+- When coordinator wants to collapse "reconcile stale lanes + promote next lanes + generate implementer-assignment text" into one deterministic pass, prefer `npm run nlsdd:launch -- --execution <id>`. The launch helper should reuse the same implementer-assignment template rather than inventing a second dispatch wording.
+
 ### Implementer Assignment
 
 - lane name

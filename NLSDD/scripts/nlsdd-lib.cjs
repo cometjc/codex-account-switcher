@@ -224,6 +224,17 @@ function parseLanePlan(text) {
   const worktreeMatch = text.match(/NLSDD worktree:\s*`([^`]+)`/);
   const worktreeRelativePath = worktreeMatch ? worktreeMatch[1] : null;
 
+  const ownershipEntries = [];
+  const ownershipBlock = text.match(/>\s*Ownership family:\n((?:>\s*`[^`]+`\n?)*)/m);
+  if (ownershipBlock) {
+    for (const line of ownershipBlock[1].split('\n')) {
+      const entryMatch = line.match(/>\s*`([^`]+)`/);
+      if (entryMatch) {
+        ownershipEntries.push(entryMatch[1]);
+      }
+    }
+  }
+
   const verificationCommands = [];
   const verificationBlock = text.match(
     />\s*Lane-local verification:\n((?:>\s*`[^`]+`\n?)*)/m,
@@ -267,6 +278,7 @@ function parseLanePlan(text) {
   }
 
   return {
+    ownershipEntries,
     worktreeRelativePath,
     verificationCommands,
     actionableItems,
