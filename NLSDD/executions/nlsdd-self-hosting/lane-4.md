@@ -29,11 +29,11 @@
 
 - [x] Projected phase: parked
 - [x] Current item: Wait for a fresh regression/CLI surface item after the cross-check coverage landed
-- [x] Latest commit: `71bc61b`
-- [x] Latest event: parked · Lane 4 accepted the cross-check coverage and is now parked pending a genuinely new regression/CLI surface gap.
-- [x] Next expected phase: queued
+- [x] Latest commit: `655aa39`
+- [x] Latest event: parked · Lane 4 is parked after the stale-field clearing regression landed cleanly.
+- [x] Next expected phase: n/a
 - [x] Next refill target: Re-open only if a fresh regression/CLI surface gap appears beyond the accepted cross-check coverage
-- [x] Latest note: Lane 4 accepted the cross-check coverage and is now parked pending a genuinely new regression/CLI surface gap.
+- [x] Latest note: Lane 4 is parked after the stale-field clearing regression landed cleanly.
 
 ## Refill Order
 

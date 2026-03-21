@@ -28,10 +28,10 @@
 - [x] Projected phase: parked
 - [x] Current item: Self-hosting scoreboard rows and schedule-facing refresh
 - [x] Latest commit: `1613f3c`
-- [x] Latest event: parked · Lane 2 scoreboard integration remains stable on the refreshed baseline; keep it parked until a concrete new gap appears.
-- [x] Next expected phase: n/a
+- [x] Latest event: parked · Lane 2 remains parked until a genuinely new scoreboard integration gap appears.
+- [x] Next expected phase: queued
 - [x] Next refill target: Schedule-facing scoreboard wording polish
-- [x] Latest note: Lane 2 scoreboard integration remains stable on the refreshed baseline; keep it parked until a concrete new gap appears.
+- [x] Latest note: Lane 2 remains parked until a genuinely new scoreboard integration gap appears.
 
 ## Refill Order
 

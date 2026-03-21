@@ -28,10 +28,10 @@
 - [x] Projected phase: parked
 - [x] Current item: Multi-lane / 4-thread schedule helper
 - [x] Latest commit: `n/a`
-- [x] Latest event: parked · nlsdd-go: remediation round for reducer drift, read-only helpers, and execution-insights lifecycle
+- [x] Latest event: parked · nlsdd-go: execute review-findings + execution-insights remediation via existing lanes
 - [x] Next expected phase: n/a
 - [x] Next refill target: Scheduler edge cases
-- [x] Latest note: nlsdd-go: remediation round for reducer drift, read-only helpers, and execution-insights lifecycle
+- [x] Latest note: nlsdd-go: execute review-findings + execution-insights remediation via existing lanes
 
 ## Refill Order
 

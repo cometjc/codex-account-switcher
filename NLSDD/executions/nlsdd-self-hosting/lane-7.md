@@ -34,10 +34,10 @@
 - [x] Projected phase: parked
 - [x] Current item: Wait for a fresh scheduler/runtime truth finding after the accepted warning cleanup
 - [x] Latest commit: `9c391aa`
-- [x] Latest event: parked · Lane 7 accepted the warning cleanup and is now parked pending a genuinely new finding.
-- [x] Next expected phase: queued
+- [x] Latest event: parked · Lane 7 is parked because only unrelated main doc drift remains in the worktree.
+- [x] Next expected phase: n/a
 - [x] Next refill target: Re-open only when a new scheduler/runtime truth finding yields a concrete helper, docs delta, or regression
-- [x] Latest note: Lane 7 accepted the warning cleanup and is now parked pending a genuinely new finding.
+- [x] Latest note: Lane 7 is parked because only unrelated main doc drift remains in the worktree.
 
 ## Refill Order
 

@@ -27,10 +27,10 @@
 - [x] Projected phase: parked
 - [x] Current item: Lane-pool + active-cap rules alignment
 - [x] Latest commit: `ef5f71e`
-- [x] Latest event: parked · Lane 3 wording is already converged after ef5f71e; park the lane instead of inventing docs churn.
-- [x] Next expected phase: n/a
+- [x] Latest event: parked · Lane 3 remains parked until a fresh documentation/spec gap appears.
+- [x] Next expected phase: queued
 - [x] Next refill target: Execution-level wording cleanup
-- [x] Latest note: Lane 3 wording is already converged after ef5f71e; park the lane instead of inventing docs churn.
+- [x] Latest note: Lane 3 remains parked until a fresh documentation/spec gap appears.
 
 ## Refill Order
 

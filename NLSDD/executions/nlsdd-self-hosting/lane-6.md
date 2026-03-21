@@ -18,10 +18,10 @@
 - [x] Projected phase: parked
 - [x] Current item: Post-rollout follow-up capture
 - [x] Latest commit: `3c2a967`
-- [x] Latest event: parked · nlsdd-go: remediation round for reducer drift, read-only helpers, and execution-insights lifecycle
+- [x] Latest event: parked · nlsdd-go: execute review-findings + execution-insights remediation via existing lanes
 - [x] Next expected phase: n/a
 - [x] Next refill target: Coordinator workflow follow-up
-- [x] Latest note: nlsdd-go: remediation round for reducer drift, read-only helpers, and execution-insights lifecycle
+- [x] Latest note: nlsdd-go: execute review-findings + execution-insights remediation via existing lanes
 
 ## Refill Order
 

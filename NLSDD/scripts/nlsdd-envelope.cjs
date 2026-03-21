@@ -254,6 +254,8 @@ function buildBootstrapEnvelopes(projectRoot, execution) {
   for (const lane of lanes) {
     const state = loadLaneState(projectRoot, execution, lane);
     const row = rowMap.get(lane);
+    const rowCurrentItem = emptyToNull(row?.['Current item']);
+    const rowNextRefillTarget = emptyToNull(row?.['Next refill target']);
     if (!state && !row) {
       continue;
     }
@@ -265,12 +267,12 @@ function buildBootstrapEnvelopes(projectRoot, execution) {
         eventType: 'bootstrap-state',
         phaseAfter: state?.phase || row?.Phase || 'queued',
         currentItem:
-          state?.currentItem ||
-          row?.['Current item'] ||
-          findNextRefillItem(projectRoot, execution, lane)?.text ||
+          state?.currentItem ??
+          rowCurrentItem ??
+          findNextRefillItem(projectRoot, execution, lane)?.text ??
           null,
         nextRefillTarget:
-          state?.nextRefillTarget || row?.['Next refill target'] || null,
+          state?.nextRefillTarget ?? rowNextRefillTarget ?? null,
         relatedCommit:
           state?.latestCommit ||
           String(row?.['Item commit'] || '')
@@ -322,16 +324,32 @@ function ensureExecutionBootstrap(projectRoot, execution) {
   fs.writeFileSync(filePath, events.map((event) => JSON.stringify(event)).join('\n') + '\n', 'utf8');
 }
 
-function applyEventToLaneState(previous, event, rowMap) {
+function emptyToNull(value) {
+  if (typeof value !== 'string') {
+    return value ?? null;
+  }
+  const trimmed = value.trim();
+  return trimmed === '' ? null : value;
+}
+
+function applyEventToLaneState(projectRoot, previous, event, rowMap) {
   const row = rowMap.get(event.lane);
-  const fallbackNextItem = findNextRefillItem(resolveProjectRoot(), event.execution, event.lane);
+  const fallbackNextItem = findNextRefillItem(projectRoot, event.execution, event.lane);
+  const rowCurrentItem = emptyToNull(row?.['Current item']);
+  const rowNextRefillTarget = emptyToNull(row?.['Next refill target']);
+  const clearsProjectedFields = ['parked', 'noop-satisfied', 'resolved-blocker'].includes(event.eventType);
+  const explicitCurrentItem = Object.prototype.hasOwnProperty.call(event, 'currentItem');
+  const explicitNextRefillTarget = Object.prototype.hasOwnProperty.call(event, 'nextRefillTarget');
+  const explicitNextExpectedPhase = Object.prototype.hasOwnProperty.call(event, 'nextExpectedPhase');
   const nextState = {
     execution: event.execution,
     lane: event.lane,
     phase: event.phaseAfter || previous.phase || row?.Phase || 'queued',
     expectedNextPhase:
-      Object.prototype.hasOwnProperty.call(event, 'nextExpectedPhase')
+      explicitNextExpectedPhase
         ? event.nextExpectedPhase
+        : clearsProjectedFields
+          ? null
         : previous.expectedNextPhase || null,
     latestCommit: event.relatedCommit || previous.latestCommit || null,
     proposedCommitTitle:
@@ -354,16 +372,22 @@ function applyEventToLaneState(previous, event, rowMap) {
         : Number(event.correctionCount),
     updatedAt: event.timestamp,
     currentItem:
-      event.currentItem ||
-      previous.currentItem ||
-      row?.['Current item'] ||
-      fallbackNextItem?.text ||
-      null,
+      explicitCurrentItem
+        ? event.currentItem
+        : clearsProjectedFields
+          ? null
+          : previous.currentItem ??
+            rowCurrentItem ??
+            fallbackNextItem?.text ??
+            null,
     nextRefillTarget:
-      event.nextRefillTarget ||
-      previous.nextRefillTarget ||
-      row?.['Next refill target'] ||
-      null,
+      explicitNextRefillTarget
+        ? event.nextRefillTarget
+        : clearsProjectedFields
+          ? null
+          : previous.nextRefillTarget ??
+            rowNextRefillTarget ??
+            null,
     lastEventType: event.eventType,
     latestSummary: event.summary,
     latestDetail: event.detail || null,
@@ -384,7 +408,7 @@ function replayExecution(projectRoot, execution) {
   for (const event of loadEnvelopeEvents(projectRoot, execution)) {
     if (event.lane && event.lane !== 'global') {
       const previous = states.get(event.lane) || {};
-      states.set(event.lane, applyEventToLaneState(previous, event, rowMap));
+      states.set(event.lane, applyEventToLaneState(projectRoot, previous, event, rowMap));
     }
     for (const insight of event.insights || []) {
       insights.push(insight);
@@ -452,13 +476,13 @@ function updateScoreboardRows(projectRoot, execution, states) {
     if (!state) {
       continue;
     }
-    row['Current item'] = state.currentItem || row['Current item'];
-    row.Phase = state.phase || row.Phase;
+    row['Current item'] = state.currentItem ?? 'n/a';
+    row.Phase = state.phase ?? row.Phase;
     row['Item commit'] = state.latestCommit ? `\`${state.latestCommit}\`` : row['Item commit'];
     row['Last verification'] = formatVerification(state.lastVerification);
-    row['Blocked by'] = state.blockedBy || 'none';
-    row['Next refill target'] = state.nextRefillTarget || row['Next refill target'];
-    row.Notes = state.note || state.latestSummary || row.Notes;
+    row['Blocked by'] = state.blockedBy ?? 'none';
+    row['Next refill target'] = state.nextRefillTarget ?? 'n/a';
+    row.Notes = state.note ?? state.latestSummary ?? row.Notes;
   }
 
   const nextLines = [

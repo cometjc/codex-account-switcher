@@ -997,3 +997,22 @@
 - `plot-mode` 現在共有 14 筆 insight，其中只有 2 筆 actionable，但這 2 筆其實是全域 adopted learnings，不是 lane-local blocker；summary 目前仍把它們和 execution 當下待處理事項放在同一層。
 - `nlsdd-self-hosting` 已收斂到 0 actionable，代表 journal 基本機制可用；真正需要補的是 `plot-mode` 這種混合「歷史 blocker + durable lesson」的情境。
 - 下一步應優先把 insight 的 supersession / graduation 規則做清楚，讓已被 lesson/spec 吸收的 adopted global learnings 不再持續佔據 runtime actionable surface。
+
+# 2026-03-21 nlsdd-go remediation round integration
+
+- [x] 將 Lane 4 的 stale-field clearing regression commit `655aa39` 整合回主線
+- [x] 修正 reducer replay 仍使用錯誤 project root 的剩餘 root cause
+- [x] 修正 parked / noop / resolved-blocker 仍會讓 stale projected fields 長回來的剩餘 root cause
+- [x] 補上空字串 scoreboard cell 應視為無值、可回退到 lane-plan fallback item 的邊界
+- [x] 驗證 `tests/nlsdd-automation.test.js` 與 `nlsdd-self-hosting` dispatch-plan 都回到綠燈
+
+## Review
+
+- 這輪 `nlsdd-go` 的真實產出只有一條 code lane：Lane 4 的 regression test；Lane 2、Lane 3、Lane 7 都經 honest probe 收回 `parked`，沒有硬做虛假的 active work。
+- 當 `655aa39` 整合回主線後，`tests/nlsdd-automation.test.js` 立刻揭露：`NLSDD/scripts/nlsdd-envelope.cjs` 仍有兩個未收乾淨的 root cause，分別是 reducer replay 還會偷回 `resolveProjectRoot()`，以及 `parked/noop/resolved-blocker` 仍會讓舊 `currentItem/nextRefillTarget` 被投影長回來。
+- 這次不是再加 workaround，而是直接在 reducer 裡修根因：讓 replay 全程吃 execution `projectRoot`、對 clearing transitions 明確寫 null、並把空字串 scoreboard cell 視為無值，避免 fallback 鏈被空字串截斷。
+- 驗證結果現在是：
+  - `node --test tests/nlsdd-automation.test.js`
+  - `node NLSDD/scripts/nlsdd-build-dispatch-plan.cjs --execution nlsdd-self-hosting --dry-run --json`
+  - `node NLSDD/scripts/nlsdd-suggest-schedule.cjs --execution nlsdd-self-hosting --json`
+  - `git diff --check`
