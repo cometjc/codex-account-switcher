@@ -1450,3 +1450,131 @@ test('coordinator loop combines launch, review, and commit intake into one summa
   assert.equal(result.commitIntake[0].lane, 'Lane 5');
   assert.equal(result.commitIntake[0].proposedCommitTitle, 'docs(plot): 補上 recovery baseline 操作說明');
 });
+
+test('dispatch plan helper builds a prioritized action queue from autopilot output', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-dispatch-'));
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  const lane2Worktree = path.join(root, '.worktrees', 'lane-2-runtime');
+  setupTempGitRepo(lane2Worktree);
+  const lane2Head = run('git', ['rev-parse', '--short', 'HEAD'], lane2Worktree);
+
+  fs.mkdirSync(path.join(root, 'NLSDD', 'executions', 'plot-mode'), {recursive: true});
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-2.md'),
+    `# Lane 2
+
+> Ownership family:
+> \`rust/plot-viewer/src/render/mod.rs\`
+>
+> NLSDD worktree: \`.worktrees/lane-2-runtime\`
+>
+> Lane-local verification:
+> \`cargo test --manifest-path rust/plot-viewer/Cargo.toml\`
+
+## V - View
+
+- [ ] Runtime compare seam follow-up
+`,
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-3.md'),
+    `# Lane 3
+
+> Ownership family:
+> \`rust/plot-viewer/src/render/chart.rs\`
+>
+> NLSDD worktree: \`.worktrees/lane-3-chart\`
+>
+> Lane-local verification:
+> \`cargo check --manifest-path rust/plot-viewer/Cargo.toml\`
+
+## C - Controller
+
+- [ ] Chart compatibility follow-up
+`,
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-5.md'),
+    `# Lane 5
+
+> Ownership family:
+> \`README.md\`
+>
+> NLSDD worktree: \`.worktrees/lane-5-docs\`
+>
+> Lane-local verification:
+> \`npm run build\`
+
+## C - Controller
+
+- [ ] Recovery-baseline README and local run instructions
+`,
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'scoreboard.md'),
+    `# NLSDD Scoreboard
+
+| Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| plot-mode | Lane 2 | Rust runtime + boundary | Runtime compare seam follow-up | queued | \`${lane2Head}\` | \`cargo test --manifest-path rust/plot-viewer/Cargo.toml\` | none | none | queued row |
+| plot-mode | Lane 3 | Rust chart surface | Chart compatibility follow-up | correction | \`abc1234\` | \`cargo check --manifest-path rust/plot-viewer/Cargo.toml\` | none | none | review row |
+| plot-mode | Lane 5 | Plot viewer docs + operator flow | Recovery-baseline README and local run instructions | coordinator-commit-pending | \`n/a\` | \`npm run build\` | none | none | commit row |
+`,
+    'utf8',
+  );
+
+  writeLaneState(root, 'plot-mode', 2, {
+    execution: 'plot-mode',
+    lane: 'Lane 2',
+    phase: 'queued',
+    'expected-next-phase': 'implementing',
+    commit: lane2Head,
+    verification: ['cargo test --manifest-path rust/plot-viewer/Cargo.toml'],
+    note: 'ready to dispatch',
+    'updated-at': '2026-03-21T11:40:00.000Z',
+  });
+  writeLaneState(root, 'plot-mode', 3, {
+    execution: 'plot-mode',
+    lane: 'Lane 3',
+    phase: 'correction',
+    'expected-next-phase': 'spec-review-pending',
+    commit: 'abc1234',
+    verification: ['cargo check --manifest-path rust/plot-viewer/Cargo.toml'],
+    note: 'Chart wording still needs correction',
+    'updated-at': '2026-03-21T11:41:00.000Z',
+  });
+  writeLaneState(root, 'plot-mode', 5, {
+    execution: 'plot-mode',
+    lane: 'Lane 5',
+    phase: 'coordinator-commit-pending',
+    'expected-next-phase': 'spec-review-pending',
+    'commit-title': 'docs(plot): 補上 recovery baseline 操作說明',
+    'commit-body': '同步本地驗證與啟動步驟',
+    verification: ['npm run build'],
+    note: 'READY_TO_COMMIT from docs lane',
+    'updated-at': '2026-03-21T11:42:00.000Z',
+  });
+
+  const {buildDispatchPlan} = freshRequire('NLSDD/scripts/nlsdd-build-dispatch-plan.cjs');
+  const result = buildDispatchPlan(root, 'plot-mode', 4, false);
+
+  assert.equal(result.queue.length, 3);
+  assert.deepEqual(
+    result.queue.map((entry) => [entry.kind, entry.lane]),
+    [
+      ['commit-intake', 'Lane 5'],
+      ['review-action', 'Lane 3'],
+      ['launch-assignment', 'Lane 2'],
+    ],
+  );
+  assert.equal(result.queue[0].priority, 100);
+  assert.equal(result.queue[1].priority, 200);
+  assert.equal(result.queue[2].priority, 501);
+  assert.match(result.queue[0].message, /Proposed commit title: docs\(plot\): 補上 recovery baseline 操作說明/);
+  assert.match(result.queue[1].message, /Reviewer finding: Chart wording still needs correction/);
+  assert.match(result.queue[2].message, /Lane item intent: Runtime compare seam follow-up/);
+});

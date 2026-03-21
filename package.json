@@ -23,6 +23,7 @@
     "nlsdd:review": "node NLSDD/scripts/nlsdd-drive-review-loop.cjs",
     "nlsdd:intake": "node NLSDD/scripts/nlsdd-intake-ready-to-commit.cjs",
     "nlsdd:autopilot": "node NLSDD/scripts/nlsdd-run-coordinator-loop.cjs",
+    "nlsdd:dispatch-plan": "node NLSDD/scripts/nlsdd-build-dispatch-plan.cjs",
     "nlsdd:compose": "node NLSDD/scripts/nlsdd-compose-message.cjs",
     "plot:viewer:build": "cargo build --manifest-path rust/plot-viewer/Cargo.toml",
     "plot:viewer:run": "cargo run --manifest-path rust/plot-viewer/Cargo.toml --",

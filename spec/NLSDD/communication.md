@@ -79,6 +79,7 @@ These templates may be generated through `node NLSDD/scripts/nlsdd-compose-messa
 - When coordinator wants to collapse "inspect current review phases + decide the next spec/quality/correction/coordinator-commit step" into one deterministic pass, prefer `npm run nlsdd:review -- --execution <id>`. The review helper should emit the same template families already defined below, not invent a separate review wording.
 - When coordinator wants to inspect only commit-ready handoffs, prefer `npm run nlsdd:intake -- --execution <id> [--lane <n>]`. The intake helper should output a normalized commit bundle rather than a reviewer message.
 - When coordinator wants the whole deterministic round in one place, prefer `npm run nlsdd:autopilot -- --execution <id>`. The autopilot helper should aggregate launch assignments, review actions, and commit intake bundles without inventing new message formats.
+- When main agent wants to act on that snapshot directly, prefer `npm run nlsdd:dispatch-plan -- --execution <id>`. The dispatch-plan helper should turn autopilot output into a prioritized queue of actionable bundles rather than inventing new message bodies.
 
 ### Implementer Assignment
 

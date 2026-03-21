@@ -828,3 +828,15 @@
 - 新增 [`NLSDD/scripts/nlsdd-run-coordinator-loop.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-run-coordinator-loop.cjs) 與 `npm run nlsdd:autopilot`，讓 coordinator 可一次取得整輪 deterministic 狀態摘要。
 - autopilot 目前是 assistive automation：它會執行 cycle/launch 的狀態收斂，並彙整 review/intake 結果，但不直接代 main agent 呼叫 subagent 工具。
 - regression 在 [tests/nlsdd-automation.test.js](/home/jethro/repo/side-projects/codex-account-switcher/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-run-coordinator-loop.cjs --execution plot-mode --json` 已通過。
+
+# 2026-03-21 NLSDD dispatch plan helper
+
+- [x] 在 autopilot 之上新增 dispatch-plan helper，輸出 main agent 可直接照單執行的 action queue
+- [x] 將 queue 預設優先順序定成 commit intake -> review/correction -> launch assignment
+- [x] 補 regression test，鎖住 dispatch plan 會依優先順序輸出 queue
+
+## Review
+
+- 新增 [`NLSDD/scripts/nlsdd-build-dispatch-plan.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-build-dispatch-plan.cjs) 與 `npm run nlsdd:dispatch-plan`，讓 main agent 可直接取得本輪 action queue。
+- helper 不重新計算 lane truth，而是直接吃 [`NLSDD/scripts/nlsdd-run-coordinator-loop.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-run-coordinator-loop.cjs) 的輸出，避免再引入第四套 state。
+- regression 在 [tests/nlsdd-automation.test.js](/home/jethro/repo/side-projects/codex-account-switcher/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-build-dispatch-plan.cjs --execution plot-mode --json` 已通過。
