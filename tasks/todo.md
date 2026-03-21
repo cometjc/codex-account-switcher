@@ -909,3 +909,16 @@
 - 這次不再試圖替 Lane 4 硬找下一個 item，而是先把 truth 收乾淨：cross-check coverage 已落地，Lane 4 回到 `parked`，之後只在真的出現新 regression/CLI surface 缺口時再重開。
 - 也把兩條舊的 adopted insight 收成 resolved，避免 `review/autopilot/dispatch-plan` 還把它們當成目前的 actionable 問題。
 - 接著再用 canonical envelope 寫入同一個 parked transition，讓 runtime journal、tracked scoreboard、lane plan `Current Lane Status` 與後續 `dispatch-plan` 全部由同一條事件鏈收斂到一致狀態。
+
+# 2026-03-21 nlsdd-self-hosting Lane 7 pseudo-refill cleanup
+
+- [x] 確認 `e853688` 已完成 Lane 7 當前 scheduler/runtime truth audit item
+- [x] 將 `NLSDD/executions/nlsdd-self-hosting/lane-7.md` 與 `NLSDD/scoreboard.md` 收斂成 honest parked wording
+- [x] 以 canonical envelope 寫入 Lane 7 的 parked transition，避免 quality pass 後又把同一 item 重派成 refill-ready
+- [x] 驗證 `dispatch-plan` / `schedule` 不再把 Lane 7 當成可立即補位的假 refill
+
+## Review
+
+- 根因不是 Lane 7 還沒做完，而是 `quality pass -> refill-ready` 的通用 phase 在沒有 fresh next item 時，會把同一個已完成 item 又推出來一次。
+- `e853688` 已經完成這輪 scheduler/runtime truth audit 的具體 delta：移除過度保守的 queued-only anti-convergence warning，並保留真正需要人工介入的警示條件。
+- 因此這次和 Lane 4 一樣，先把 honest truth 收乾淨：Lane 7 回到 `parked`，之後只在真的出現新的 scheduler/runtime truth finding 時再重開。
