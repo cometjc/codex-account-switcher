@@ -15,7 +15,7 @@
 - [x] Define the TypeScript plot snapshot contract and barrel export
 - [x] Add stable JSON serialization for Rust handoff
 - [x] Add regression tests for snapshot builder and serializer
-- [ ] Tighten snapshot builder semantics when real 7d history or 5h band math evolves
+- [x] Tighten snapshot builder semantics when real 7d history or 5h band math evolves
 
 ## V - View / Shell Surface
 
@@ -36,11 +36,12 @@
 
 - [x] First-round handoff verification landed and passed review
 - [x] Second-round shell confidence / retry messaging implementer commit landed
-- [ ] Close the current correction / re-review loop for second-round commit `1d29843`
+- [x] Close the current correction / re-review loop for second-round commit `1d29843`
+- [x] Third-round snapshot semantics commit `baa7b8e` landed and passed spec + quality review
 - [x] This lane occupies one active slot in the execution's lane pool; additional plot-mode lanes may remain queued or parked outside this lane.
 
 ## Refill Order
 
 - [x] First refill target after the current item: remaining Controller items
-- [ ] Then tighten plot snapshot builder semantics for real 7d history and 5h band math inside `src/lib/plot/**`
-- [ ] Only then touch future View polish
+- [x] Then tighten plot snapshot builder semantics for real 7d history and 5h band math inside `src/lib/plot/**`
+- [ ] Only then touch future View polish if Rust viewer launch UX changes again
