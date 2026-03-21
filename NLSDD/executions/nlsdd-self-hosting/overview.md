@@ -13,19 +13,19 @@
 
 - [x] Lane 1: Scheduler Core
   - Plan: `NLSDD/executions/nlsdd-self-hosting/lane-1.md`
-  - Status: initial active set
+  - Status: parked until a fresh scheduler-core gap appears
 
 - [x] Lane 2: Scoreboard Integration
   - Plan: `NLSDD/executions/nlsdd-self-hosting/lane-2.md`
-  - Status: initial active set
+  - Status: parked until a fresh tracked/runtime scoreboard boundary gap appears
 
 - [x] Lane 3: Rules and Communication
   - Plan: `NLSDD/executions/nlsdd-self-hosting/lane-3.md`
-  - Status: initial active set
+  - Status: parked after the projection and insight lifecycle wording converged
 
 - [x] Lane 4: Regression and CLI Surface
   - Plan: `NLSDD/executions/nlsdd-self-hosting/lane-4.md`
-  - Status: initial active set
+  - Status: parked until a genuinely new regression or CLI surface gap appears
 
 - [x] Lane 5: Plot-Mode Execution Migration
   - Plan: `NLSDD/executions/nlsdd-self-hosting/lane-5.md`
@@ -37,7 +37,7 @@
 
 - [x] Lane 7: NLSDD Meta-Optimization
   - Plan: `NLSDD/executions/nlsdd-self-hosting/lane-7.md`
-  - Status: queued follow-up lane
+  - Status: parked until a fresh scheduler/runtime truth finding appears
 
 ## Refill Rules
 

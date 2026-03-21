@@ -28,10 +28,10 @@
 - [x] Projected phase: parked
 - [x] Current item: Multi-lane / 4-thread schedule helper
 - [x] Latest commit: `n/a`
-- [x] Latest event: bootstrap-insight · Lane 1 scheduler core was a no-op at this baseline
+- [x] Latest event: parked · nlsdd-go: remediation round for reducer drift, read-only helpers, and execution-insights lifecycle
 - [x] Next expected phase: n/a
 - [x] Next refill target: Scheduler edge cases
-- [x] Latest note: Scheduler semantics already held across implementing and review-pending phases, so keeping Lane 1 active would have created fake saturation. Parked the lane and promoted Lane 7 instead.
+- [x] Latest note: nlsdd-go: remediation round for reducer drift, read-only helpers, and execution-insights lifecycle
 
 ## Refill Order
 

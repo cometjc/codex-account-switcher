@@ -10,29 +10,29 @@
 
 ## M - Operating Model
 
-- [ ] Rewrite remaining fixed-4-lane wording into lane-pool + active-cap language
-- [ ] Make it explicit that queued lanes may exist without consuming active thread slots
+- [ ] Clarify that tracked scoreboard and lane-plan status surfaces are projection-only outputs, not independent writable state
+- [ ] Define insight lifecycle and graduation rules for adopted global learnings versus execution-local blockers
 
 ## V - Communication Surface
 
-- [ ] Align reviewer / implementer templates with the new scheduling model
-- [ ] Clarify how queued lanes enter the active set when a slot opens
+- [ ] Align review-time guidance so `execution-insights` are inspected during or after NLSDD-stage review passes
+- [ ] Clarify which reducer/read helpers are observational and must not rewrite tracked docs on read
 
 ## C - Guardrails
 
-- [ ] Keep autopilot refill, probe, and blocker rules consistent with a lane pool larger than the active cap
+- [ ] Keep autopilot, probe, and execution-insights rules consistent with projection-only tracked surfaces
 
 ## Current Lane Status
 
 - [x] Projected phase: parked
 - [x] Current item: Lane-pool + active-cap rules alignment
-- [x] Latest commit: `n/a`
-- [x] Latest event: bootstrap-insight · Lane 3 rules stream converged to honest no-op
+- [x] Latest commit: `ef5f71e`
+- [x] Latest event: parked · Lane 3 wording is already converged after ef5f71e; park the lane instead of inventing docs churn.
 - [x] Next expected phase: n/a
 - [x] Next refill target: Execution-level wording cleanup
-- [x] Latest note: After queued-lane promotion and active-cap clarifications landed, there was no further reviewable spec-only step. Parked Lane 3 instead of inventing wording churn.
+- [x] Latest note: Lane 3 wording is already converged after ef5f71e; park the lane instead of inventing docs churn.
 
 ## Refill Order
 
-- [ ] First refill target: execution-level wording cleanup
-- [ ] Then lane-creation guidance if the scheduler rollout proves stable
+- [ ] First refill target: insight graduation and projection-only wording cleanup
+- [ ] Then lane-creation guidance only if the new reducer/read model exposes another documentation gap

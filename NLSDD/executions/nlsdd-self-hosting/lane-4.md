@@ -10,32 +10,32 @@
 >
 > `node NLSDD/scripts/nlsdd-suggest-schedule.cjs --execution nlsdd-self-hosting`
 
-## M - Fixture Coverage
+## M - Reducer Regression
 
-- [x] Add fixture coverage for lane pools larger than the active thread cap
-- [x] Keep test fixtures readable enough for future NLSDD executions to copy
+- [ ] Add regression coverage for linked-worktree / non-canonical-root reducer replay
+- [ ] Add regression coverage for clearing stale `Current item` / `Next refill target` after parked or noop transitions
 
-## V - CLI Regression
+## V - Read-Loop Safety
 
-- [x] Add schedule CLI coverage for human-readable and JSON output
-- [x] Verify refill-ready lanes sort ahead of queued lanes
+- [ ] Add regression coverage proving `review` / `schedule` / `dispatch-plan` keep tracked files unchanged on read
+- [ ] Add insight-summary coverage separating actionable execution issues from durable adopted learnings
 
 ## C - Verification Harness
 
-- [x] Keep the verification path fast enough to run as a lane-local smoke check
-- [x] Add scoreboard/schedule cross-check coverage so runtime and tracked scheduling surfaces stay aligned
+- [ ] Keep the verification path fast enough to run as a lane-local smoke check
+- [ ] Preserve existing scoreboard/schedule cross-check coverage while extending reducer/read-loop regressions
 
 ## Current Lane Status
 
 - [x] Projected phase: parked
 - [x] Current item: Wait for a fresh regression/CLI surface item after the cross-check coverage landed
-- [x] Latest commit: `6d6c4e8`
-- [x] Latest event: state-update · Lane 4 cross-check coverage landed, so the lane is parked until a fresh regression/CLI item appears
+- [x] Latest commit: `71bc61b`
+- [x] Latest event: parked · Lane 4 accepted the cross-check coverage and is now parked pending a genuinely new regression/CLI surface gap.
 - [x] Next expected phase: queued
 - [x] Next refill target: Re-open only if a fresh regression/CLI surface gap appears beyond the accepted cross-check coverage
-- [x] Latest note: Commit 6d6c4e8 completed the schedule CLI smoke and scoreboard/schedule cross-check coverage, so the honest next phase is parked rather than pseudo-implementing.
+- [x] Latest note: Lane 4 accepted the cross-check coverage and is now parked pending a genuinely new regression/CLI surface gap.
 
 ## Refill Order
 
-- [ ] First refill target: a fresh regression/CLI surface gap beyond the accepted cross-check coverage
-- [ ] Then deeper message-helper coverage only if that new gap exposes a real coordinator bottleneck
+- [ ] First refill target: insight summary and supersession regression coverage
+- [ ] Then deeper message-helper coverage only if the new reducer/read model exposes another coordinator bottleneck

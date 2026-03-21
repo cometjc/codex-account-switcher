@@ -23,16 +23,22 @@
 - [x] Update NLSDD definitions and runtime artifacts to match the new operating model
 - [x] Audit scheduler/runtime truth after recent self-hosting rounds and cut one concrete framework helper, doc, or test delta from that review
 
+## C - Reducer and Insight Integrity
+
+- [x] Fix reducer root drift so replay uses the current execution `projectRoot`
+- [x] Add explicit state-clearing semantics so parked/noop/resolved transitions can clear stale projected fields
+- [x] Add reducer-backed insight supersession so resolved insight entries retire older adopted/open variants cleanly
+
 ## Current Lane Status
 
 - [x] Projected phase: parked
 - [x] Current item: Wait for a fresh scheduler/runtime truth finding after the accepted warning cleanup
-- [x] Latest commit: `e853688`
-- [x] Latest event: state-update · Lane 7 warning cleanup landed, so the lane is parked until a fresh meta item appears
+- [x] Latest commit: `9c391aa`
+- [x] Latest event: parked · Lane 7 accepted the warning cleanup and is now parked pending a genuinely new finding.
 - [x] Next expected phase: queued
 - [x] Next refill target: Re-open only when a new scheduler/runtime truth finding yields a concrete helper, docs delta, or regression
-- [x] Latest note: Commit e853688 completed the current scheduler/runtime truth audit by narrowing the over-eager anti-convergence warning, so the honest next phase is parked rather than pseudo-refill-ready.
+- [x] Latest note: Lane 7 accepted the warning cleanup and is now parked pending a genuinely new finding.
 
 ## Refill Order
 
-- [ ] First refill target: a fresh scheduler/runtime truth finding that justifies one concrete helper, docs delta, or regression
+- [ ] First refill target: helper consolidation after reducer and insight fixes land

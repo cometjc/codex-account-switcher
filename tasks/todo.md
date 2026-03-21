@@ -923,6 +923,18 @@
 - `e853688` 已經完成這輪 scheduler/runtime truth audit 的具體 delta：移除過度保守的 queued-only anti-convergence warning，並保留真正需要人工介入的警示條件。
 - 因此這次和 Lane 4 一樣，先把 honest truth 收乾淨：Lane 7 回到 `parked`，之後只在真的出現新的 scheduler/runtime truth finding 時再重開。
 
+# 2026-03-21 nlsdd-self-hosting execution idle sync
+
+- [x] 將 self-hosting overview 的 Lane 2 / 3 / 4 / 7 狀態收斂成 parked truth
+- [x] 將 Lane 7 已落地的 reducer / insight integrity checklist 標成完成
+- [x] 驗證 `schedule` / `dispatch-plan` 對 `nlsdd-self-hosting` 都回到 `idleSlots: 4`
+
+## Review
+
+- 這一步不是新功能，而是把 `nlsdd-go` remediation round 跑完後的真相收進 tracked docs。
+- runtime 已經先由 canonical envelope 收斂成全 execution idle；如果 overview 和 lane checklist 還停在早期的 active/remediation 語氣，之後讀 tracked docs 仍會以為 lane 還在進行中。
+- 現在 `nlsdd-self-hosting` 的 honest state 是：沒有 active lane、沒有 dispatchable lane、沒有 actionable insight，之後只有在出現 fresh gap 時才重新喚醒對應 lane。
+
 # 2026-03-21 NLSDD tracked lane status projection sync
 
 - [x] 將 remaining self-hosting lane docs 同步成 honest parked/current-status wording
@@ -953,4 +965,35 @@
   - `npm run build`
   - `node --test tests/plot-handoff.test.js tests/plot-mode-shell.test.js tests/plot-readme.test.js tests/plot-rust-model-contract.test.js tests/plot-snapshot.test.js tests/plot-viewer-scaffold.test.js`
   - `cargo check --manifest-path rust/plot-viewer/Cargo.toml`
-  - `npm run plot:viewer:build`
+- `npm run plot:viewer:build`
+
+# 2026-03-21 NLSDD review findings remediation
+
+- [ ] 修正 reducer 在 replay 時錯讀 canonical root，避免 linked worktree / recovery branch 吃到錯的 lane plan
+- [ ] 修正 parked / noop / resolved-blocker transition 無法清掉舊 `Current item` / `Next refill target` 的問題
+- [ ] 將 `review` / `schedule` / `dispatch-plan` 等讀取入口改成不會順手重寫 tracked scoreboard / lane plan
+- [ ] 補 regression tests，鎖住 root replay、state clearing、read-only helper 三條行為
+- [ ] 跑 NLSDD automation tests 與 helper smoke checks 驗證修正
+
+## Review
+
+- 這批是直接承接剛剛的 `NLSDD` review findings，不是新功能線。目標是把目前最容易重新製造 drift 的三個根因一次收斂掉。
+- 第一個 finding 是 reducer 在 replay 時仍有 `resolveProjectRoot()` fallback，會在 linked worktree / recovery branch 下讀錯 next refill item。
+- 第二個 finding 是 state projection 還無法顯式清空舊 item，導致 parked / noop / resolved-blocker 後，舊 `Current item` 和 `Next refill target` 會藉由 `||` fallback 長回來。
+- 第三個 finding 是多個 read-path helper 會先 reduce，然後順手改寫 tracked `scoreboard` 與 lane-plan status，讓單純觀察也變成 tracked mutation。
+
+# 2026-03-21 execution-insights journal remediation
+
+- [ ] 收斂 execution-insights lifecycle，避免已解決 insight 仍長期停在 adopted/open
+- [ ] 補 supersession / resolution 規則，讓較新的 resolved insight 能正確覆蓋舊的 adopted/open insight
+- [ ] 區分 execution-local actionable insights 與可升級成 tracked lesson/spec 的全域 learnings
+- [ ] 調整 `nlsdd-summarize-insights`，讓 coordinator 可直接看出哪些 insight 仍需規劃，哪些只是歷史/長期 learnings
+- [ ] 補 regression tests，鎖住 duplicate/resolved insight replay 與 summary 行為
+- [ ] 跑 NLSDD insight/automation 驗證
+
+## Review
+
+- inspection 後目前 `execution-insights` 最大問題不是「沒記錄」，而是 lifecycle 與 read path 還不夠清楚。
+- `plot-mode` 現在共有 14 筆 insight，其中只有 2 筆 actionable，但這 2 筆其實是全域 adopted learnings，不是 lane-local blocker；summary 目前仍把它們和 execution 當下待處理事項放在同一層。
+- `nlsdd-self-hosting` 已收斂到 0 actionable，代表 journal 基本機制可用；真正需要補的是 `plot-mode` 這種混合「歷史 blocker + durable lesson」的情境。
+- 下一步應優先把 insight 的 supersession / graduation 規則做清楚，讓已被 lesson/spec 吸收的 adopted global learnings 不再持續佔據 runtime actionable surface。

@@ -18,11 +18,11 @@
 - [x] Projected phase: parked
 - [x] Current item: Plot-mode docs alignment for lane-pool scheduling
 - [x] Latest commit: `n/a`
-- [x] Latest event: bootstrap-state · Bootstrapped lane state for Lane 5
+- [x] Latest event: parked · nlsdd-go: remediation round for reducer drift, read-only helpers, and execution-insights lifecycle
 - [x] Next expected phase: n/a
 - [x] Next refill target: Plot-mode overview wording
 - [x] Blocked by: wait-slot
-- [x] Latest note: Lane 5 docs already aligned; park until a new reviewable plot-mode docs delta exists.
+- [x] Latest note: nlsdd-go: remediation round for reducer drift, read-only helpers, and execution-insights lifecycle
 
 ## Refill Order
 
