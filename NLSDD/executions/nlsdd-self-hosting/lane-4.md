@@ -12,23 +12,30 @@
 
 ## M - Fixture Coverage
 
-- [ ] Add fixture coverage for lane pools larger than the active thread cap
-- [ ] Keep test fixtures readable enough for future NLSDD executions to copy
+- [x] Add fixture coverage for lane pools larger than the active thread cap
+- [x] Keep test fixtures readable enough for future NLSDD executions to copy
 
 ## V - CLI Regression
 
-- [ ] Add schedule CLI coverage for human-readable and JSON output
-- [ ] Verify refill-ready lanes sort ahead of queued lanes
+- [x] Add schedule CLI coverage for human-readable and JSON output
+- [x] Verify refill-ready lanes sort ahead of queued lanes
 
 ## C - Verification Harness
 
-- [ ] Keep the verification path fast enough to run as a lane-local smoke check
+- [x] Keep the verification path fast enough to run as a lane-local smoke check
+- [x] Add scoreboard/schedule cross-check coverage so runtime and tracked scheduling surfaces stay aligned
 
 ## Current Lane Status
 
-- [ ] Active lane item: add schedule regression coverage for the first multi-lane self-hosting execution in the initial active set
+- [x] Projected phase: parked
+- [x] Current item: Wait for a fresh regression/CLI surface item after the cross-check coverage landed
+- [x] Latest commit: `6d6c4e8`
+- [x] Latest event: state-update · Lane 4 cross-check coverage landed, so the lane is parked until a fresh regression/CLI item appears
+- [x] Next expected phase: queued
+- [x] Next refill target: Re-open only if a fresh regression/CLI surface gap appears beyond the accepted cross-check coverage
+- [x] Latest note: Commit 6d6c4e8 completed the schedule CLI smoke and scoreboard/schedule cross-check coverage, so the honest next phase is parked rather than pseudo-implementing.
 
 ## Refill Order
 
-- [ ] First refill target: scoreboard/schedule cross-check coverage
-- [ ] Then deeper message-helper coverage if it becomes the next bottleneck
+- [ ] First refill target: a fresh regression/CLI surface gap beyond the accepted cross-check coverage
+- [ ] Then deeper message-helper coverage only if that new gap exposes a real coordinator bottleneck

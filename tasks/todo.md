@@ -894,4 +894,18 @@
 
 - 根因不是 reducer 壞掉，而是 `plot-mode Lane 4` 的歷史 bootstrapped event 仍把 `6bb1fba` 投影成 `implementing`，而 tracked lane plan / scoreboard 也還停留在舊 wording，導致 reducer 每次重播都忠實重建同一個假 active state。
 - 這次先把 tracked planning surface 收斂成 honest truth：`6bb1fba` 已完成 adopted-target emphasis，所以 Lane 4 的 current item 改成等待下一個 fresh panel-local item，phase 改為 `parked`。
+
+# 2026-03-21 nlsdd-self-hosting Lane 4 stale runtime state cleanup
+
+- [x] 確認 `6d6c4e8` 的實際 diff 是否已完成 Lane 4 的 regression/CLI cross-check item
+- [x] 將 `NLSDD/executions/nlsdd-self-hosting/lane-4.md` 與 `NLSDD/scoreboard.md` 收斂成 honest parked wording
+- [x] 以 canonical envelope 寫入 Lane 4 的 parked transition，重建 reducer 投影
+- [x] 將 Lane 4 舊的 adopted issues 收斂成 resolved，避免 insight summary 繼續重播已解決問題
+- [x] 驗證 `dispatch-plan` / `schedule` / `insight summary` 不再把 Lane 4 列成 actionable stale work
+
+## Review
+
+- 根因和 `plot-mode Lane 4` 很像：`6d6c4e8` 其實已經完成 CLI smoke 與 scoreboard/schedule cross-check coverage，但 tracked wording、lane journal、insight lifecycle 都還停在 correction 當下，所以 reducer 忠實地把它重播成 `stale-implementing`。
+- 這次不再試圖替 Lane 4 硬找下一個 item，而是先把 truth 收乾淨：cross-check coverage 已落地，Lane 4 回到 `parked`，之後只在真的出現新 regression/CLI surface 缺口時再重開。
+- 也把兩條舊的 adopted insight 收成 resolved，避免 `review/autopilot/dispatch-plan` 還把它們當成目前的 actionable 問題。
 - 接著再用 canonical envelope 寫入同一個 parked transition，讓 runtime journal、tracked scoreboard、lane plan `Current Lane Status` 與後續 `dispatch-plan` 全部由同一條事件鏈收斂到一致狀態。
