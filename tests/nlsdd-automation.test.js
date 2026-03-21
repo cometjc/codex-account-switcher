@@ -1066,6 +1066,40 @@ test('execution insight summary helper groups actionable insights and converged 
   assert.match(rendered, /\[open\] Lane 2 · blocker · Need render boundary compare payload/);
 });
 
+test('execution insight summary keeps only the latest status for the same lane+summary key', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-insight-collapse-'));
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  const {recordInsight} = freshRequire('NLSDD/scripts/nlsdd-record-insight.cjs');
+  const {summarizeExecutionInsights} = freshRequire('NLSDD/scripts/nlsdd-lib.cjs');
+
+  recordInsight(root, {
+    execution: 'plot-mode',
+    lane: '4',
+    source: 'subagent',
+    kind: 'suggestion',
+    status: 'open',
+    summary: 'Need render-boundary compare payload',
+    timestamp: '2026-03-21T08:00:00.000Z',
+  });
+  recordInsight(root, {
+    execution: 'plot-mode',
+    lane: '4',
+    source: 'coordinator',
+    kind: 'resolved-blocker',
+    status: 'resolved',
+    summary: 'Need render-boundary compare payload',
+    timestamp: '2026-03-21T08:05:00.000Z',
+  });
+
+  const summary = summarizeExecutionInsights(root, 'plot-mode');
+  assert.equal(summary.total, 1);
+  assert.equal(summary.actionableCount, 0);
+  assert.equal(summary.latest[0].kind, 'resolved-blocker');
+  assert.equal(summary.latest[0].status, 'resolved');
+  assert.equal(summary.latest[0].summary, 'Need render-boundary compare payload');
+});
+
 test('active-set replan helper updates tracked phases and lane journals atomically', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-replan-'));
   process.env.NLSDD_PROJECT_ROOT = root;

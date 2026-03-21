@@ -163,8 +163,29 @@ function loadExecutionInsights(projectRoot, execution) {
     .sort((left, right) => new Date(right.timestamp) - new Date(left.timestamp));
 }
 
+function insightKey(entry) {
+  return [
+    normalizeInsightLane(entry.lane),
+    normalizeInsightLane(entry.relatedLane),
+    entry.summary || '',
+  ].join('::');
+}
+
+function collapseExecutionInsights(entries) {
+  const latestByKey = new Map();
+  for (const entry of entries) {
+    const key = insightKey(entry);
+    if (!latestByKey.has(key)) {
+      latestByKey.set(key, entry);
+    }
+  }
+  return Array.from(latestByKey.values()).sort(
+    (left, right) => new Date(right.timestamp) - new Date(left.timestamp),
+  );
+}
+
 function summarizeExecutionInsights(projectRoot, execution, limit = 5) {
-  const entries = loadExecutionInsights(projectRoot, execution);
+  const entries = collapseExecutionInsights(loadExecutionInsights(projectRoot, execution));
   const countsByStatus = Object.fromEntries(INSIGHT_STATUSES.map((status) => [status, 0]));
   const countsByKind = Object.fromEntries(INSIGHT_KINDS.map((kind) => [kind, 0]));
 
@@ -918,6 +939,7 @@ module.exports = {
   executionInsightsPath,
   normalizeInsightLane,
   loadExecutionInsights,
+  collapseExecutionInsights,
   summarizeExecutionInsights,
   resolveCodexStateDbPath,
   resolveCodexSessionsRoot,
