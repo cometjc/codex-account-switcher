@@ -15,9 +15,6 @@ const {
   tryRun,
 } = require('./nlsdd-lib.cjs');
 
-const projectRoot = resolveProjectRoot();
-const scoreboardPath = resolveScoreboardPath(projectRoot);
-const runtimeScoreboardPath = resolveRuntimeScoreboardPath(projectRoot);
 const runtimeColumns = [
   'Execution',
   'Lane',
@@ -90,7 +87,18 @@ function buildRuntimePreamble(lines, headerIndex) {
   return [rewritten[0], ...insertion, ...rewritten.slice(1)];
 }
 
-function updateScoreboard() {
+function updateScoreboard(projectRoot = resolveProjectRoot()) {
+  const scoreboardPath = resolveScoreboardPath(projectRoot);
+  const runtimeScoreboardPath = resolveRuntimeScoreboardPath(projectRoot);
+  if (!fs.existsSync(scoreboardPath)) {
+    fs.mkdirSync(require('node:path').dirname(runtimeScoreboardPath), {recursive: true});
+    fs.writeFileSync(
+      runtimeScoreboardPath,
+      '# NLSDD Runtime Scoreboard\n\n> Tracked scoreboard not found for this project root.\n',
+      'utf8',
+    );
+    return;
+  }
   const scoreboardText = fs.readFileSync(scoreboardPath, 'utf8');
   const table = loadScoreboardTable(scoreboardText, scoreboardPath);
 
