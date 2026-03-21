@@ -1,12 +1,30 @@
 # Ratatui Plot Mode Implementation Plan
 
-> **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED: Use the repo's `NLSDD` workflow and the plot-mode execution lane plans under `NLSDD/executions/plot-mode/` when running this plan with subagents. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a new Rust-based `plot` mode that visualizes per-profile 7d usage curves plus current 5h projection bands, and establish the first migration step from the current Node CLI toward a Rust TUI architecture.
 
 **Architecture:** Keep the existing TypeScript CLI as the source of truth for auth/account/cache/API access in Phase 1. Add a Rust workspace app that consumes a normalized snapshot JSON exported by the Node CLI and renders the chart UI with `ratatui` `Canvas`, because the 5h projected parallel-band geometry is custom drawing rather than a standard dataset chart.
 
 **Tech Stack:** TypeScript, Node.js, Rust, Cargo, `ratatui`, `crossterm`, JSON snapshot interchange
+
+## NLSDD Execution Status
+
+- [x] Lane 1 landed real-binary handoff verification against the Rust viewer and passed spec + quality review.
+- [x] Lane 2 landed the drawable panel boundary seam and passed spec + quality review.
+- [x] Lane 3 landed a local `ChartViewModel` extraction in `chart.rs` and passed spec + quality review.
+- [x] Lane 4 landed the first visible Summary/Compare panel surface and passed spec + quality review.
+- [x] Lane 1 second-round shell confidence messaging implementer commit landed and is now tracked in `NLSDD/scoreboard.md`.
+- [x] Lane 2 second-round boundary API stabilization implementer commit landed and is now tracked in `NLSDD/scoreboard.md`.
+- [x] Lane 3 second-round ASCII 7d curve surface implementer commit landed and is now tracked in `NLSDD/scoreboard.md`.
+- [x] Lane 4 second-round panel docs / README regression implementer commit landed and is now tracked in `NLSDD/scoreboard.md`.
+- [x] Re-cut the next 4-active-lane plan from current NLSDD runtime/manual state instead of blindly reusing the original second-round queue
+- [x] Keep Lane 1 / Lane 3 / Lane 4 as the preferred post-correction refill lanes
+- [x] Mark Lane 2 as conditional: keep it active only while the current correction loop is open, then park it unless another lane proves the stronger decode path is needed
+- [x] Narrow the next lane-local refill items to:
+  - Lane 1: tighten plot snapshot builder semantics for real 7d history and 5h band math
+  - Lane 3: add 5h band, axis labels, and unavailable-band fallback
+  - Lane 4: add panel-specific regression coverage for the visible Summary / Compare structure
 
 ---
 

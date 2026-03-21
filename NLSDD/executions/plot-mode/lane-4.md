@@ -32,11 +32,11 @@
 
 - [x] First-round visible Summary / Compare panel surface landed and passed review
 - [x] Second-round panel docs / README regression implementer commit landed
-- [ ] Review second-round commit `12785d1`
+- [ ] Close the current correction / re-review loop for second-round commit `12785d1`
 - [x] This lane occupies one active slot in the execution's lane pool; queued lanes may wait until a slot opens.
 
 ## Refill Order
 
-- [x] First refill target after the current item: panel-specific regression coverage
+- [x] First refill target after the current item: panel-specific regression coverage for the visible Summary / Compare structure
 - [ ] Then consume README/doc polish that reflects newly visible panel behavior
 - [ ] Then extend panel structure only if a later execution item truly needs richer side-panel content

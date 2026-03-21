@@ -1,5 +1,21 @@
 # 2026-03-20 limits 欄位 header 修正
 
+# 2026-03-21 plot-mode 4-active-lane re-plan
+
+- [x] 盤點 plot-mode lane docs、manual scoreboard、runtime scoreboard 與 lane worktrees 的目前狀態
+- [x] 用 4 條 lane 平行分析下一個 reviewable item 與 active/queued/parked 建議
+- [x] 將 plot-mode execution docs、manual scoreboard 與上層 plans 收斂到新的 4-active-lane 規劃
+- [x] 驗證 NLSDD schedule / refill tooling 在新規劃語意下仍可正常讀取
+
+## Review
+
+- 目前 plot-mode 的 manual scoreboard 與 lane docs 都還殘留 `spec-review-pending` 的第二輪文案，但 runtime scoreboard 顯示四條 lane 實際都還停在 `correction` 相關狀態；這次先把 manual planning surface 校正成能反映現在的協調真相。
+- 4 條 lane 的平行分析收斂出一致結論：Lane 1、Lane 3、Lane 4 都還有清楚的 lane-local refill item，應維持為下一輪 active/refill priority；Lane 2 的下一步則是條件式 model deepening，應在當前 correction 關閉後改為 `parked`，除非 chart/panels lane 證明它已成真 blocker。
+- 因此目前不新增 Lane 5；先耗盡既有 4-lane pool 比較乾淨，也更符合 lane-local refill 原則。
+- 驗證：
+  - `node NLSDD/scripts/nlsdd-suggest-schedule.cjs --execution plot-mode --json`
+  - `node NLSDD/scripts/nlsdd-suggest-refill.cjs --execution plot-mode --json`
+
 # 2026-03-21 NLSDD runtime scoreboard 邊界收斂
 
 - [x] 將 auto-refreshed scoreboard 輸出改到 ignored runtime 檔，不再覆寫 tracked `NLSDD/scoreboard.md`

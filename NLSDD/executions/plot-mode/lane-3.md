@@ -31,11 +31,11 @@
 
 - [x] First-round `ChartViewModel` extraction landed and passed review
 - [x] Second-round ASCII 7d curve surface implementer commit landed
-- [ ] Review second-round commit `907cbc7`
+- [ ] Close the current correction / re-review loop for second-round commit `907cbc7`
 - [x] This lane occupies one active slot in the execution's lane pool; extra lanes can stay queued or parked until promotion.
 
 ## Refill Order
 
-- [x] First refill target after the current item: chart fallbacks and legend/axis work
+- [x] First refill target after the current item: add 5h band, axis labels, and unavailable-band fallback
 - [ ] Then land chart-specific regression tests
 - [ ] Only then widen into richer focus behavior if still needed

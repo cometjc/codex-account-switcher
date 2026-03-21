@@ -115,15 +115,42 @@ Completed MVP notes:
 - option list and prompt body now share the same influence story across two levels of detail
 - the indicator remains short enough to preserve the current row rhythm
 
-## Next MVP: Tier vs Window Influence Differentiation
+## Tier vs Window Influence Decision
 
-- [ ] Decide whether the UI should distinguish workload-tier influence from raw window bottleneck influence
-- [ ] Keep any new distinction compact enough for remote-terminal scanning
-- [ ] Avoid duplicating explanation text across the status line, option list, and detail rows
-- [ ] Update `spec/` only after the differentiation MVP is implemented and verified
+- [x] Decide whether the UI should distinguish workload-tier influence from raw window bottleneck influence
+- [x] Keep workload-tier bias in the shared status line and keep row/body markers focused on window truth
+- [x] Avoid duplicating explanation text across the status line, option list, and detail rows
+
+Decision note:
+- the UI intentionally keeps `[W]` / `[5H]` and `W:*` / `5H:*` as window-truth markers only
+- workload tier remains a shared status-line explanation rather than becoming a second row-level marker
+- this follow-up is intentionally closed unless future usage shows that tier influence is still too opaque
 
 ## Follow-up Track
 
 - [ ] Keep the Rust plot-mode work in `plan/2026-03-20-ratatui-plot-mode-implementation-plan.md` as the separate visualization stream
 - [ ] Add a visual indicator in the table body showing which workload tier most influenced the current ranking
 - [ ] Revisit whether prompt density eventually needs more than one condensed level if future real usage shows the current layout is no longer enough
+
+## Plot Mode Lane Planning
+
+- [x] Decide that plot-mode sub-agent work should run through stable non-overlapping lanes rather than ad-hoc refill tasks
+- [x] Create a fixed lane overview plus lane plans covering Node handoff, Rust runtime/state, Rust chart surface, and Rust panels/docs
+- [x] Update sub-agent guardrails so refills stay inside lane-local MVC steps and only create a new lane plan when a lane is exhausted
+- [x] Promote the workflow into repo-native `NLSDD` operating rules instead of continuing to reference the original SDD skill name
+- [x] Add explicit rules for per-lane worktrees, per-item implementer commits, commit-diff-based review, and coordinator-owned tracking updates
+- [x] Re-cut the lane relationship so Lane 4 panel visibility depends on a Lane 2 boundary item instead of ad-hoc scope expansion
+- [x] Execute the first lane round and prove that all 4 lanes can complete one reviewable item with lane-local correction loops
+- [x] Validate that Lane 2 can unblock Lane 4 through a boundary seam rather than by widening Lane 4 scope
+- [x] Land the first visible plot viewer panel surface without breaking the lane ownership split
+- [x] Migrate the repo-native workflow from `4LSDD` naming into centralized `NLSDD` docs, scoreboard, and communication rules
+- [x] Add autopilot refill, lane probe, and scoreboard rules to reduce coordinator bottlenecks
+- [x] Start treating Rust `target/` churn as workflow noise, with `.gitignore` plus lane hygiene cleanup instead of reviewer confusion
+- [x] Re-plan the current 4-active-lane set from live NLSDD runtime/manual state instead of preserving stale second-round review labels
+
+Decision note:
+- plot-mode parallel work now follows an NLSDD execution with 4 active lanes
+- new sub-agent assignments should start from the current lane plans instead of free-form task slicing
+- lane progress should be reported in lane-local MVC terms so the coordinator can refill predictably
+- future execution should use `NLSDD` as the workflow name, not `$subagent-driven-development`
+- the current 4-active-lane plan keeps lanes 1/3/4 as the next refill priorities and treats lane 2 as conditional after its current correction loop closes

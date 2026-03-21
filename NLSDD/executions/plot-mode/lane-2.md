@@ -35,11 +35,11 @@
 
 - [x] First-round boundary seam landed and passed review
 - [x] Second-round boundary API stabilization implementer commit landed
-- [ ] Review second-round commit `3b62c5b`
+- [ ] Close the current correction / re-review loop for second-round commit `3b62c5b`
 - [x] This lane occupies one active slot in the execution's lane pool; coordinator may keep extra lanes queued or parked until a slot opens.
 
 ## Refill Order
 
 - [x] First refill target after the current item: remaining Controller/runtime reliability work if any appear
 - [x] Then consume remaining View/runtime-boundary hardening
-- [ ] Leave model deepening for later unless a runtime task is blocked on it
+- [ ] Park the lane after the current correction closes unless another lane proves that nested `usage` decoding is now a real runtime blocker

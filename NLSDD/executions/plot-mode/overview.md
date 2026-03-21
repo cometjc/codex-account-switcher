@@ -35,6 +35,18 @@
 - [x] Lane 4 first-round visible Summary / Compare panel surface landed and passed spec + quality review.
 - [x] Second-round implementer commits now exist for lanes 1-4 and are tracked in `NLSDD/scoreboard.md`.
 
+## Current 4-Active-Lane Plan
+
+- [x] Keep plot-mode on a 4-lane active set while the current second-round correction / re-review loop is still open for lanes 1-4.
+- [x] Treat Lane 1, Lane 3, and Lane 4 as the post-correction refill priorities:
+  - Lane 1 -> tighten plot snapshot builder semantics for real 7d history and 5h band math
+  - Lane 3 -> add 5h band, axis labels, and unavailable-band fallback
+  - Lane 4 -> add panel-specific regression coverage for the visible Summary / Compare surface
+- [x] Treat Lane 2 as conditional after the current correction closes:
+  - keep the lane active only while the current correction/re-review loop remains open
+  - park it after closure unless another lane proves the stronger nested `usage` decode path is necessary
+- [x] Do not invent Lane 5 yet; exhaust the current 4-lane pool first, because Lane 1/3/4 still have clearly reviewable lane-local refill items.
+
 ## Refill Rules
 
 - [x] Refill from the same lane's next unchecked item before inventing cross-lane work.

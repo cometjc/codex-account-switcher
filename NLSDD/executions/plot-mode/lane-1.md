@@ -36,11 +36,11 @@
 
 - [x] First-round handoff verification landed and passed review
 - [x] Second-round shell confidence / retry messaging implementer commit landed
-- [ ] Review second-round commit `1d29843`
+- [ ] Close the current correction / re-review loop for second-round commit `1d29843`
 - [x] This lane occupies one active slot in the execution's lane pool; additional plot-mode lanes may remain queued or parked outside this lane.
 
 ## Refill Order
 
 - [x] First refill target after the current item: remaining Controller items
-- [ ] Then consume remaining Model items
+- [ ] Then tighten plot snapshot builder semantics for real 7d history and 5h band math inside `src/lib/plot/**`
 - [ ] Only then touch future View polish
