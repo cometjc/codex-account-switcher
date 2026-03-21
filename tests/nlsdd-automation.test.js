@@ -834,6 +834,210 @@ test('envelope reducer projects tracked scoreboard and lane status from a single
   assert.equal(insight.summary, 'Adopted target deserves stronger emphasis once compare data is present');
 });
 
+test('envelope replay uses the execution root when deriving fallback lane content', () => {
+  const executionRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-envelope-root-'));
+  const cwdRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-envelope-cwd-'));
+  const originalCwd = process.cwd();
+  const originalProjectRoot = process.env.NLSDD_PROJECT_ROOT;
+  const modulePath = path.join(originalCwd, 'NLSDD', 'scripts', 'nlsdd-envelope.cjs');
+
+  try {
+    fs.mkdirSync(path.join(executionRoot, 'NLSDD', 'executions', 'plot-mode'), {recursive: true});
+    fs.writeFileSync(
+      path.join(executionRoot, 'NLSDD', 'executions', 'plot-mode', 'lane-1.md'),
+      `# Lane 1
+
+> Ownership family:
+> \`src/commands/root.ts\`
+>
+> NLSDD worktree: \`.worktrees/lane-1-node\`
+>
+> Lane-local verification:
+> \`git status --short\`
+
+## C - Controller
+
+- [ ] Root A repair item
+`,
+      'utf8',
+    );
+    fs.writeFileSync(
+      path.join(executionRoot, 'NLSDD', 'scoreboard.md'),
+      `# NLSDD Scoreboard
+
+| Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| plot-mode | Lane 1 | Node contract + handoff |  | queued | \`n/a\` | \`git status --short\` | none |  | root A row |
+`,
+      'utf8',
+    );
+    fs.mkdirSync(path.join(executionRoot, 'NLSDD', 'state', 'plot-mode'), {recursive: true});
+    fs.writeFileSync(
+      path.join(executionRoot, 'NLSDD', 'state', 'plot-mode', 'events.ndjson'),
+      `${JSON.stringify({
+        execution: 'plot-mode',
+        lane: 'Lane 1',
+        role: 'coordinator',
+        eventType: 'bootstrap-state',
+        phaseAfter: 'queued',
+        summary: 'bootstrap',
+        timestamp: '2026-03-21T08:00:00.000Z',
+        insights: [],
+      })}\n`,
+      'utf8',
+    );
+
+    fs.mkdirSync(path.join(cwdRoot, 'NLSDD', 'executions', 'plot-mode'), {recursive: true});
+    fs.writeFileSync(
+      path.join(cwdRoot, 'NLSDD', 'executions', 'plot-mode', 'lane-1.md'),
+      `# Lane 1
+
+> Ownership family:
+> \`src/commands/root.ts\`
+>
+> NLSDD worktree: \`.worktrees/lane-1-node\`
+>
+> Lane-local verification:
+> \`git status --short\`
+
+## C - Controller
+
+- [ ] Root B repair item
+`,
+      'utf8',
+    );
+
+    delete process.env.NLSDD_PROJECT_ROOT;
+    process.chdir(cwdRoot);
+
+    delete require.cache[require.resolve(modulePath)];
+    const {prepareExecutionState} = require(modulePath);
+    prepareExecutionState(executionRoot, 'plot-mode');
+
+    const laneState = JSON.parse(
+      fs.readFileSync(
+        path.join(executionRoot, 'NLSDD', 'state', 'plot-mode', 'lane-1.json'),
+        'utf8',
+      ),
+    );
+    const scoreboardText = fs.readFileSync(
+      path.join(executionRoot, 'NLSDD', 'scoreboard.md'),
+      'utf8',
+    );
+
+    assert.equal(laneState.currentItem, 'Root A repair item');
+    assert.equal(laneState.nextRefillTarget, null);
+    assert.match(scoreboardText, /Root A repair item/);
+    assert.doesNotMatch(scoreboardText, /Root B repair item/);
+  } finally {
+    process.chdir(originalCwd);
+    if (originalProjectRoot === undefined) {
+      delete process.env.NLSDD_PROJECT_ROOT;
+    } else {
+      process.env.NLSDD_PROJECT_ROOT = originalProjectRoot;
+    }
+  }
+});
+
+test('parked replay clears stale projected fields from scoreboard projections', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-envelope-clear-'));
+  const originalCwd = process.cwd();
+  const originalProjectRoot = process.env.NLSDD_PROJECT_ROOT;
+  const modulePath = path.join(originalCwd, 'NLSDD', 'scripts', 'nlsdd-envelope.cjs');
+
+  try {
+    fs.mkdirSync(path.join(root, 'NLSDD', 'executions', 'plot-mode'), {recursive: true});
+    fs.writeFileSync(
+      path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-1.md'),
+      `# Lane 1
+
+> Ownership family:
+> \`src/commands/root.ts\`
+>
+> NLSDD worktree: \`.worktrees/lane-1-node\`
+>
+> Lane-local verification:
+> \`git status --short\`
+
+## C - Controller
+
+- [ ] Fresh parking item
+`,
+      'utf8',
+    );
+    fs.writeFileSync(
+      path.join(root, 'NLSDD', 'scoreboard.md'),
+      `# NLSDD Scoreboard
+
+| Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| plot-mode | Lane 1 | Node contract + handoff | Stale projected item | implementing | \`abc1234\` | \`git status --short\` | none | Stale projected target | stale row |
+`,
+      'utf8',
+    );
+    fs.mkdirSync(path.join(root, 'NLSDD', 'state', 'plot-mode'), {recursive: true});
+    fs.writeFileSync(
+      path.join(root, 'NLSDD', 'state', 'plot-mode', 'events.ndjson'),
+      [
+        JSON.stringify({
+          execution: 'plot-mode',
+          lane: 'Lane 1',
+          role: 'coordinator',
+          eventType: 'bootstrap-state',
+          phaseAfter: 'implementing',
+          currentItem: 'Fresh parking item',
+          nextRefillTarget: 'Fresh parking target',
+          summary: 'bootstrap',
+          timestamp: '2026-03-21T09:00:00.000Z',
+          insights: [],
+        }),
+        JSON.stringify({
+          execution: 'plot-mode',
+          lane: 'Lane 1',
+          role: 'coordinator',
+          eventType: 'parked',
+          phaseBefore: 'implementing',
+          phaseAfter: 'parked',
+          summary: 'Lane 1 is parked after the current work closed cleanly',
+          detail: 'No honest refill item is ready yet.',
+          timestamp: '2026-03-21T09:05:00.000Z',
+          insights: [],
+        }),
+      ].join('\n') + '\n',
+      'utf8',
+    );
+
+    delete process.env.NLSDD_PROJECT_ROOT;
+    process.chdir(root);
+
+    delete require.cache[require.resolve(modulePath)];
+    const {prepareExecutionState} = require(modulePath);
+    prepareExecutionState(root, 'plot-mode');
+
+    const laneState = JSON.parse(
+      fs.readFileSync(path.join(root, 'NLSDD', 'state', 'plot-mode', 'lane-1.json'), 'utf8'),
+    );
+    const scoreboardText = fs.readFileSync(path.join(root, 'NLSDD', 'scoreboard.md'), 'utf8');
+
+    assert.equal(laneState.phase, 'parked');
+    assert.equal(laneState.currentItem, null);
+    assert.equal(laneState.nextRefillTarget, null);
+    assert.equal(laneState.expectedNextPhase, null);
+    assert.match(
+      scoreboardText,
+      /\| plot-mode \| Lane 1 \| Node contract \+ handoff \| n\/a \| parked \| `abc1234` \| n\/a \| none \| n\/a \| No honest refill item is ready yet\. \|/,
+    );
+    assert.doesNotMatch(scoreboardText, /Stale projected item/);
+    assert.doesNotMatch(scoreboardText, /Stale projected target/);
+  } finally {
+    process.chdir(originalCwd);
+    if (originalProjectRoot === undefined) {
+      delete process.env.NLSDD_PROJECT_ROOT;
+    } else {
+      process.env.NLSDD_PROJECT_ROOT = originalProjectRoot;
+    }
+  }
+});
 test('review helper reduces execution state before reading projected review actions', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-review-reduce-'));
   process.env.NLSDD_PROJECT_ROOT = root;
