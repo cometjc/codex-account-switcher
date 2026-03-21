@@ -53,6 +53,7 @@ Use this file to keep NLSDD execution predictable, low-conflict, and easy to rev
   - a thread goes quiet longer than expected for the lane item
   - thread status and worktree status appear inconsistent
   - a lane item is expected to end in a commit and the sub-agent may be waiting on a permission or confirmation prompt instead of actively coding
+- Treat `implementing` as stale when the lane journal still says `implementing`, but the lane worktree is clean and `HEAD` still matches `latestCommit`; in that case, scheduler/probe output should surface `stale-implementing` so coordinator can reassign or park the lane instead of counting it as an active slot.
 - Probe checklist:
   - `node NLSDD/scripts/nlsdd-probe-lane.cjs --execution <id> --lane <n>`
   - or, if the helper is unavailable, fall back to:

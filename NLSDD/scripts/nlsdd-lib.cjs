@@ -364,6 +364,47 @@ function splitStatusEntries(statusOutput) {
   return {sourcePaths, artifactPaths};
 }
 
+function inspectLaneWorktree(projectRoot, execution, lane) {
+  const lanePlan = loadLanePlan(projectRoot, execution, lane);
+  if (!lanePlan || !lanePlan.worktreePath || !fs.existsSync(lanePlan.worktreePath)) {
+    return null;
+  }
+
+  const head = tryRun('git', ['rev-parse', '--short', 'HEAD'], lanePlan.worktreePath) || null;
+  const statusOutput = tryRun('git', ['status', '--short'], lanePlan.worktreePath);
+  const {sourcePaths, artifactPaths} = splitStatusEntries(statusOutput);
+
+  return {
+    head,
+    sourcePaths,
+    artifactPaths,
+    noise: classifyNoise(statusOutput),
+  };
+}
+
+function detectStaleImplementing(laneState, worktreeInspection) {
+  if (!laneState || laneState.phase !== 'implementing' || !worktreeInspection) {
+    return null;
+  }
+
+  if (worktreeInspection.sourcePaths.length > 0) {
+    return null;
+  }
+
+  if (!laneState.latestCommit || !worktreeInspection.head) {
+    return null;
+  }
+
+  if (String(laneState.latestCommit).trim() !== String(worktreeInspection.head).trim()) {
+    return null;
+  }
+
+  return {
+    kind: 'stale-implementing',
+    summary: 'lane journal still says implementing, but the worktree is clean at the same HEAD',
+  };
+}
+
 function formatIsoTimestamp(value) {
   if (!value) {
     return 'n/a';
@@ -701,11 +742,17 @@ function computeExecutionSchedule(projectRoot, execution, maxActiveThreads = 4) 
 
   const enrichedRows = rows.map((row) => {
     const laneState = loadLaneState(projectRoot, execution, row.Lane);
-    const schedulingPhase = laneState?.phase || phaseForScheduling(row);
+    const worktreeInspection = inspectLaneWorktree(projectRoot, execution, row.Lane);
+    const staleImplementing = detectStaleImplementing(laneState, worktreeInspection);
+    const schedulingPhase = staleImplementing
+      ? 'stale-implementing'
+      : laneState?.phase || phaseForScheduling(row);
     const nextItem = findNextRefillItem(projectRoot, execution, row.Lane);
     return {
       ...row,
       laneState,
+      worktreeInspection,
+      staleImplementing,
       schedulingPhase,
       nextExpectedPhase: laneState?.expectedNextPhase || null,
       nextItem: nextItem ? nextItem.text : null,
@@ -719,6 +766,7 @@ function computeExecutionSchedule(projectRoot, execution, maxActiveThreads = 4) 
     ['queued', 'lane-ready'].includes(row.schedulingPhase),
   );
   const blockedRows = enrichedRows.filter((row) => row.schedulingPhase === 'blocked');
+  const staleRows = enrichedRows.filter((row) => row.schedulingPhase === 'stale-implementing');
 
   const availableSlots = Math.max(0, maxActiveThreads - activeRows.length);
   const dispatchSuggestions = [...refillReadyRows, ...queuedRows]
@@ -741,6 +789,7 @@ function computeExecutionSchedule(projectRoot, execution, maxActiveThreads = 4) 
     refillReadyRows,
     queuedRows,
     blockedRows,
+    staleRows,
     availableSlots,
     dispatchSuggestions,
   };
@@ -767,6 +816,8 @@ module.exports = {
   loadLaneState,
   classifyNoise,
   splitStatusEntries,
+  inspectLaneWorktree,
+  detectStaleImplementing,
   refreshProbe,
   readRecentThreads,
   buildSessionIndex: indexSessionFiles,

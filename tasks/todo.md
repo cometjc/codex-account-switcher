@@ -750,3 +750,15 @@
   - 或改成同時推進 2-3 個 plans/executions
   - 只有在沒有 truthful parallel work 時，才接受暫時降到低併行度。
 - 這條 guardrail 直接來自本輪 `plot-mode` 觀察：Lane 4 一度成為唯一有真實前進的 lane，而 Lane 1/3/5 多次回到 `NOOP` 或 clean probe。
+
+# 2026-03-21 NLSDD stale-implementing detection
+
+- [x] 在 scheduler / probe 邏輯中辨識「lane journal 還是 implementing，但 worktree clean 且 HEAD == latestCommit」的 stale 狀態
+- [x] 讓 stale lane 不再被算入 active thread usage
+- [x] 補 regression test，鎖住 stale lane 會進入 `staleRows` 而不是 `activeRows`
+
+## Review
+
+- [`NLSDD/scripts/nlsdd-lib.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-lib.cjs) 新增 `inspectLaneWorktree()` 與 `detectStaleImplementing()`，讓 schedule 在 lane journal 之外也會看 worktree truth。
+- [`NLSDD/scripts/nlsdd-suggest-schedule.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-suggest-schedule.cjs) 現在會額外輸出 `Stale implementing lanes`。
+- regression 在 [tests/nlsdd-automation.test.js](/home/jethro/repo/side-projects/codex-account-switcher/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-suggest-schedule.cjs --execution plot-mode` 已通過。

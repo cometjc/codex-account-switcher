@@ -31,6 +31,7 @@
 - Not every lane row has to consume an active thread slot at all times; queued or parked lanes may remain visible in the scoreboard until a slot opens, then the coordinator can promote the next eligible queued lane into that slot.
 - A healthy execution should avoid collapsing into a single serial critical lane while the other active slots are effectively idle; when the remaining work starts converging that way, coordinator should re-plan instead of pretending the active cap is still meaningfully saturated.
 - When one execution no longer contains enough honest non-overlapping work to keep multiple slots productive, coordinator should prefer cutting 1-2 new independent lanes or advancing 2-3 plans/executions in parallel over keeping several slots pseudo-active behind one blocker.
+- Scheduler/probe tooling should detect stale `implementing` lanes from worktree truth and stop counting them as active thread consumers once the lane is clean at the same committed `HEAD`.
 - Runtime tooling must resolve the canonical repo root even when invoked from a linked worktree, so lane plans, worktrees, and state files always point back to the same execution root.
 - When the coordinator redefines an execution's active set, it should update the tracked scoreboard and the lane journals as one atomic replan step, preferably through `nlsdd-replan-active-set`, rather than editing only the manual scoreboard first.
 

@@ -879,3 +879,65 @@ test('active-set replan helper updates tracked phases and lane journals atomical
     [],
   );
 });
+
+test('schedule marks clean implementing lane at same HEAD as stale-implementing', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-stale-'));
+  const laneWorktree = path.join(root, '.worktrees', 'lane-1-node');
+  setupTempGitRepo(laneWorktree);
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  const head = run('git', ['rev-parse', '--short', 'HEAD'], laneWorktree);
+
+  fs.mkdirSync(path.join(root, 'NLSDD', 'executions', 'plot-mode'), {recursive: true});
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-1.md'),
+    `# Lane 1 Plan - Node Contract and Handoff
+
+> Ownership family:
+> \`src/commands/root.ts\`
+>
+> NLSDD worktree: \`.worktrees/lane-1-node\`
+>
+> Lane-local verification:
+> \`git status --short\`
+
+## C - Controller / Handoff
+
+- [ ] Audit shell/handoff alignment
+`,
+    'utf8',
+  );
+
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'scoreboard.md'),
+    `# NLSDD Scoreboard
+
+| Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| plot-mode | Lane 1 | Node contract + handoff | Audit shell/handoff alignment | implementing | \`${head}\` | \`git status --short\` | none | none | stale implementing candidate |
+`,
+    'utf8',
+  );
+
+  writeLaneState(root, 'plot-mode', 1, {
+    execution: 'plot-mode',
+    lane: 'Lane 1',
+    phase: 'implementing',
+    expectedNextPhase: 'spec-review-pending',
+    latestCommit: head,
+    lastReviewerResult: null,
+    lastVerification: ['git status --short'],
+    blockedBy: null,
+    note: 'stale implementing candidate',
+    correctionCount: 0,
+    updatedAt: '2026-03-21T10:00:00.000Z',
+  });
+
+  const {computeExecutionSchedule} = freshRequire('NLSDD/scripts/nlsdd-lib.cjs');
+  const schedule = computeExecutionSchedule(root, 'plot-mode', 4);
+
+  assert.equal(schedule.activeRows.length, 0);
+  assert.deepEqual(schedule.staleRows.map((row) => row.Lane), ['Lane 1']);
+  assert.equal(schedule.staleRows[0].staleImplementing.kind, 'stale-implementing');
+  assert.equal(schedule.availableSlots, 4);
+});

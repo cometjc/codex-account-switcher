@@ -53,6 +53,7 @@ function renderSchedule(schedule) {
     renderRows('Refill-ready lanes', schedule.refillReadyRows),
     renderRows('Queued lanes', schedule.queuedRows),
     renderRows('Blocked lanes', schedule.blockedRows),
+    renderRows('Stale implementing lanes', schedule.staleRows || []),
     renderSuggestions(schedule.dispatchSuggestions),
   ].join('\n\n');
 }
