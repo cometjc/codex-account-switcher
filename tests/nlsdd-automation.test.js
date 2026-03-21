@@ -696,6 +696,8 @@ test('lane state recorder writes execution-aware journal files for coordinator t
     phase: 'quality-review-pending',
     'expected-next-phase': 'refill-ready',
     commit: 'abc1234',
+    'commit-title': 'feat(plot): tighten runtime seam',
+    'commit-body': '補上 compare payload handoff',
     reviewer: 'PASS',
     'correction-count': 3,
     verification: ['cargo test', 'cargo check'],
@@ -710,6 +712,8 @@ test('lane state recorder writes execution-aware journal files for coordinator t
   assert.equal(state.phase, 'quality-review-pending');
   assert.equal(state.expectedNextPhase, 'refill-ready');
   assert.equal(state.latestCommit, 'abc1234');
+  assert.equal(state.proposedCommitTitle, 'feat(plot): tighten runtime seam');
+  assert.equal(state.proposedCommitBody, '補上 compare payload handoff');
   assert.equal(state.lastReviewerResult, 'PASS');
   assert.deepEqual(state.lastVerification, ['cargo test', 'cargo check']);
   assert.equal(state.blockedBy, 'none');
@@ -1259,4 +1263,68 @@ test('review loop driver returns coordinator-ready bundles for review and correc
   assert.equal(result[1].action, 'correction-loop');
   assert.match(result[1].message, /Reviewer finding: Compare panel still re-derives label heuristics/);
   assert.match(result[1].message, /Accepted write scope: rust\/plot-viewer\/src\/render\/panels\.rs/);
+});
+
+test('ready-to-commit intake helper returns structured coordinator commit bundle', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-intake-'));
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  fs.mkdirSync(path.join(root, 'NLSDD', 'executions', 'plot-mode'), {recursive: true});
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-5.md'),
+    `# Lane 5
+
+> Ownership family:
+> \`README.md\`
+> \`tests/plot-readme.test.js\`
+>
+> NLSDD worktree: \`.worktrees/lane-5-docs\`
+>
+> Lane-local verification:
+> \`npm run build\`
+> \`node --test tests/plot-readme.test.js\`
+
+## C - Controller
+
+- [ ] Recovery-baseline README and local run instructions
+`,
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'scoreboard.md'),
+    `# NLSDD Scoreboard
+
+| Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| plot-mode | Lane 5 | Plot viewer docs + operator flow | Recovery-baseline README and local run instructions | coordinator-commit-pending | \`n/a\` | \`npm run build\`; \`node --test tests/plot-readme.test.js\` | none | none | ready to commit |
+`,
+    'utf8',
+  );
+
+  writeLaneState(root, 'plot-mode', 5, {
+    execution: 'plot-mode',
+    lane: 'Lane 5',
+    phase: 'coordinator-commit-pending',
+    'expected-next-phase': 'spec-review-pending',
+    commit: null,
+    'commit-title': 'docs(plot): 補上 recovery baseline 操作說明',
+    'commit-body': '同步 shell/readme 驗證與本地啟動步驟',
+    reviewer: null,
+    verification: ['npm run build', 'node --test tests/plot-readme.test.js'],
+    'blocked-by': null,
+    note: 'READY_TO_COMMIT from docs lane',
+    'updated-at': '2026-03-21T11:00:00.000Z',
+  });
+
+  const {intakeReadyToCommit} = freshRequire('NLSDD/scripts/nlsdd-intake-ready-to-commit.cjs');
+  const result = intakeReadyToCommit(root, 'plot-mode');
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].lane, 'Lane 5');
+  assert.equal(result[0].phase, 'coordinator-commit-pending');
+  assert.equal(result[0].proposedCommitTitle, 'docs(plot): 補上 recovery baseline 操作說明');
+  assert.equal(result[0].proposedCommitBody, '同步 shell/readme 驗證與本地啟動步驟');
+  assert.deepEqual(result[0].verification, ['npm run build', 'node --test tests/plot-readme.test.js']);
+  assert.deepEqual(result[0].scope, ['README.md', 'tests/plot-readme.test.js']);
+  assert.match(result[0].note, /READY_TO_COMMIT/);
 });

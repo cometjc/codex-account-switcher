@@ -804,3 +804,15 @@
 - 新增 [`NLSDD/scripts/nlsdd-drive-review-loop.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-drive-review-loop.cjs) 與 `npm run nlsdd:review`，讓 coordinator 不必逐條掃 lane docs/journal，就能拿到下一步 review action。
 - helper 目前會優先吃 lane journal phase，再回退到 runtime/tracked scoreboard phase，並重用既有的 `spec-review`、`quality-review`、`correction-loop` 模板；若 lane 已進 `coordinator-commit-pending`，則輸出 commit intake bundle。
 - regression 在 [tests/nlsdd-automation.test.js](/home/jethro/repo/side-projects/codex-account-switcher/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-drive-review-loop.cjs --execution plot-mode --json` 已通過。
+
+# 2026-03-21 NLSDD READY_TO_COMMIT intake helper
+
+- [x] 將 commit-ready handoff 的 title/body/verification 結構化寫進 lane journal
+- [x] 新增 intake helper，讓 coordinator 可直接收 `coordinator-commit-pending` lanes 的 commit bundle
+- [x] 補 regression test，鎖住 intake helper 會回傳 proposed commit title/body、scope、verification 與 note
+
+## Review
+
+- [`NLSDD/scripts/nlsdd-record-lane-state.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-record-lane-state.cjs) 現在支援 `--commit-title` 與 `--commit-body`，讓 `READY_TO_COMMIT` handoff 不只剩 phase 與 note。
+- 新增 [`NLSDD/scripts/nlsdd-intake-ready-to-commit.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-intake-ready-to-commit.cjs) 與 `npm run nlsdd:intake`，可直接列出目前可由 coordinator 收單提交的 lanes。
+- [`NLSDD/scripts/nlsdd-drive-review-loop.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-drive-review-loop.cjs) 的 `coordinator-commit-needed` 輸出也會帶 proposed commit title/body，避免 review helper 和 intake helper 出現兩套 commit 資訊。

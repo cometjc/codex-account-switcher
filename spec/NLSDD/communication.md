@@ -49,6 +49,7 @@
   - an optional commit body summary when the change is not single-purpose
 - Coordinator should treat `READY_TO_COMMIT` as a live lane state, not as an unresponsive thread.
 - Under this repo's default NLSDD flow, `READY_TO_COMMIT` means the sub-agent passes the commit-ready MVC handoff back to the main agent/coordinator, and the main agent performs the commit to avoid permission-block stalls.
+- Coordinators should preserve the commit-ready package structurally when they record lane state: proposed commit title, optional body summary, verification already completed, and the latest note should all survive into the `coordinator-commit-pending` lane journal.
 
 ## Blocker Reporting
 
@@ -76,6 +77,7 @@ These templates may be generated through `node NLSDD/scripts/nlsdd-compose-messa
 
 - When coordinator wants to collapse "reconcile stale lanes + promote next lanes + generate implementer-assignment text" into one deterministic pass, prefer `npm run nlsdd:launch -- --execution <id>`. The launch helper should reuse the same implementer-assignment template rather than inventing a second dispatch wording.
 - When coordinator wants to collapse "inspect current review phases + decide the next spec/quality/correction/coordinator-commit step" into one deterministic pass, prefer `npm run nlsdd:review -- --execution <id>`. The review helper should emit the same template families already defined below, not invent a separate review wording.
+- When coordinator wants to inspect only commit-ready handoffs, prefer `npm run nlsdd:intake -- --execution <id> [--lane <n>]`. The intake helper should output a normalized commit bundle rather than a reviewer message.
 
 ### Implementer Assignment
 

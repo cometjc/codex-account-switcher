@@ -111,6 +111,8 @@ function buildAction(context) {
           `Lane: ${context.row.Lane}`,
           `Lane item: ${context.item}`,
           `Commit-ready handoff: ${context.commit}`,
+          `Proposed commit title: ${context.laneState?.proposedCommitTitle || 'n/a'}`,
+          `Proposed commit body: ${context.laneState?.proposedCommitBody || 'n/a'}`,
           `Scope: ${context.scope}`,
           `Verification: ${context.verification}`,
           `Latest note: ${context.laneState?.note || 'n/a'}`,

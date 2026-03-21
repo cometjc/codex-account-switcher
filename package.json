@@ -21,6 +21,7 @@
     "nlsdd:cycle": "node NLSDD/scripts/nlsdd-run-cycle.cjs",
     "nlsdd:launch": "node NLSDD/scripts/nlsdd-launch-active-set.cjs",
     "nlsdd:review": "node NLSDD/scripts/nlsdd-drive-review-loop.cjs",
+    "nlsdd:intake": "node NLSDD/scripts/nlsdd-intake-ready-to-commit.cjs",
     "nlsdd:compose": "node NLSDD/scripts/nlsdd-compose-message.cjs",
     "plot:viewer:build": "cargo build --manifest-path rust/plot-viewer/Cargo.toml",
     "plot:viewer:run": "cargo run --manifest-path rust/plot-viewer/Cargo.toml --",

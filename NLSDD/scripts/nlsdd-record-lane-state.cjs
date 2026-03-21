@@ -23,6 +23,12 @@ function parseArgs(argv) {
     } else if (value === '--commit') {
       args.commit = argv[index + 1];
       index += 1;
+    } else if (value === '--commit-title') {
+      args['commit-title'] = argv[index + 1];
+      index += 1;
+    } else if (value === '--commit-body') {
+      args['commit-body'] = argv[index + 1];
+      index += 1;
     } else if (value === '--reviewer') {
       args.reviewer = argv[index + 1];
       index += 1;
@@ -65,6 +71,8 @@ function recordLaneState(projectRoot, args) {
     phase: args.phase,
     expectedNextPhase: args['expected-next-phase'] || null,
     latestCommit: args.commit || null,
+    proposedCommitTitle: args['commit-title'] || null,
+    proposedCommitBody: args['commit-body'] || null,
     lastReviewerResult: args.reviewer || null,
     lastVerification: args.verification || [],
     blockedBy: args['blocked-by'] || null,
@@ -80,7 +88,7 @@ function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.execution || !args.lane || !args.phase) {
     throw new Error(
-      'Usage: node NLSDD/scripts/nlsdd-record-lane-state.cjs --execution <id> --lane <n> --phase <phase> [--expected-next-phase <phase>] [--commit <sha>] [--reviewer <result>] [--correction-count <n>] [--verification <cmd>] [--blocked-by <reason>] [--note <text>] [--updated-at <iso>]',
+      'Usage: node NLSDD/scripts/nlsdd-record-lane-state.cjs --execution <id> --lane <n> --phase <phase> [--expected-next-phase <phase>] [--commit <sha>] [--commit-title <title>] [--commit-body <body>] [--reviewer <result>] [--correction-count <n>] [--verification <cmd>] [--blocked-by <reason>] [--note <text>] [--updated-at <iso>]',
     );
   }
   const filePath = recordLaneState(resolveProjectRoot(), args);

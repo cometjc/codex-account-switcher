@@ -327,6 +327,8 @@ function loadLaneState(projectRoot, execution, lane) {
       filePath,
       execution: parsed.execution || execution,
       lane: parsed.lane || lane,
+      proposedCommitTitle: parsed.proposedCommitTitle || parsed['commit-title'] || null,
+      proposedCommitBody: parsed.proposedCommitBody || parsed['commit-body'] || null,
     };
   } catch {
     return null;
