@@ -265,19 +265,28 @@ test('scoreboard refresh v2 backfills effective phase and lane event metadata', 
   const fixture = setupNlsddFixture();
   process.env.NLSDD_PROJECT_ROOT = fixture.root;
   process.env.NLSDD_SCOREBOARD_PATH = path.join(fixture.root, 'NLSDD', 'scoreboard.md');
+  process.env.NLSDD_RUNTIME_SCOREBOARD_PATH = path.join(
+    fixture.root,
+    'NLSDD',
+    'state',
+    'scoreboard.runtime.md',
+  );
   process.env.CODEX_STATE_DB_PATH = fixture.dbPath;
   process.env.CODEX_SESSIONS_ROOT = path.join(fixture.root, '.codex', 'sessions');
 
+  const trackedBefore = fs.readFileSync(process.env.NLSDD_SCOREBOARD_PATH, 'utf8');
   const {updateScoreboard} = freshRequire('NLSDD/scripts/nlsdd-refresh-scoreboard.cjs');
   updateScoreboard();
 
-  const scoreboardText = fs.readFileSync(process.env.NLSDD_SCOREBOARD_PATH, 'utf8');
-  assert.match(scoreboardText, /\| plot-mode \| Lane 1 \|/);
-  assert.match(scoreboardText, /\| quality-review-pending \|/);
-  assert.match(scoreboardText, /PASS · Meitner · 2026-03-21 03:00:00Z/);
-  assert.match(scoreboardText, /\| 1 \| 2026-03-20 18:37:48Z \|/);
-  assert.match(scoreboardText, /mixed/);
-  assert.match(scoreboardText, /## Recent Codex Threads/);
+  const trackedAfter = fs.readFileSync(process.env.NLSDD_SCOREBOARD_PATH, 'utf8');
+  const runtimeText = fs.readFileSync(process.env.NLSDD_RUNTIME_SCOREBOARD_PATH, 'utf8');
+  assert.equal(trackedAfter, trackedBefore);
+  assert.match(runtimeText, /\| plot-mode \| Lane 1 \|/);
+  assert.match(runtimeText, /\| quality-review-pending \|/);
+  assert.match(runtimeText, /PASS · Meitner · 2026-03-21 03:00:00Z/);
+  assert.match(runtimeText, /\| 1 \| 2026-03-20 18:37:48Z \|/);
+  assert.match(runtimeText, /mixed/);
+  assert.match(runtimeText, /## Recent Codex Threads/);
 });
 
 test('resolveProjectRoot returns the canonical repo root when called from a linked worktree', () => {

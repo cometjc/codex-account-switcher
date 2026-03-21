@@ -23,7 +23,8 @@
   - lane-local verification commands
 - Every execution must keep its runtime lane plans under `NLSDD/executions/<execution-id>/`.
 - Every execution may keep execution-aware lane runtime state under `NLSDD/state/<execution-id>/`.
-- Every execution must have one canonical row set in `NLSDD/scoreboard.md`.
+- Every execution must have one canonical tracked row set in `NLSDD/scoreboard.md`.
+- Auto-refreshed runtime scoreboard output should be written under `NLSDD/state/`, not back into the tracked scoreboard.
 - Scoreboard rows may contain both manual coordinator fields and auto-derived fields; automation may suggest state, but the coordinator remains the decision-maker for dispatch.
 - Not every lane row has to consume an active thread slot at all times; queued or parked lanes may remain visible in the scoreboard until a slot opens, then the coordinator can promote the next eligible queued lane into that slot.
 - Runtime tooling must resolve the canonical repo root even when invoked from a linked worktree, so lane plans, worktrees, and state files always point back to the same execution root.
@@ -54,6 +55,7 @@
   - execution and lane checklist updates
   - `NLSDD/scoreboard.md`
   - `NLSDD/state/<execution-id>/lane-<n>.json`
+  - `NLSDD/state/scoreboard.runtime.md`
   - cross-lane lessons in `tasks/lessons.md`
 - Implementers and reviewers should not "helpfully" update those files as part of feature work.
 - Auto-refresh tooling may rewrite the scoreboard's derived columns, but must not overwrite manual intent fields such as `Current item`, `Phase`, or `Blocked by`.

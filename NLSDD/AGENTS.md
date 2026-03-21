@@ -2,7 +2,7 @@
 
 - 此處集中管理 `NLSDD` 的實際執行用流程文件、scoreboard、execution docs 與 helper scripts。
 - `executions/<execution-id>/` 記錄 execution overview、lane plans、目前狀態與 refill 順序，供實際協作與回放使用。
-- `state/<execution-id>/lane-<n>.json` 記錄 execution-aware 的 lane runtime state，供 scoreboard refresh、probe 與 schedule tooling 使用。
-- `scoreboard.md` 是 repo 內唯一正式的 lane 狀態板；lane phase、latest commit、blocked 狀態與 queued/active set 應優先在此維護。
+- `state/<execution-id>/lane-<n>.json` 記錄 execution-aware 的 lane runtime state；`state/scoreboard.runtime.md` 承接 auto-refreshed scoreboard 輸出。這些都是 runtime artifacts，不應納入 tracked tree。
+- `scoreboard.md` 是 repo 內唯一正式的 tracked lane 狀態板；lane phase、latest commit、blocked 狀態與 queued/active set 應優先在此維護，auto-derived 欄位則輸出到 runtime scoreboard。
 - `scripts/` 放 `NLSDD` 執行輔助腳本；若路徑或輸出格式變更，需同步更新 `package.json` scripts、tests 與相關文件。
 - `NLSDD/` 只放實際執行所需 artefacts；通用定義、規格與不依賴單次 execution 的治理文件應維護在 `spec/NLSDD/`。

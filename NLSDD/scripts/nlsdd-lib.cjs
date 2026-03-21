@@ -45,6 +45,14 @@ function resolveScoreboardPath(projectRoot = resolveProjectRoot()) {
   return path.join(projectRoot, 'NLSDD', 'scoreboard.md');
 }
 
+function resolveRuntimeScoreboardPath(projectRoot = resolveProjectRoot()) {
+  const envRuntimeScoreboardPath = process.env.NLSDD_RUNTIME_SCOREBOARD_PATH;
+  if (envRuntimeScoreboardPath && isPathWithin(projectRoot, envRuntimeScoreboardPath)) {
+    return envRuntimeScoreboardPath;
+  }
+  return path.join(projectRoot, 'NLSDD', 'state', 'scoreboard.runtime.md');
+}
+
 function resolveCodexStateDbPath() {
   return process.env.CODEX_STATE_DB_PATH || path.join(os.homedir(), '.codex', 'state_5.sqlite');
 }
@@ -671,6 +679,7 @@ function computeExecutionSchedule(projectRoot, execution, maxActiveThreads = 4) 
 module.exports = {
   resolveProjectRoot,
   resolveScoreboardPath,
+  resolveRuntimeScoreboardPath,
   resolveCodexStateDbPath,
   resolveCodexSessionsRoot,
   run,

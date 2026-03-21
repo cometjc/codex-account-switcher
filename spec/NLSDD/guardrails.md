@@ -40,6 +40,7 @@ Use this file to keep NLSDD execution predictable, low-conflict, and easy to rev
     - `git log --oneline -n 1`
     - the lane-local verification command from the lane plan
 - Probe results override thread assumptions and must be reflected in the scoreboard.
+- Runtime probe/refresh output belongs under `NLSDD/state/`; do not use auto-refresh to rewrite the tracked `NLSDD/scoreboard.md`.
 - When a lane journal exists, probes should treat it as the primary execution-aware state surface and only use thread/session heuristics as fallback.
 
 ## Blocker Suggestions
@@ -73,6 +74,7 @@ Use this file to keep NLSDD execution predictable, low-conflict, and easy to rev
 - Prefer `node NLSDD/scripts/nlsdd-compose-message.cjs ...` to generate those templates consistently.
 - If correction loops exceed 2 rounds, escalate to coordinator arbitration.
 - When coordinator records a new lane state after review, correction, or blockage, prefer `node NLSDD/scripts/nlsdd-record-lane-state.cjs ...` over hand-editing journal JSON.
+- When coordinator needs a refreshed scoreboard snapshot, prefer `npm run nlsdd:scoreboard:refresh` and inspect `NLSDD/state/scoreboard.runtime.md` rather than staging runtime churn from the tracked scoreboard.
 
 ## Required Handoff Format
 

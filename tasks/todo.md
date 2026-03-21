@@ -1,5 +1,22 @@
 # 2026-03-20 limits 欄位 header 修正
 
+# 2026-03-21 NLSDD runtime scoreboard 邊界收斂
+
+- [x] 將 auto-refreshed scoreboard 輸出改到 ignored runtime 檔，不再覆寫 tracked `NLSDD/scoreboard.md`
+- [x] 將 `NLSDD/state/` 納入 ignore 邊界，讓 lane journal 與 runtime scoreboard 都視為執行期狀態
+- [x] 更新 NLSDD 定義與執行文件，明確區分 tracked scoreboard 與 runtime scoreboard
+- [x] 補回歸測試，確認 refresh 會保留 tracked scoreboard 並改寫 runtime scoreboard
+
+## Review
+
+- 根因：`npm run nlsdd:scoreboard:refresh` 原本直接覆寫 tracked 的 [`NLSDD/scoreboard.md`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scoreboard.md)，導致每次 refresh 都把主工作樹弄髒，也讓 merge / cherry-pick 容易被 runtime 狀態阻塞。
+- 修正：新增 ignored runtime scoreboard 邊界，refresh 現在改寫 `NLSDD/state/scoreboard.runtime.md`；tracked 的 `NLSDD/scoreboard.md` 只保留 coordinator 維護的 canonical row set 與說明。
+- 一併把 [`NLSDD/state/`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/state/) 納入 [`.gitignore`](/home/jethro/repo/side-projects/codex-account-switcher/.gitignore)，讓 lane journal 與 runtime scoreboard 同屬執行期狀態，不再污染 tracked tree。
+- 驗證：
+  - `node --test tests/nlsdd-automation.test.js`
+  - `npm run nlsdd:scoreboard:refresh`
+  - `npm run build`
+
 # 2026-03-21 NLSDD meta-optimization lane
 
 - [x] 新增一條 `nlsdd-self-hosting` lane，專門 review 並優化 `NLSDD` 本身

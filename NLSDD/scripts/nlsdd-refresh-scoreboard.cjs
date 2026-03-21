@@ -4,19 +4,20 @@ const fs = require('node:fs');
 const {
   classifyNoise,
   computeLaneAutomation,
-  formatIsoTimestamp,
   joinRow,
   loadLanePlan,
   loadScoreboardTable,
   readRecentThreads,
   refreshProbe,
   resolveProjectRoot,
+  resolveRuntimeScoreboardPath,
   resolveScoreboardPath,
   tryRun,
 } = require('./nlsdd-lib.cjs');
 
 const projectRoot = resolveProjectRoot();
 const scoreboardPath = resolveScoreboardPath(projectRoot);
+const runtimeScoreboardPath = resolveRuntimeScoreboardPath(projectRoot);
 
 function escapeTableCell(value) {
   return String(value).replace(/\|/g, '\\|');
@@ -84,7 +85,8 @@ function updateScoreboard() {
     '',
   ];
 
-  fs.writeFileSync(scoreboardPath, nextLines.join('\n'), 'utf8');
+  fs.mkdirSync(require('node:path').dirname(runtimeScoreboardPath), {recursive: true});
+  fs.writeFileSync(runtimeScoreboardPath, nextLines.join('\n'), 'utf8');
 }
 
 if (require.main === module) {
