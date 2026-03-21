@@ -147,10 +147,13 @@ Decision note:
 - [x] Add autopilot refill, lane probe, and scoreboard rules to reduce coordinator bottlenecks
 - [x] Start treating Rust `target/` churn as workflow noise, with `.gitignore` plus lane hygiene cleanup instead of reviewer confusion
 - [x] Re-plan the current 4-active-lane set from live NLSDD runtime/manual state instead of preserving stale second-round review labels
+- [x] Re-cut the next plot-mode 4a active set around the recovery baseline: Lane 2 + Lane 3 + Lane 4 + Lane 5, with Lane 1 parked
+- [x] Promote a dedicated docs/operator-flow lane instead of inventing overlapping work just to keep four slots busy
+- [x] Capture that stale lane journals must be refreshed before the next dispatch round so runtime tooling does not override the new manual plan
 
 Decision note:
 - plot-mode parallel work now follows an NLSDD execution with 4 active lanes
 - new sub-agent assignments should start from the current lane plans instead of free-form task slicing
 - lane progress should be reported in lane-local MVC terms so the coordinator can refill predictably
 - future execution should use `NLSDD` as the workflow name, not `$subagent-driven-development`
-- the current 4-active-lane plan keeps lanes 1/3/4 as the next refill priorities and treats lane 2 as conditional after its current correction loop closes
+- the next 4-active-lane plan parks Lane 1, reactivates Lane 2 for runtime navigation/focus flow, keeps Lane 3/4 active, and adds Lane 5 for docs/operator flow

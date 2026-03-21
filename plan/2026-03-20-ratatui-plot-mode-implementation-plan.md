@@ -32,6 +32,10 @@
 - [x] Land the fourth-round Lane 3 wording refinement (`35c8351`) and keep it chart-local
 - [x] Land the fourth-round Lane 4 field-mapping refactor (`b24f12a`) without changing visible panel output
 - [x] Build a clean integration branch from shared baseline `d19d319` and merge the accepted Lane 1 / 3 / 4 stacks there
+- [x] Re-cut the next 4-active-lane set around recovery-baseline work instead of keeping Lane 1 in the active pool by inertia
+- [x] Add Lane 5 on `main` as the docs/operator-flow family so the fourth active slot is a real non-overlapping lane
+- [x] Record that the next 4a set is Lane 2 + Lane 3 + Lane 4 + Lane 5, with Lane 1 parked until shell UX changes again
+- [x] Record that stale lane journals must be refreshed before dispatch so runtime tooling matches the new manual active set
 
 ---
 

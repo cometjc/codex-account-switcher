@@ -1,6 +1,10 @@
 import confirm from "@inquirer/confirm";
 import input from "@inquirer/input";
+import { constants as fsConstants } from "node:fs";
+import fsp from "node:fs/promises";
 import { execFileSync } from "node:child_process";
+import os from "node:os";
+import path from "node:path";
 import { BaseCommand } from "../lib/base-command";
 import {
   renderRootHeaderBlock,
@@ -11,6 +15,11 @@ import { computePanelWidths, renderRootDetailPanel } from "../lib/root-panel-lay
 import { renderSelectionOptionLabel } from "../lib/root-option-layout";
 import actionSelect, { Separator } from "../lib/prompts/action-select";
 import { uiStateService, type PersistedWorkloadTier } from "../lib/config/ui-state";
+import {
+  buildPlotSnapshot,
+  serializePlotSnapshot,
+  type PlotProfileInput,
+} from "../lib/plot";
 import {
   AccountAlreadyExistsError,
   type AuthSnapshot,
@@ -29,7 +38,7 @@ type ActionKind =
   | "update-current"
   | "update-all"
   | "redraw";
-type BarStyle = "quota" | "delta";
+type BarStyle = "quota" | "delta" | "plot";
 type RefreshScope = "none" | "current" | "all";
 type WorkloadTier = PersistedWorkloadTier;
 type PromptDensity = "full" | "condensed";
@@ -102,6 +111,15 @@ interface RecommendationSummary {
   scoreLabel: string;
 }
 
+interface PlotModeLaunchContext {
+  barStyle: BarStyle;
+  itemCount: number;
+  items: MenuItem[];
+  workloadTier: WorkloadTier;
+  terminalColumns: number;
+  terminalRows: number;
+}
+
 export default class RootCommand extends BaseCommand {
   static description =
     "Interactive Codex auth profile manager (save/use/delete/rename with limits)";
@@ -157,7 +175,15 @@ export default class RootCommand extends BaseCommand {
         const action = result.action;
 
         if (action === "mode") {
-          barStyle = barStyle === "quota" ? "delta" : "quota";
+          const nextBarStyle = this.nextBarStyle(barStyle);
+          if (nextBarStyle === "plot") {
+            const launched = await this.maybeLaunchPlotMode(
+              this.buildPlotModeLaunchContext(menu.items, workloadTier, nextBarStyle),
+            );
+            barStyle = launched ? nextBarStyle : "delta";
+          } else {
+            barStyle = nextBarStyle;
+          }
           continue;
         }
         if (action === "quit") {
@@ -251,7 +277,7 @@ export default class RootCommand extends BaseCommand {
           { value: "update-current", name: "Update One", key: "u" },
           { value: "update-all", name: "Update All", key: "a" },
           { value: "redraw", name: "Redraw", key: "r" },
-          { value: "mode", name: "Bar Style", key: "b" },
+          { value: "mode", name: "Mode", key: "b" },
           { value: "workload", name: "Workload", key: "w" },
           { value: "color", name: "Color", key: "c" },
           { value: "quit", name: "Quit", key: "q" },
@@ -1007,7 +1033,7 @@ export default class RootCommand extends BaseCommand {
   }
 
   private buildActionsHelpText(barStyle: BarStyle, workloadTier: WorkloadTier = "auto"): string {
-    const barStyleValue = barStyle === "delta" ? "Delta" : "Quota";
+    const barStyleValue = this.formatBarStyle(barStyle);
     const workloadValue = this.formatWorkloadTier(workloadTier);
     const colorValue = this.ansiEnabled ? "On" : "Off";
     const actionStyle = "30;106";
@@ -1023,6 +1049,184 @@ export default class RootCommand extends BaseCommand {
       this.renderActionButton(`[Q]uit`, actionStyle),
     ];
     return buttons.join("  ");
+  }
+
+  private nextBarStyle(barStyle: BarStyle): BarStyle {
+    if (barStyle === "quota") return "delta";
+    if (barStyle === "delta") return "plot";
+    return "quota";
+  }
+
+  private formatBarStyle(barStyle: BarStyle): string {
+    if (barStyle === "delta") return "Delta";
+    if (barStyle === "plot") return "Plot";
+    return "Quota";
+  }
+
+  private buildPlotModeLaunchContext(
+    items: MenuItem[],
+    workloadTier: WorkloadTier,
+    barStyle: BarStyle,
+  ): PlotModeLaunchContext {
+    return {
+      barStyle,
+      itemCount: items.length,
+      items,
+      workloadTier,
+      terminalColumns: this.currentTerminalColumns(),
+      terminalRows: this.currentTerminalRows(),
+    };
+  }
+
+  private async maybeLaunchPlotMode(context: PlotModeLaunchContext): Promise<boolean> {
+    const snapshot = buildPlotSnapshot({
+      generatedAt: this.nowSeconds(),
+      profiles: context.items.map((item) => this.buildPlotProfileInput(item, context.workloadTier)),
+    });
+    const snapshotPath = await this.writePlotSnapshot(snapshot);
+    const viewerBinaryPath = await this.resolvePlotViewerBinaryPath();
+
+    if (!viewerBinaryPath) {
+      this.log(
+        `Plot snapshot prepared at ${snapshotPath} (${context.itemCount} profiles; viewer binary not available yet).`,
+      );
+      return false;
+    }
+
+    try {
+      execFileSync(viewerBinaryPath, [snapshotPath], { stdio: "inherit" });
+      return true;
+    } catch (error) {
+      this.log(
+        `Plot viewer launch failed from ${viewerBinaryPath}; snapshot kept at ${snapshotPath}.`,
+      );
+      if (error instanceof Error && error.message) {
+        this.log(error.message);
+      }
+      return false;
+    }
+  }
+
+  private buildPlotProfileInput(item: MenuItem, workloadTier: WorkloadTier): PlotProfileInput {
+    const weeklyWindow = this.pickWeeklyWindow(item.usage);
+    const fiveHourWindow = this.pickFiveHourWindow(item.usage);
+    const summary = this.computeSummary(item.usage, item.isCurrent, workloadTier);
+    const weeklySummary = summary.windows.find((window) => window.source === "W");
+    const fiveHourSummary = summary.windows.find((window) => window.source === "5H");
+    const plotWindow = weeklyWindow ?? fiveHourWindow;
+    const points = this.buildPlotWindowPoints(plotWindow);
+    const fiveHourBand = this.buildPlotFiveHourBand(weeklyWindow, weeklySummary, fiveHourSummary);
+
+    return {
+      id: this.buildPlotProfileId(item),
+      name: item.profileName,
+      isCurrent: item.isCurrent,
+      usage: item.usage,
+      sevenDayWindow: this.buildPlotWindowBounds(weeklyWindow ?? plotWindow),
+      sevenDayPoints: points,
+      fiveHourWindow: this.buildPlotWindowBounds(fiveHourWindow),
+      fiveHourBand,
+      summaryLabels: {
+        timeToReset: "Time to reset",
+        usageLeft: "Usage Left",
+        drift: "Drift",
+        pacingStatus: "Pacing Status",
+      },
+    };
+  }
+
+  private buildPlotProfileId(item: MenuItem): string {
+    if (item.savedName) return `saved:${item.savedName}`;
+    if (item.accountId) return `current:${item.accountId}`;
+    return `profile:${item.profileName}`;
+  }
+
+  private buildPlotWindowBounds(
+    window: UsageWindow | null,
+  ): { startAt: number | null; endAt: number | null } {
+    if (!window) {
+      return { startAt: null, endAt: null };
+    }
+
+    return {
+      startAt: this.windowStartAt(window),
+      endAt: window.reset_at,
+    };
+  }
+
+  private buildPlotWindowPoints(window: UsageWindow | null): Array<{ offsetSeconds: number; usedPercent: number }> {
+    if (!window) return [];
+
+    const totalSeconds = Math.max(1, window.limit_window_seconds || this.readResetSeconds(window));
+    const usedPercent = this.clampPercent(window.used_percent);
+    return [
+      { offsetSeconds: 0, usedPercent },
+      { offsetSeconds: totalSeconds, usedPercent },
+    ];
+  }
+
+  private buildPlotFiveHourBand(
+    weeklyWindow: UsageWindow | null,
+    weeklySummary: WindowSummary | undefined,
+    fiveHourSummary: WindowSummary | undefined,
+  ): {
+    available?: boolean;
+    lowerY?: number | null;
+    upperY?: number | null;
+    bandHeight?: number | null;
+    delta7dPercent?: number | null;
+    delta5hPercent?: number | null;
+    reason?: string;
+  } | null {
+    if (!weeklyWindow || !weeklySummary || !fiveHourSummary) return null;
+    if (weeklySummary.drift <= 0 || fiveHourSummary.drift <= 0) return null;
+
+    const bandHeight = (weeklySummary.drift / fiveHourSummary.drift) * 100;
+    const center = this.clampPercent(weeklyWindow.used_percent);
+    const halfHeight = bandHeight / 2;
+
+    return {
+      available: true,
+      lowerY: this.clampPercent(center - halfHeight),
+      upperY: this.clampPercent(center + halfHeight),
+      bandHeight,
+      delta7dPercent: weeklySummary.drift,
+      delta5hPercent: fiveHourSummary.drift,
+    };
+  }
+
+  private async writePlotSnapshot(snapshot: ReturnType<typeof buildPlotSnapshot>): Promise<string> {
+    const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), "codex-account-switcher-plot-"));
+    const snapshotPath = path.join(tempDir, "snapshot.json");
+    await fsp.writeFile(snapshotPath, serializePlotSnapshot(snapshot), "utf8");
+    return snapshotPath;
+  }
+
+  private async resolvePlotViewerBinaryPath(): Promise<string | null> {
+    const envBinary = process.env.CODEX_AUTH_PLOT_VIEWER_BIN?.trim();
+    if (envBinary) {
+      return (await this.pathIsExecutable(envBinary)) ? envBinary : null;
+    }
+
+    const candidates = [
+      path.resolve("rust/plot-viewer/target/debug/plot-viewer"),
+      path.resolve("rust/plot-viewer/target/release/plot-viewer"),
+    ];
+
+    for (const candidate of candidates) {
+      if (await this.pathIsExecutable(candidate)) return candidate;
+    }
+
+    return null;
+  }
+
+  private async pathIsExecutable(targetPath: string): Promise<boolean> {
+    try {
+      await fsp.access(targetPath, fsConstants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private renderActionButton(label: string, styleCode: string): string {

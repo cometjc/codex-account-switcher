@@ -13,6 +13,15 @@ Codex stores your authentication session in a single `auth.json` file. This tool
 
 - Node.js 18 or newer
 
+## Plot Mode
+
+Plot mode is an experimental, in-progress phase-1 migration toward a Rust TUI viewer.
+
+- Node remains the source of truth for auth, cache, and API access in this phase.
+- Rust is intended to own rendering for the plot viewer only.
+- Any `plot:viewer:*` scripts in `package.json` should be treated as developer scaffolding, not stable end-user commands.
+- Those scripts now point at cargo-backed Rust viewer commands, but the viewer itself is still being fleshed out.
+
 ## Install (npm)
 
 ```sh

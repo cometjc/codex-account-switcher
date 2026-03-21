@@ -934,3 +934,23 @@
 - 這批變更沒有新增功能，目的是把舊的 lane-plan 文案從早期的 `Active lane item` / initial-active-set 敘述，收斂成現在 envelope/reducer 投影後的 honest `Current Lane Status`。
 - 內容上主要是把已經 no-op、已經完成、或已經 parked 的 lanes 寫成目前真實狀態，避免未來再讀 tracked docs 時以為它們還有未完成的 active item。
 - 這次刻意不碰 `nlsdd-refresh-scoreboard.cjs` 與產品線 WIP，避免把純 docs sync 和其他未驗證中的改動混在同一顆 commit。
+
+# 2026-03-21 plot-mode phase-1 scaffold and handoff
+
+- [x] 新增 TypeScript plot snapshot contract 與 barrel export
+- [x] 在 root command 加入 `plot` mode、snapshot temp file 輸出與 Rust viewer handoff
+- [x] 新增 Rust `plot-viewer` scaffold，包含 model / app / input / render 模組
+- [x] 新增 plot-mode 專屬 regression tests 與 README 說明
+- [x] 驗證 Node build、Rust compile、plot tests 與 cargo-backed viewer build script
+
+## Review
+
+- 這批目前是「Phase 1 scaffold + handoff」而不是完整 chart/panel product。Node 仍是 auth/cache/API 的 source of truth，Rust 目前先承接 plot viewer runtime 與 render scaffold。
+- `src/commands/root.ts` 已能在 mode cycle 中切到 `plot`，建立 snapshot 並嘗試啟動 Rust viewer；若 viewer binary 尚未可用，會保留 snapshot path 並回退到 `delta`，不會把互動 flow 弄壞。
+- `src/lib/plot/plot-snapshot.ts` 與 Rust `model.rs` 已建立跨 runtime 合約，對應測試也鎖住 TypeScript/Rust schema 與 package scripts。
+- 目前 Rust render 還是 scaffold/placeholder，但這次已提供可編譯、可啟動、可持續擴充的骨架，並用 README 清楚標示它仍是 developer-facing scaffolding。
+- 驗證：
+  - `npm run build`
+  - `node --test tests/plot-handoff.test.js tests/plot-mode-shell.test.js tests/plot-readme.test.js tests/plot-rust-model-contract.test.js tests/plot-snapshot.test.js tests/plot-viewer-scaffold.test.js`
+  - `cargo check --manifest-path rust/plot-viewer/Cargo.toml`
+  - `npm run plot:viewer:build`
