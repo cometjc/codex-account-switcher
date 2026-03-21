@@ -8,6 +8,7 @@ const {
   resolvePreferredScoreboardPath,
   resolveProjectRoot,
 } = require('./nlsdd-lib.cjs');
+const {prepareExecutionState} = require('./nlsdd-envelope.cjs');
 
 function parseArgs(argv) {
   const args = {};
@@ -55,6 +56,7 @@ function buildCommitIntake(projectRoot, execution, row) {
 }
 
 function intakeReadyToCommit(projectRoot, execution, lane = null) {
+  prepareExecutionState(projectRoot, execution);
   const scoreboardPath = resolvePreferredScoreboardPath(projectRoot);
   const scoreboardText = fs.readFileSync(scoreboardPath, 'utf8');
   const table = loadScoreboardTable(scoreboardText, scoreboardPath);

@@ -8,6 +8,7 @@
 - Coordinator may operate in sidecar mode:
   - default: template-based forwarding
   - escalation: interrupt and arbitrate when communication quality degrades
+- The only state-changing payload that should survive that bridge is the strict `lane handoff envelope`; free-form thread text is transport, not state.
 
 ## Queue Promotion
 
@@ -36,6 +37,12 @@
   - quality `PASS` => `next expected phase: refill-ready`
   - `BLOCKED` => `next expected phase: blocked`
 
+## Required Envelope
+
+- NLSDD implementer and reviewer handoffs should return one strict lane handoff envelope JSON object.
+- The envelope should carry the normalized lane result instead of relying on the coordinator to parse meaning out of prose.
+- Free-form notes may still appear inside `summary` / `detail`, but the lane state transition itself should be explicit in the envelope.
+
 ## Commit-Gate Reporting
 
 - In this repo's default NLSDD flow, `READY_TO_COMMIT` is the normal end-of-implementation handoff for sub-agents.
@@ -50,6 +57,7 @@
 - Coordinator should treat `READY_TO_COMMIT` as a live lane state, not as an unresponsive thread.
 - Under this repo's default NLSDD flow, `READY_TO_COMMIT` means the sub-agent passes the commit-ready MVC handoff back to the main agent/coordinator, and the main agent performs the commit to avoid permission-block stalls.
 - Coordinators should preserve the commit-ready package structurally when they record lane state: proposed commit title, optional body summary, verification already completed, and the latest note should all survive into the `coordinator-commit-pending` lane journal.
+- Under the canonical envelope flow, `READY_TO_COMMIT` should be represented as `eventType=ready-to-commit`, with the proposed commit title/body and verification included directly in the envelope.
 
 ## Blocker Reporting
 

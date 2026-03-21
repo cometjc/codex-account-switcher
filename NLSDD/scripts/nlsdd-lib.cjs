@@ -396,6 +396,18 @@ function loadLaneState(projectRoot, execution, lane) {
       filePath,
       execution: parsed.execution || execution,
       lane: parsed.lane || lane,
+      phase: parsed.phase || parsed.Phase || null,
+      expectedNextPhase:
+        parsed.expectedNextPhase || parsed['expected-next-phase'] || null,
+      latestCommit: parsed.latestCommit || parsed.commit || parsed['related-commit'] || null,
+      lastReviewerResult: parsed.lastReviewerResult || parsed.reviewer || null,
+      lastVerification: parsed.lastVerification || parsed.verification || [],
+      blockedBy: parsed.blockedBy || parsed['blocked-by'] || null,
+      correctionCount:
+        parsed.correctionCount == null
+          ? Number(parsed['correction-count'] || 0)
+          : Number(parsed.correctionCount),
+      updatedAt: parsed.updatedAt || parsed['updated-at'] || null,
       proposedCommitTitle: parsed.proposedCommitTitle || parsed['commit-title'] || null,
       proposedCommitBody: parsed.proposedCommitBody || parsed['commit-body'] || null,
     };
@@ -756,8 +768,13 @@ function laneStateLatestEventText(laneState) {
   if (!laneState) {
     return 'n/a';
   }
-  const result = laneState.lastReviewerResult || laneState.phase || 'n/a';
-  return `${result} · journal · ${formatIsoTimestamp(laneState.updatedAt)}`;
+  const result =
+    laneState.lastEventType ||
+    laneState.lastReviewerResult ||
+    laneState.phase ||
+    'n/a';
+  const summary = laneState.latestSummary ? ` · ${laneState.latestSummary}` : '';
+  return `${result}${summary} · journal · ${formatIsoTimestamp(laneState.updatedAt)}`;
 }
 
 function computeLaneAutomation(projectRoot, execution, lane, manualPhase) {
@@ -842,6 +859,8 @@ function computeExecutionSchedule(projectRoot, execution, maxActiveThreads = 4) 
     const nextItem = findNextRefillItem(projectRoot, execution, row.Lane);
     return {
       ...row,
+      'Current item': laneState?.currentItem || row['Current item'],
+      'Next refill target': laneState?.nextRefillTarget || row['Next refill target'],
       laneState,
       worktreeInspection,
       staleImplementing,

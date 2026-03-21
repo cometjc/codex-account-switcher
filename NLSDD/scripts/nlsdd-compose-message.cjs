@@ -39,7 +39,8 @@ function composeMessage(args) {
         `Lane item intent: ${context.item}`,
         `Write scope: ${context.scope}`,
         `Required verification: ${context.verification}`,
-        'Required handoff format: lane name, MVC step completed, commit sha or READY_TO_COMMIT package, files changed, verification run, open concerns.',
+        'Required handoff format: return only one strict NLSDD lane handoff envelope JSON object.',
+        'Required envelope keys: execution, lane, role, eventType, phaseBefore, phaseAfter, currentItem, nextRefillTarget, relatedCommit, verification, summary, detail, nextExpectedPhase, blockedBy, proposedCommitTitle, proposedCommitBody, insights, timestamp.',
         'Do not run git commit yourself unless this lane explicitly says self-commit is allowed.',
         'Default NLSDD flow in this repo: hand back READY_TO_COMMIT with intended commit title/body summary so coordinator can commit for you.',
       ].join('\n');
@@ -51,7 +52,7 @@ function composeMessage(args) {
         `Lane item: ${context.item}`,
         'Inspect only the lane-item commit diff.',
         'Ignore total dirty worktree state.',
-        'Return PASS or FAIL with file/line refs for behavior, scope, and write-set compliance.',
+        'Return the result as one strict NLSDD lane handoff envelope JSON object with role=spec-reviewer and eventType=pass or fail.',
       ].join('\n');
     case 'quality-review':
       return [
@@ -60,7 +61,7 @@ function composeMessage(args) {
         `Review target commit: ${context.commit}`,
         `Lane item: ${context.item}`,
         'Inspect only the same lane-item commit diff.',
-        'Return PASS or FAIL with file/line refs for maintainability, coupling, and test quality.',
+        'Return the result as one strict NLSDD lane handoff envelope JSON object with role=quality-reviewer and eventType=pass or fail.',
       ].join('\n');
     case 'correction-loop':
       return [
@@ -72,7 +73,7 @@ function composeMessage(args) {
         `Accepted write scope: ${context.scope}`,
         `Relevant files: ${context.files}`,
         `Required verification: ${context.verification}`,
-        'Return a new commit sha and verification results, or READY_TO_COMMIT with a commit-ready summary if coordinator commit is required.',
+        'Return a new strict NLSDD lane handoff envelope JSON object, or READY_TO_COMMIT as eventType=ready-to-commit with proposed commit title/body if coordinator commit is required.',
       ].join('\n');
     default:
       throw new Error(

@@ -24,10 +24,12 @@
 - Every execution must keep its runtime lane plans under `NLSDD/executions/<execution-id>/`.
 - Every execution may keep execution-aware lane runtime state under `NLSDD/state/<execution-id>/`.
 - Every execution may keep an append-only execution insights journal under `NLSDD/state/<execution-id>/execution-insights.ndjson`.
+- Every execution should treat `NLSDD/state/<execution-id>/events.ndjson` as the canonical handoff event log when it exists.
 - Every execution must have one canonical tracked row set in `NLSDD/scoreboard.md`.
 - Auto-refreshed runtime scoreboard output should be written under `NLSDD/state/`, not back into the tracked scoreboard.
 - The tracked scoreboard should keep only coordinator-owned manual fields; full auto-derived lane state belongs in the runtime scoreboard.
 - Runtime scoreboard rows may contain both manual coordinator fields and auto-derived fields; automation may suggest state, but the coordinator remains the decision-maker for dispatch.
+- NLSDD should prefer a single strict `lane handoff envelope` as the only state-changing write interface. Lane journal, execution insights, tracked scoreboard rows, and generated lane-status surfaces should be projected from that envelope flow rather than written independently.
 - NLSDD may expose a single dispatch-cycle helper that performs the deterministic coordinator work in one pass: reconcile stale implementing lanes, refresh runtime state, promote the next dispatchable lanes according to the tracked plan, and report the resulting scheduling status.
 - When the deterministic output needs to become real subagent work, NLSDD may expose a launch helper that wraps the dispatch cycle and emits coordinator-ready implementer assignment bundles for each newly promoted lane.
 - NLSDD may also expose a review-loop driver that inspects lane state and emits the next coordinator action bundle for `spec-review-pending`, `quality-review-pending`, `correction`, and `coordinator-commit-pending` lanes.
@@ -144,6 +146,31 @@
   - `updatedAt`
 - Scoreboard refresh, schedule suggestion, and lane probes should prefer lane journal state over cross-thread heuristics when the journal exists.
 - If lane plans or worktrees go missing, automation should degrade explicitly rather than silently reusing stale derived values.
+- When the execution event log exists, lane journals are reducer outputs rather than primary coordinator-authored state.
+
+## Lane Handoff Envelope Contract
+
+- A canonical lane handoff envelope should include, at minimum:
+  - `execution`
+  - `lane`
+  - `role`
+  - `eventType`
+  - `summary`
+  - `timestamp`
+- State-changing envelopes should also include, when applicable:
+  - `phaseBefore`
+  - `phaseAfter`
+  - `currentItem`
+  - `nextRefillTarget`
+  - `relatedCommit`
+  - `verification`
+  - `nextExpectedPhase`
+  - `blockedBy`
+  - `proposedCommitTitle`
+  - `proposedCommitBody`
+  - `insights[]`
+- NLSDD sub-agents should return this envelope shape directly instead of free-form status text once the lane template requires envelope-only handoff.
+- Coordinator-side wrappers may still accept legacy state/insight arguments for compatibility, but they must translate them into the canonical envelope before mutating any NLSDD surface.
 
 ## Execution Insights Contract
 

@@ -5,6 +5,7 @@ const {
   loadLaneState,
   resolveProjectRoot,
 } = require('./nlsdd-lib.cjs');
+const {prepareExecutionState} = require('./nlsdd-envelope.cjs');
 const {recordLaneState} = require('./nlsdd-record-lane-state.cjs');
 const {updateScoreboard} = require('./nlsdd-refresh-scoreboard.cjs');
 
@@ -119,6 +120,7 @@ function promoteSuggestedRows(projectRoot, execution, schedule, dryRun = false) 
 }
 
 function runCycle(projectRoot, execution, maxActive = 4, dryRun = false) {
+  prepareExecutionState(projectRoot, execution);
   const before = computeExecutionSchedule(projectRoot, execution, maxActive);
   const reconciled = reconcileStaleRows(projectRoot, execution, before, dryRun);
 

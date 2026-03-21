@@ -854,3 +854,31 @@
 - 新增 [`NLSDD/scripts/nlsdd-build-dispatch-plan.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-build-dispatch-plan.cjs) 與 `npm run nlsdd:dispatch-plan`，讓 main agent 可直接取得本輪 action queue。
 - helper 不重新計算 lane truth，而是直接吃 [`NLSDD/scripts/nlsdd-run-coordinator-loop.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-run-coordinator-loop.cjs) 的輸出，避免再引入第四套 state。
 - regression 在 [tests/nlsdd-automation.test.js](/home/jethro/repo/side-projects/codex-account-switcher/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-build-dispatch-plan.cjs --execution plot-mode --json` 已通過。
+
+# 2026-03-21 NLSDD honest next-item rewrite
+
+- [x] 檢視 `plot-mode` 與 `nlsdd-self-hosting` 的 insights、lane docs、scoreboard 是否仍重派已被現有 commit 吃完的 item
+- [x] 將 `plot-mode Lane 2` 改成 parked，停止從已滿足的 compare seam wording 重派 runtime lane
+- [x] 將 `plot-mode Lane 4` 改寫為 adopted-target emphasis 的 honest next item
+- [x] 將 `nlsdd-self-hosting Lane 4` 改寫為 scoreboard/schedule cross-check coverage 的 honest next item
+- [x] 將 `nlsdd-self-hosting Lane 7` 改寫為 scheduler/runtime truth audit 的 honest next item
+
+## Review
+
+- 根因不是 scheduler 算錯，而是 tracked lane docs 還保留舊的 current/refill wording，導致 autopilot 會把已被 `noop-satisfied` 的 lane 再次 promote 回 implementing。
+- 這次先把 tracked planning surface 對齊 runtime truth：已完成的 item 直接打勾，只留下真正的下一個 reviewable item。這樣 `dispatch-plan`、人工 review 與 execution insights 看到的 lane intent 才會一致。
+- 其中 `plot-mode Lane 2` 最適合直接 park，因為 `d361653` 已滿足 compare seam，而下一個 runtime item 尚未切成 concrete step；`plot-mode Lane 4`、`nlsdd-self-hosting Lane 4`、`Lane 7` 則各自留下新的 honest refill item。
+
+# 2026-03-21 NLSDD 單一 handoff envelope 與 reducer 投影
+
+- [x] 新增 canonical `lane handoff envelope` 與 `events.ndjson` event log
+- [x] 將 `nlsdd-record-lane-state` / `nlsdd-record-insight` 改成相容 wrapper，先轉成 envelope 再寫入
+- [x] 新增 reducer，從 envelope 投影 lane journal、execution insights、tracked scoreboard 與 lane plan `Current Lane Status`
+- [x] 將 message helper 改成要求 subagent 回傳 strict envelope JSON
+- [x] 補 automation tests，鎖住 envelope -> projection 鏈路與 active-set/review 既有行為
+
+## Review
+
+- 根因不是單一 script 出錯，而是 `record-lane-state`、`record-insight`、tracked scoreboard、lane plan status 都能各自落筆，導致同一個 execution 同時存在多套可寫 state surface。
+- 這次先把「寫入」集中到單一 canonical interface：`lane handoff envelope`。不論是 lane state、insight、READY_TO_COMMIT、review result，最後都先進 `NLSDD/state/<execution>/events.ndjson`，再由 reducer 投影到其他 surfaces。
+- 目前 `launch/review/intake/autopilot` 還是讀既有 projection surfaces，但因為這些 surfaces 已改成同一條 reducer 產物，狀態差異已大幅收斂；後續可以再把讀取端逐步改成直接吃 reducer snapshot。

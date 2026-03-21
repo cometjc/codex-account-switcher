@@ -601,31 +601,31 @@ test('schedule suggestion prefers lane journal phase over stale scoreboard phase
   assert.equal(schedule.queuedRows.some((row) => row.Lane === 'Lane 5'), false);
 });
 
-test('schedule and refill helpers prefer runtime scoreboard when present', () => {
+test('schedule and refill helpers prefer reduced envelope state over stale tracked rows', () => {
   const fixture = setupNlsddFixture();
-  const runtimeScoreboardPath = path.join(
-    fixture.root,
-    'NLSDD',
-    'state',
-    'scoreboard.runtime.md',
-  );
-  fs.mkdirSync(path.dirname(runtimeScoreboardPath), {recursive: true});
-  fs.writeFileSync(
-    runtimeScoreboardPath,
-    `# NLSDD Scoreboard
-
-| Execution | Lane | Ownership | Current item | Phase | Effective phase | Item commit | Branch HEAD | Last verification | Last probe | Latest event | Correction count | Last activity | Blocked by | Next refill target | Noise | Notes |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| plot-mode | Lane 1 | Node contract + handoff | Viewer launch confidence / shell messaging | queued | refill-ready | \`abc1234\` | \`abc1234\` | \`git status --short\` | n/a | PASS · runtime · 2026-03-21 03:40:00Z | 0 | 2026-03-21 03:40:00Z | none | Tighten snapshot builder semantics when real 7d history evolves | none | runtime row |
-`,
-    'utf8',
-  );
 
   process.env.NLSDD_PROJECT_ROOT = fixture.root;
-  process.env.NLSDD_RUNTIME_SCOREBOARD_PATH = runtimeScoreboardPath;
 
-  const {computeExecutionSchedule} = freshRequire('NLSDD/scripts/nlsdd-lib.cjs');
+  const {recordEnvelope} = freshRequire('NLSDD/scripts/nlsdd-envelope.cjs');
   const {suggestRefill} = freshRequire('NLSDD/scripts/nlsdd-suggest-refill.cjs');
+  const {computeExecutionSchedule} = freshRequire('NLSDD/scripts/nlsdd-lib.cjs');
+
+  recordEnvelope(fixture.root, {
+    execution: 'plot-mode',
+    lane: 'Lane 1',
+    role: 'implementer',
+    eventType: 'pass',
+    phaseBefore: 'implementing',
+    phaseAfter: 'refill-ready',
+    currentItem: 'Viewer launch confidence / shell messaging',
+    nextRefillTarget: 'Tighten snapshot builder semantics when real 7d history evolves',
+    relatedCommit: 'abc1234',
+    verification: ['git status --short'],
+    summary: 'Lane 1 current work completed and is ready for refill',
+    detail: 'Shift to the next node contract refinement item.',
+    nextExpectedPhase: 'implementing',
+    timestamp: '2026-03-21T03:40:00.000Z',
+  });
 
   const schedule = computeExecutionSchedule(fixture.root, 'plot-mode', 4);
   const suggestion = suggestRefill(fixture.root, 'plot-mode', 'Lane 1');
@@ -659,7 +659,7 @@ test('message helper renders correction-loop text without opening direct reviewe
   assert.match(message, /Reviewer finding: FAIL \[src\/commands\/root\.ts:10\] missing retry hint/);
   assert.match(
     message,
-    /Return a new commit sha and verification results, or READY_TO_COMMIT with a commit-ready summary if coordinator commit is required/,
+    /Return a new strict NLSDD lane handoff envelope JSON object, or READY_TO_COMMIT as eventType=ready-to-commit with proposed commit title\/body if coordinator commit is required/,
   );
   assert.doesNotMatch(message, /talk directly to reviewer/i);
 });
@@ -677,7 +677,8 @@ test('message helper tells implementers to hand commit-ready mvc back to coordin
 
   assert.match(message, /Execution: plot-mode/);
   assert.match(message, /Lane: Lane 4/);
-  assert.match(message, /commit sha or READY_TO_COMMIT package/);
+  assert.match(message, /return only one strict NLSDD lane handoff envelope JSON object/i);
+  assert.match(message, /Required envelope keys:/);
   assert.match(message, /Do not run git commit yourself unless this lane explicitly says self-commit is allowed/);
   assert.match(
     message,
@@ -714,12 +715,246 @@ test('lane state recorder writes execution-aware journal files for coordinator t
   assert.equal(state.latestCommit, 'abc1234');
   assert.equal(state.proposedCommitTitle, 'feat(plot): tighten runtime seam');
   assert.equal(state.proposedCommitBody, '補上 compare payload handoff');
-  assert.equal(state.lastReviewerResult, 'PASS');
+  assert.equal(state.lastReviewerResult, 'pass');
   assert.deepEqual(state.lastVerification, ['cargo test', 'cargo check']);
   assert.equal(state.blockedBy, 'none');
   assert.equal(state.note, 'ready for quality review');
   assert.equal(state.correctionCount, 3);
   assert.equal(state.updatedAt, '2026-03-21T04:20:00.000Z');
+
+  const eventsPath = path.join(root, 'NLSDD', 'state', 'plot-mode', 'events.ndjson');
+  const eventLines = fs.readFileSync(eventsPath, 'utf8').trim().split('\n');
+  assert.equal(eventLines.length, 1);
+  const event = JSON.parse(eventLines[0]);
+  assert.equal(event.eventType, 'pass');
+  assert.equal(event.phaseAfter, 'quality-review-pending');
+});
+
+test('envelope reducer projects tracked scoreboard and lane status from a single handoff event', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-envelope-'));
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  fs.mkdirSync(path.join(root, 'NLSDD', 'executions', 'plot-mode'), {recursive: true});
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-4.md'),
+    `# Lane 4
+
+> Ownership family:
+> \`rust/plot-viewer/src/render/panels.rs\`
+>
+> NLSDD worktree: \`.worktrees/lane-4-panels\`
+>
+> Lane-local verification:
+> \`cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path rust/plot-viewer/Cargo.toml\`
+
+## C - Controller / Docs and Verification Surfaces
+
+- [ ] Highlight the adopted routing target more clearly once compare-panel data becomes meaningful
+
+## Current Lane Status
+
+- [x] stale manual line
+
+## Refill Order
+
+- [ ] Later item
+`,
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'scoreboard.md'),
+    `# NLSDD Scoreboard
+
+| Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| plot-mode | Lane 4 | Rust panels + docs | Recommendation-rich Compare panel on the recovery baseline | queued | \`51ac2eb\` | \`cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path rust/plot-viewer/Cargo.toml\` | none | Extend panel structure only if later plot UX still needs richer side-panel content | stale note |
+`,
+    'utf8',
+  );
+
+  const {recordEnvelope, loadEnvelopeEvents} = freshRequire('NLSDD/scripts/nlsdd-envelope.cjs');
+  recordEnvelope(root, {
+    execution: 'plot-mode',
+    lane: 'Lane 4',
+    role: 'implementer',
+    eventType: 'ready-to-commit',
+    phaseBefore: 'queued',
+    phaseAfter: 'coordinator-commit-pending',
+    currentItem: 'Highlight the adopted routing target more clearly once compare-panel data becomes meaningful',
+    nextRefillTarget: 'Extend panel structure only if later plot UX still needs richer side-panel content',
+    relatedCommit: '6bb1fba',
+    verification: [
+      'cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path rust/plot-viewer/Cargo.toml',
+    ],
+    summary: 'Lane 4 adopted-target emphasis is ready to commit',
+    detail: 'READY_TO_COMMIT package from panels lane',
+    nextExpectedPhase: 'spec-review-pending',
+    'commit-title': 'feat(plot): 強化 compare panel 的 adopted target 標示',
+    'commit-body': '讓 Compare panel 更清楚標示目前採用的 routing target',
+    insights: [
+      {
+        lane: 'Lane 4',
+        source: 'subagent',
+        kind: 'improvement-opportunity',
+        status: 'adopted',
+        summary: 'Adopted target deserves stronger emphasis once compare data is present',
+      },
+    ],
+    timestamp: '2026-03-21T12:20:00.000Z',
+  });
+
+  const events = loadEnvelopeEvents(root, 'plot-mode');
+  assert.equal(events.length, 2);
+  assert.equal(events.some((entry) => entry.eventType === 'ready-to-commit'), true);
+
+  const state = JSON.parse(
+    fs.readFileSync(path.join(root, 'NLSDD', 'state', 'plot-mode', 'lane-4.json'), 'utf8'),
+  );
+  assert.equal(state.phase, 'coordinator-commit-pending');
+  assert.equal(state.currentItem, 'Highlight the adopted routing target more clearly once compare-panel data becomes meaningful');
+  assert.equal(state.latestCommit, '6bb1fba');
+  assert.equal(state.proposedCommitTitle, 'feat(plot): 強化 compare panel 的 adopted target 標示');
+
+  const scoreboard = fs.readFileSync(path.join(root, 'NLSDD', 'scoreboard.md'), 'utf8');
+  assert.match(scoreboard, /Highlight the adopted routing target more clearly once compare-panel data becomes meaningful/);
+  assert.match(scoreboard, /\| plot-mode \| Lane 4 \| Rust panels \+ docs \| Highlight the adopted routing target more clearly once compare-panel data becomes meaningful \| coordinator-commit-pending \| `6bb1fba` \|/);
+
+  const lanePlan = fs.readFileSync(path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-4.md'), 'utf8');
+  assert.match(lanePlan, /## Current Lane Status/);
+  assert.match(lanePlan, /Projected phase: coordinator-commit-pending/);
+  assert.match(lanePlan, /Latest event: ready-to-commit · Lane 4 adopted-target emphasis is ready to commit/);
+
+  const insightsLines = fs
+    .readFileSync(path.join(root, 'NLSDD', 'state', 'plot-mode', 'execution-insights.ndjson'), 'utf8')
+    .trim()
+    .split('\n');
+  assert.equal(insightsLines.length, 1);
+  const insight = JSON.parse(insightsLines[0]);
+  assert.equal(insight.kind, 'improvement-opportunity');
+  assert.equal(insight.summary, 'Adopted target deserves stronger emphasis once compare data is present');
+});
+
+test('review helper reduces execution state before reading projected review actions', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-review-reduce-'));
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  fs.mkdirSync(path.join(root, 'NLSDD', 'executions', 'plot-mode'), {recursive: true});
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-3.md'),
+    `# Lane 3
+
+> Ownership family:
+> \`rust/plot-viewer/src/render/chart.rs\`
+>
+> NLSDD worktree: \`.worktrees/lane-3-chart\`
+>
+> Lane-local verification:
+> \`cargo check --manifest-path rust/plot-viewer/Cargo.toml\`
+
+## C - Controller
+
+- [ ] Chart compatibility follow-up
+`,
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'scoreboard.md'),
+    `# NLSDD Scoreboard
+
+| Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| plot-mode | Lane 3 | Rust chart surface | Chart compatibility follow-up | queued | \`abc1234\` | \`cargo check --manifest-path rust/plot-viewer/Cargo.toml\` | none | none | stale row |
+`,
+    'utf8',
+  );
+
+  const {recordEnvelope} = freshRequire('NLSDD/scripts/nlsdd-envelope.cjs');
+  recordEnvelope(root, {
+    execution: 'plot-mode',
+    lane: 'Lane 3',
+    role: 'implementer',
+    eventType: 'pass',
+    phaseBefore: 'implementing',
+    phaseAfter: 'spec-review-pending',
+    currentItem: 'Chart compatibility follow-up',
+    relatedCommit: 'abc1234',
+    verification: ['cargo check --manifest-path rust/plot-viewer/Cargo.toml'],
+    summary: 'Lane 3 chart compatibility follow-up is ready for spec review',
+    detail: 'READY_FOR_REVIEW from chart lane',
+    nextExpectedPhase: 'quality-review-pending',
+    timestamp: '2026-03-21T12:40:00.000Z',
+  });
+
+  const {driveReviewLoop} = freshRequire('NLSDD/scripts/nlsdd-drive-review-loop.cjs');
+  const result = driveReviewLoop(root, 'plot-mode');
+
+  assert.equal(result.actions.length, 1);
+  assert.equal(result.actions[0].lane, 'Lane 3');
+  assert.equal(result.actions[0].action, 'spec-review');
+  assert.match(result.actions[0].message, /Review target commit: abc1234/);
+});
+
+test('commit intake helper reduces execution state before reading ready-to-commit handoff', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-intake-reduce-'));
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  fs.mkdirSync(path.join(root, 'NLSDD', 'executions', 'plot-mode'), {recursive: true});
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-5.md'),
+    `# Lane 5
+
+> Ownership family:
+> \`README.md\`
+>
+> NLSDD worktree: \`.worktrees/lane-5-docs\`
+>
+> Lane-local verification:
+> \`npm run build\`
+
+## C - Controller
+
+- [ ] Recovery-baseline README and local run instructions
+`,
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'scoreboard.md'),
+    `# NLSDD Scoreboard
+
+| Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| plot-mode | Lane 5 | Plot viewer docs + operator flow | Recovery-baseline README and local run instructions | queued | \`n/a\` | \`npm run build\` | none | none | stale row |
+`,
+    'utf8',
+  );
+
+  const {recordEnvelope} = freshRequire('NLSDD/scripts/nlsdd-envelope.cjs');
+  recordEnvelope(root, {
+    execution: 'plot-mode',
+    lane: 'Lane 5',
+    role: 'implementer',
+    eventType: 'ready-to-commit',
+    phaseBefore: 'implementing',
+    phaseAfter: 'coordinator-commit-pending',
+    currentItem: 'Recovery-baseline README and local run instructions',
+    relatedCommit: null,
+    verification: ['npm run build'],
+    summary: 'Lane 5 docs refresh is ready to commit',
+    detail: 'READY_TO_COMMIT from docs lane',
+    nextExpectedPhase: 'spec-review-pending',
+    'commit-title': 'docs(plot): 補上 recovery baseline 操作說明',
+    'commit-body': '同步本地驗證與啟動步驟',
+    timestamp: '2026-03-21T12:41:00.000Z',
+  });
+
+  const {intakeReadyToCommit} = freshRequire('NLSDD/scripts/nlsdd-intake-ready-to-commit.cjs');
+  const result = intakeReadyToCommit(root, 'plot-mode');
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].lane, 'Lane 5');
+  assert.equal(result[0].phase, 'coordinator-commit-pending');
+  assert.equal(result[0].proposedCommitTitle, 'docs(plot): 補上 recovery baseline 操作說明');
+  assert.equal(result[0].note, 'READY_TO_COMMIT from docs lane');
 });
 
 test('execution insight recorder appends subagent and coordinator learnings into runtime insights journal', () => {
@@ -1002,7 +1237,7 @@ test('schedule marks clean implementing lane at same HEAD as stale-implementing'
   assert.equal(schedule.availableSlots, 4);
 });
 
-test('dispatch cycle reconciles stale lanes and promotes next queued work', () => {
+test('dispatch cycle promotes the next queued work from reduced execution state', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-cycle-'));
   process.env.NLSDD_PROJECT_ROOT = root;
 
@@ -1064,19 +1299,6 @@ test('dispatch cycle reconciles stale lanes and promotes next queued work', () =
     'utf8',
   );
 
-  writeLaneState(root, 'plot-mode', 1, {
-    execution: 'plot-mode',
-    lane: 'Lane 1',
-    phase: 'implementing',
-    expectedNextPhase: 'spec-review-pending',
-    latestCommit: lane1Head,
-    lastReviewerResult: null,
-    lastVerification: ['git status --short'],
-    blockedBy: null,
-    note: 'stale implementing lane',
-    correctionCount: 0,
-    updatedAt: '2020-01-01T00:00:00.000Z',
-  });
   writeLaneState(root, 'plot-mode', 2, {
     execution: 'plot-mode',
     lane: 'Lane 2',
@@ -1091,10 +1313,27 @@ test('dispatch cycle reconciles stale lanes and promotes next queued work', () =
     updatedAt: '2026-03-21T10:00:00.000Z',
   });
 
+  const {recordEnvelope} = freshRequire('NLSDD/scripts/nlsdd-envelope.cjs');
+  recordEnvelope(root, {
+    execution: 'plot-mode',
+    lane: 'Lane 1',
+    role: 'coordinator',
+    eventType: 'parked',
+    phaseBefore: 'implementing',
+    phaseAfter: 'parked',
+    currentItem: 'Future shell audit',
+    relatedCommit: lane1Head,
+    verification: ['git status --short'],
+    summary: 'Lane 1 is parked after the previous node work closed cleanly',
+    detail: 'No honest refill item is ready for Lane 1 yet.',
+    nextExpectedPhase: null,
+    timestamp: '2026-03-21T10:05:00.000Z',
+  });
+
   const {runCycle} = freshRequire('NLSDD/scripts/nlsdd-run-cycle.cjs');
   const result = runCycle(root, 'plot-mode', 2, false);
 
-  assert.deepEqual(result.reconciled.map((entry) => entry.lane), ['Lane 1']);
+  assert.deepEqual(result.reconciled.map((entry) => entry.lane), []);
   assert.deepEqual(result.promoted.map((entry) => entry.lane), ['Lane 2']);
   assert.equal(result.idleSlots, 1);
 
@@ -1112,7 +1351,7 @@ test('dispatch cycle reconciles stale lanes and promotes next queued work', () =
   assert.deepEqual(finalSchedule.staleRows.map((row) => row.Lane), []);
 });
 
-test('launch helper returns assignment bundles for newly promoted lanes', () => {
+test('launch helper returns assignment bundles for newly promoted lanes from reduced execution state', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-launch-'));
   process.env.NLSDD_PROJECT_ROOT = root;
 
@@ -1175,19 +1414,6 @@ test('launch helper returns assignment bundles for newly promoted lanes', () => 
     'utf8',
   );
 
-  writeLaneState(root, 'plot-mode', 1, {
-    execution: 'plot-mode',
-    lane: 'Lane 1',
-    phase: 'implementing',
-    expectedNextPhase: 'spec-review-pending',
-    latestCommit: lane1Head,
-    lastReviewerResult: null,
-    lastVerification: ['git status --short'],
-    blockedBy: null,
-    note: 'stale implementing lane',
-    correctionCount: 0,
-    updatedAt: '2020-01-01T00:00:00.000Z',
-  });
   writeLaneState(root, 'plot-mode', 2, {
     execution: 'plot-mode',
     lane: 'Lane 2',
@@ -1202,10 +1428,27 @@ test('launch helper returns assignment bundles for newly promoted lanes', () => 
     updatedAt: '2026-03-21T10:00:00.000Z',
   });
 
+  const {recordEnvelope} = freshRequire('NLSDD/scripts/nlsdd-envelope.cjs');
+  recordEnvelope(root, {
+    execution: 'plot-mode',
+    lane: 'Lane 1',
+    role: 'coordinator',
+    eventType: 'parked',
+    phaseBefore: 'implementing',
+    phaseAfter: 'parked',
+    currentItem: 'Future shell audit',
+    relatedCommit: lane1Head,
+    verification: ['git status --short'],
+    summary: 'Lane 1 is parked after the previous node work closed cleanly',
+    detail: 'No honest refill item is ready for Lane 1 yet.',
+    nextExpectedPhase: null,
+    timestamp: '2026-03-21T10:05:00.000Z',
+  });
+
   const {launchActiveSet} = freshRequire('NLSDD/scripts/nlsdd-launch-active-set.cjs');
   const result = launchActiveSet(root, 'plot-mode', 2, false);
 
-  assert.deepEqual(result.completedLanes, ['Lane 1']);
+  assert.deepEqual(result.completedLanes, []);
   assert.deepEqual(result.promoted.map((entry) => entry.lane), ['Lane 2']);
   assert.equal(result.assignments.length, 1);
   assert.equal(result.assignments[0].lane, 'Lane 2');

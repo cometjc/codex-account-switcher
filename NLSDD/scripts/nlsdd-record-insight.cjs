@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 
-const fs = require('node:fs');
-const path = require('node:path');
 const {
   INSIGHT_KINDS,
   INSIGHT_STATUSES,
@@ -9,6 +7,7 @@ const {
   normalizeInsightLane,
   resolveProjectRoot,
 } = require('./nlsdd-lib.cjs');
+const {recordEnvelope} = require('./nlsdd-envelope.cjs');
 
 function parseArgs(argv) {
   const args = {};
@@ -78,7 +77,6 @@ function recordInsight(projectRoot, args) {
     );
   }
 
-  fs.mkdirSync(path.dirname(filePath), {recursive: true});
   const entry = {
     timestamp: args.timestamp || new Date().toISOString(),
     execution: args.execution,
@@ -93,7 +91,18 @@ function recordInsight(projectRoot, args) {
     relatedAgent: args['related-agent'] || null,
     recordedBy: args['recorded-by'] || 'coordinator',
   };
-  fs.appendFileSync(filePath, `${JSON.stringify(entry)}\n`, 'utf8');
+  recordEnvelope(projectRoot, {
+    execution: args.execution,
+    lane: entry.lane,
+    role: args.source,
+    eventType: 'insight-recorded',
+    phaseBefore: null,
+    phaseAfter: null,
+    summary: entry.summary,
+    detail: entry.detail,
+    timestamp: entry.timestamp,
+    insights: [entry],
+  });
   return {filePath, entry};
 }
 

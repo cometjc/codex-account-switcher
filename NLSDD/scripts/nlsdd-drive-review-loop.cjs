@@ -9,6 +9,7 @@ const {
   resolveProjectRoot,
   summarizeExecutionInsights,
 } = require('./nlsdd-lib.cjs');
+const {prepareExecutionState} = require('./nlsdd-envelope.cjs');
 const {composeMessage} = require('./nlsdd-compose-message.cjs');
 
 function parseArgs(argv) {
@@ -125,6 +126,7 @@ function buildAction(context) {
 }
 
 function driveReviewLoop(projectRoot, execution, lane = null) {
+  prepareExecutionState(projectRoot, execution);
   const scoreboardPath = resolvePreferredScoreboardPath(projectRoot);
   const scoreboardText = fs.readFileSync(scoreboardPath, 'utf8');
   const table = loadScoreboardTable(scoreboardText, scoreboardPath);

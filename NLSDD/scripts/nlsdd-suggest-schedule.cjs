@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const {computeExecutionSchedule, resolveProjectRoot} = require('./nlsdd-lib.cjs');
+const {prepareExecutionState} = require('./nlsdd-envelope.cjs');
 
 function parseArgs(argv) {
   const args = {maxActive: 4};
@@ -65,7 +66,9 @@ function main() {
       'Usage: node NLSDD/scripts/nlsdd-suggest-schedule.cjs --execution <id> [--max-active <n>] [--json]',
     );
   }
-  const schedule = computeExecutionSchedule(resolveProjectRoot(), args.execution, args.maxActive);
+  const projectRoot = resolveProjectRoot();
+  prepareExecutionState(projectRoot, args.execution);
+  const schedule = computeExecutionSchedule(projectRoot, args.execution, args.maxActive);
   if (args.json) {
     process.stdout.write(`${JSON.stringify(schedule, null, 2)}\n`);
     return;

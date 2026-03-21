@@ -13,6 +13,8 @@
     "build": "npm run clean && tsc -p tsconfig.json",
     "nlsdd:scoreboard:refresh": "node NLSDD/scripts/nlsdd-refresh-scoreboard.cjs",
     "nlsdd:probe": "node NLSDD/scripts/nlsdd-probe-lane.cjs",
+    "nlsdd:envelope:record": "node NLSDD/scripts/nlsdd-envelope.cjs",
+    "nlsdd:reduce": "node NLSDD/scripts/nlsdd-reduce-execution.cjs",
     "nlsdd:state:record": "node NLSDD/scripts/nlsdd-record-lane-state.cjs",
     "nlsdd:insight:record": "node NLSDD/scripts/nlsdd-record-insight.cjs",
     "nlsdd:insights:summarize": "node NLSDD/scripts/nlsdd-summarize-insights.cjs",

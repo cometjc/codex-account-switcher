@@ -96,9 +96,12 @@ Use this file to keep NLSDD execution predictable, low-conflict, and easy to rev
   - quality review
   - correction loop
 - Prefer `node NLSDD/scripts/nlsdd-compose-message.cjs ...` to generate those templates consistently.
+- Those templates should ask for one strict lane handoff envelope JSON object on return, not a free-form NLSDD status paragraph.
 - If correction loops exceed 2 rounds, escalate to coordinator arbitration.
 - When coordinator records a new lane state after review, correction, or blockage, prefer `node NLSDD/scripts/nlsdd-record-lane-state.cjs ...` over hand-editing journal JSON.
 - When a sub-agent suggests a remediation, or coordinator notices a workflow issue or optimization opportunity during execution, prefer `node NLSDD/scripts/nlsdd-record-insight.cjs ...` over burying that observation only in thread history.
+- `nlsdd-record-lane-state` and `nlsdd-record-insight` are compatibility entrypoints. They should translate their input into the canonical envelope flow instead of bypassing the reducer/projection path.
+- Prefer `node NLSDD/scripts/nlsdd-envelope.cjs ...` or reducer-backed helpers when adding new NLSDD automation, so the event log remains the only write interface.
 - When an NLSDD prompt includes `review`, coordinator should also inspect the execution insights journal and decide whether any open/adopted insight needs planning, adoption, or closure alongside the normal lane review work.
 - When coordinator needs a refreshed scoreboard snapshot, prefer `npm run nlsdd:scoreboard:refresh` and inspect `NLSDD/state/scoreboard.runtime.md` rather than staging runtime churn from the tracked scoreboard.
 - When coordinator changes the active/parked lane set for an execution, prefer `npm run nlsdd:active-set:replan -- --execution <id> --active ... --parked ...` so tracked `Phase` values and lane journals stay aligned.

@@ -1,8 +1,14 @@
 #!/usr/bin/env node
 
-const fs = require('node:fs');
-const path = require('node:path');
-const {laneStatePath, resolveProjectRoot} = require('./nlsdd-lib.cjs');
+const {
+  findNextRefillItem,
+  loadLanePlan,
+  loadLaneState,
+  loadScoreboardTable,
+  resolvePreferredScoreboardPath,
+  resolveProjectRoot,
+} = require('./nlsdd-lib.cjs');
+const {recordEnvelope} = require('./nlsdd-envelope.cjs');
 
 function parseArgs(argv) {
   const args = {verification: []};
@@ -58,30 +64,76 @@ function recordLaneState(projectRoot, args) {
       'execution, lane, and phase are required to record NLSDD lane state',
     );
   }
-
-  const filePath = laneStatePath(projectRoot, args.execution, args.lane);
-  if (!filePath) {
-    throw new Error(`Could not resolve lane state path for ${args.execution} ${args.lane}`);
-  }
-
-  fs.mkdirSync(path.dirname(filePath), {recursive: true});
-  const state = {
+  const scoreboardPath = resolvePreferredScoreboardPath(projectRoot);
+  const scoreboardText = require('node:fs').existsSync(scoreboardPath)
+    ? require('node:fs').readFileSync(scoreboardPath, 'utf8')
+    : '';
+  const table = scoreboardText
+    ? loadScoreboardTable(scoreboardText, scoreboardPath)
+    : {objects: []};
+  const row = table.objects.find(
+    (candidate) => candidate.Execution === args.execution && candidate.Lane === args.lane,
+  );
+  const previous = loadLaneState(projectRoot, args.execution, args.lane);
+  const lanePlan = loadLanePlan(projectRoot, args.execution, args.lane);
+  const fallbackNextItem = findNextRefillItem(projectRoot, args.execution, args.lane);
+  const currentItem =
+    args.item ||
+    args['current-item'] ||
+    previous?.currentItem ||
+    row?.['Current item'] ||
+    fallbackNextItem?.text ||
+    null;
+  const nextRefillTarget =
+    args['next-refill-target'] ||
+    previous?.nextRefillTarget ||
+    row?.['Next refill target'] ||
+    null;
+  const eventType = (() => {
+    if (String(args.phase).toLowerCase() === 'ready-to-commit' || String(args.phase) === 'READY_TO_COMMIT') {
+      return 'ready-to-commit';
+    }
+    if (String(args.phase).toLowerCase() === 'blocked') {
+      return 'blocked';
+    }
+    if (String(args.phase).toLowerCase() === 'parked') {
+      return 'parked';
+    }
+    if (String(args.reviewer || '').toLowerCase() === 'pass') {
+      return 'pass';
+    }
+    if (String(args.reviewer || '').toLowerCase() === 'fail') {
+      return 'fail';
+    }
+    return 'state-update';
+  })();
+  const normalizedExpectedNextPhase =
+    args['expected-next-phase'] !== undefined
+      ? args['expected-next-phase']
+      : ['parked', 'blocked'].includes(String(args.phase).toLowerCase())
+        ? null
+        : previous?.expectedNextPhase || null;
+  const result = recordEnvelope(projectRoot, {
     execution: args.execution,
     lane: args.lane,
-    phase: args.phase,
-    expectedNextPhase: args['expected-next-phase'] || null,
-    latestCommit: args.commit || null,
-    proposedCommitTitle: args['commit-title'] || null,
-    proposedCommitBody: args['commit-body'] || null,
-    lastReviewerResult: args.reviewer || null,
-    lastVerification: args.verification || [],
+    role: 'coordinator',
+    eventType,
+    phaseBefore: previous?.phase || row?.['Effective phase'] || row?.Phase || null,
+    phaseAfter: args.phase,
+    currentItem,
+    nextRefillTarget,
+    relatedCommit: args.commit || previous?.latestCommit || null,
+    verification: args.verification || previous?.lastVerification || lanePlan?.verificationCommands || [],
+    summary: args.note || `Lane state updated for ${args.lane}`,
+    detail: args.note || null,
+    nextExpectedPhase: normalizedExpectedNextPhase,
     blockedBy: args['blocked-by'] || null,
-    note: args.note || null,
-    correctionCount: Number(args['correction-count'] || 0),
-    updatedAt: args['updated-at'] || new Date().toISOString(),
-  };
-  fs.writeFileSync(filePath, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
-  return filePath;
+    'commit-title': args['commit-title'] || null,
+    'commit-body': args['commit-body'] || null,
+    'correction-count': Number(args['correction-count'] || previous?.correctionCount || 0),
+    timestamp: args['updated-at'] || new Date().toISOString(),
+  });
+  return require('./nlsdd-lib.cjs').laneStatePath(projectRoot, args.execution, args.lane) || result.filePath;
 }
 
 function main() {
