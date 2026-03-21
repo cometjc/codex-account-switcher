@@ -12,6 +12,7 @@
 - 若要把同一輪 cycle 的 promotion 直接轉成 coordinator-ready implementer assignment，優先使用 `NLSDD/scripts/nlsdd-launch-active-set.cjs`；它應在 cycle 之後回傳每條 promoted lane 的 scope、verification 與可直接轉發的 handoff 文案。
 - 若要把 review loop 的下一步自動整理成 coordinator-ready bundle，優先使用 `NLSDD/scripts/nlsdd-drive-review-loop.cjs`；它應根據 lane 當前 phase 回傳 spec review、quality review、correction 或 coordinator commit intake 的下一步文案。
 - 若 implementer 已回 `READY_TO_COMMIT`，優先使用 `NLSDD/scripts/nlsdd-intake-ready-to-commit.cjs` 收 commit-ready handoff；它應回傳 proposed commit title/body、verification、scope 與 note，讓 main agent 直接 commit。
+- 若要把本輪 dispatch/review/intake 一次整理成 coordinator-ready 狀態摘要，優先使用 `NLSDD/scripts/nlsdd-run-coordinator-loop.cjs`；它應回傳 promoted lanes、review actions、commit intake 與 idle slots，但不直接代替 main agent 呼叫 subagent 工具。
 - `NLSDD/` 只放實際執行所需 artefacts；通用定義、規格與不依賴單次 execution 的治理文件應維護在 `spec/NLSDD/`。
 - 只要一個 lane-local MVC step 已完成且驗證通過，就應預設立即收斂成 lane-item commit；不要把多個已完成 MVC step 疊在同一個未提交狀態裡。
 - 若某個 execution 開始收束成單一 critical lane，導致其他 slot 只是在等它完成，就應視為需要 replan 的訊號；優先切出新的獨立 lane，或改成同時推進 2-3 個 plans/executions，而不是維持假的 4-active 表象。

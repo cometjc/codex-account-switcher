@@ -816,3 +816,15 @@
 - [`NLSDD/scripts/nlsdd-record-lane-state.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-record-lane-state.cjs) 現在支援 `--commit-title` 與 `--commit-body`，讓 `READY_TO_COMMIT` handoff 不只剩 phase 與 note。
 - 新增 [`NLSDD/scripts/nlsdd-intake-ready-to-commit.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-intake-ready-to-commit.cjs) 與 `npm run nlsdd:intake`，可直接列出目前可由 coordinator 收單提交的 lanes。
 - [`NLSDD/scripts/nlsdd-drive-review-loop.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-drive-review-loop.cjs) 的 `coordinator-commit-needed` 輸出也會帶 proposed commit title/body，避免 review helper 和 intake helper 出現兩套 commit 資訊。
+
+# 2026-03-21 NLSDD coordinator autopilot loop
+
+- [x] 將 launch / review / intake 三條 coordinator 助手收成單一 autopilot loop
+- [x] 讓單次指令回傳 promoted lanes、review actions、commit intake 與 idle slots
+- [x] 補 regression test，鎖住 autopilot 會同時看見 dispatch、review 與 READY_TO_COMMIT 收單
+
+## Review
+
+- 新增 [`NLSDD/scripts/nlsdd-run-coordinator-loop.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-run-coordinator-loop.cjs) 與 `npm run nlsdd:autopilot`，讓 coordinator 可一次取得整輪 deterministic 狀態摘要。
+- autopilot 目前是 assistive automation：它會執行 cycle/launch 的狀態收斂，並彙整 review/intake 結果，但不直接代 main agent 呼叫 subagent 工具。
+- regression 在 [tests/nlsdd-automation.test.js](/home/jethro/repo/side-projects/codex-account-switcher/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-run-coordinator-loop.cjs --execution plot-mode --json` 已通過。
