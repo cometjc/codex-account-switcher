@@ -20,6 +20,8 @@
 - 若要把本輪 dispatch/review/intake 一次整理成 coordinator-ready 狀態摘要，優先使用 `NLSDD/scripts/nlsdd-run-coordinator-loop.cjs`；它應回傳 promoted lanes、review actions、commit intake 與 idle slots，但不直接代替 main agent 呼叫 subagent 工具。
 - 若要讓 main agent 幾乎不思考就依序處理本輪工作，優先使用 `NLSDD/scripts/nlsdd-build-dispatch-plan.cjs`；它應把 autopilot 結果整理成有優先順序的 action queue，預設順序是 commit intake、review/correction、launch assignment。
 - 若要先快速檢視某個 execution 當前有哪些 runtime learnings 仍待處理，優先使用 `NLSDD/scripts/nlsdd-summarize-insights.cjs`；它應聚合 open / adopted insights，而不是只列 raw journal lines。
+- 若使用者輸入 `nlsdd-go`，將其視為 coordinator 快捷指令：`proceed plan/*.md via nlsdd, reuse existing lanes`。
+- `nlsdd-go` 應優先從 `plan/` 中挑選 in-progress plan，並盡量沿用既有 lane family、worktree 與 execution；只有無法 truthful 派工時才建立新 lane 或 replan active set。
 - `NLSDD/` 只放實際執行所需 artefacts；通用定義、規格與不依賴單次 execution 的治理文件應維護在 `spec/NLSDD/`。
 - 只要一個 lane-local MVC step 已完成且驗證通過，就應預設立即收斂成 lane-item commit；不要把多個已完成 MVC step 疊在同一個未提交狀態裡。
 - 若某個 execution 開始收束成單一 critical lane，導致其他 slot 只是在等它完成，就應視為需要 replan 的訊號；優先切出新的獨立 lane，或改成同時推進 2-3 個 plans/executions，而不是維持假的 4-active 表象。

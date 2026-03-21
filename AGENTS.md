@@ -11,6 +11,8 @@
 - Offload research, exploration, and parallel analysis to subagents
 - For complex problems, throw more compute at it via subagents
 - One task per subagent for focused execution
+- 若使用者輸入 `nlsdd-go`，將其視為固定口令：`proceed plan/*.md via nlsdd, reuse existing lanes`
+- `nlsdd-go` 預設行為是優先挑選 `plan/` 下目前 in-progress 的 plan，並優先沿用既有 `NLSDD` lanes / worktrees / execution；只有 lane 不足或 runtime truth 不一致時才 replan
 
 ---
 
