@@ -10,8 +10,11 @@ Use this file to keep NLSDD execution predictable, low-conflict, and easy to rev
 - Every sub-agent should be assigned through one of the current execution lane plans first, not through an ad-hoc one-off task description.
 - Every lane should run inside its own dedicated worktree.
 - Every lane item should create its own lane-item commit before review starts.
-- When a lane-local MVC step is done and verified, the default next action is to commit it immediately rather than batching additional completed MVC work into the same uncommitted state.
-- If sub-agent commits are likely to hit permission or confirmation gates, the default NLSDD path is: sub-agent finishes the MVC step, hands commit-ready details back, and coordinator/main agent performs the commit.
+- When a lane-local MVC step is done and verified, the default next action is to finalize that step into its own lane-item commit rather than batching additional completed MVC work into the same uncommitted state.
+- Distinguish commit ownership by context:
+  - main agent direct local work: verify first, then commit directly
+  - NLSDD sub-agent lane work: default to `READY_TO_COMMIT`, and coordinator/main agent performs the commit
+  - self-commit by a sub-agent is an explicit exception, not the default
 - Do not assign the same file to two active implementer agents at the same time.
 - Every sub-agent must assume other agents are editing nearby code and must not revert unrelated changes.
 - A completed lane item is not considered integrated until the coordinator sees both spec review and code quality review pass on that lane-item diff.
@@ -80,7 +83,7 @@ Use this file to keep NLSDD execution predictable, low-conflict, and easy to rev
 - When coordinator records a new lane state after review, correction, or blockage, prefer `node NLSDD/scripts/nlsdd-record-lane-state.cjs ...` over hand-editing journal JSON.
 - When coordinator needs a refreshed scoreboard snapshot, prefer `npm run nlsdd:scoreboard:refresh` and inspect `NLSDD/state/scoreboard.runtime.md` rather than staging runtime churn from the tracked scoreboard.
 - When coordinator changes the active/parked lane set for an execution, prefer `npm run nlsdd:active-set:replan -- --execution <id> --active ... --parked ...` so tracked `Phase` values and lane journals stay aligned.
-- If the environment may show permission prompts for `git commit` or similar lane-finalizing steps, implementer assignments should ask the sub-agent to report `READY_TO_COMMIT` with verification results and commit-ready handoff details rather than waiting silently at the end of the lane item.
+- Implementer assignments for NLSDD sub-agents should tell them not to run `git commit` themselves unless the lane explicitly says self-commit is allowed. The default end state is `READY_TO_COMMIT` with verification results and commit-ready handoff details.
 - Do not keep a completed MVC step uncommitted just because the lane may continue later; later refill items should start from the committed lane state, not from piled-up local progress.
 
 ## Required Handoff Format

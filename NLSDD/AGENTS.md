@@ -7,5 +7,8 @@
 - `scripts/` 放 `NLSDD` 執行輔助腳本；若路徑或輸出格式變更，需同步更新 `package.json` scripts、tests 與相關文件。
 - 若要重排某個 execution 的 active/parked lane set，優先使用 `NLSDD/scripts/nlsdd-replan-active-set.cjs`，不要只改 tracked scoreboard 而忘記同步 lane journal。
 - `NLSDD/` 只放實際執行所需 artefacts；通用定義、規格與不依賴單次 execution 的治理文件應維護在 `spec/NLSDD/`。
-- 只要一個 lane-local MVC step 已完成且驗證通過，就應預設立即產生 lane-item commit；不要把多個已完成 MVC step 疊在同一個未提交狀態裡。
-- 若執行環境對 `git commit` 或其他 lane-finalizing 動作會跳 permission/confirmation prompt，subagent 不應默默卡住；應先回報 `READY_TO_COMMIT`、已完成的驗證與 commit-ready 摘要，交由 main agent/coordinator 執行 commit。
+- 只要一個 lane-local MVC step 已完成且驗證通過，就應預設立即收斂成 lane-item commit；不要把多個已完成 MVC step 疊在同一個未提交狀態裡。
+- commit 責任要依情境區分：
+  - main agent 直接在本地工作時，可在驗證後直接 commit
+  - NLSDD subagent 在 lane worktree 內工作時，預設不要自己跑 `git commit`
+- NLSDD subagent 完成 lane-local MVC step 後，應回報 `READY_TO_COMMIT`、已完成的驗證與 commit-ready 摘要，交由 main agent/coordinator 執行 commit；只有 lane 明確標示 self-commit-safe 時才例外。

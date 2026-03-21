@@ -678,9 +678,10 @@ test('message helper tells implementers to hand commit-ready mvc back to coordin
   assert.match(message, /Execution: plot-mode/);
   assert.match(message, /Lane: Lane 4/);
   assert.match(message, /commit sha or READY_TO_COMMIT package/);
+  assert.match(message, /Do not run git commit yourself unless this lane explicitly says self-commit is allowed/);
   assert.match(
     message,
-    /If sub-agent commit may be gated, hand back READY_TO_COMMIT with intended commit title\/body summary so coordinator can commit for you/,
+    /Default NLSDD flow in this repo: hand back READY_TO_COMMIT with intended commit title\/body summary so coordinator can commit for you/,
   );
 });
 

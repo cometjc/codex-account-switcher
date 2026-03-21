@@ -38,12 +38,13 @@
 
 ## Commit-Gate Reporting
 
-- If an implementer has finished the code and verification but expects a permission prompt, confirmation prompt, or environment gate before `git commit`, it should not remain silent.
-- In that case the implementer should report `READY_TO_COMMIT` and include:
+- In this repo's default NLSDD flow, `READY_TO_COMMIT` is the normal end-of-implementation handoff for sub-agents.
+- A sub-agent should not run `git commit` itself unless the lane explicitly authorizes self-commit.
+- When the code and verification are finished, the implementer should report `READY_TO_COMMIT` and include:
   - the intended commit scope
   - verification already completed
   - whether the worktree is otherwise clean
-  - the exact gate it expects to hit
+  - whether any permission/confirmation gate is expected
   - a proposed commit title
   - an optional commit body summary when the change is not single-purpose
 - Coordinator should treat `READY_TO_COMMIT` as a live lane state, not as an unresponsive thread.
@@ -72,6 +73,7 @@ These templates may be generated through `node NLSDD/scripts/nlsdd-compose-messa
 - required verification
 - required handoff format
 - explicit instruction that commit-ready MVC work should be handed back to coordinator if sub-agent commit may be gated
+- explicit instruction that sub-agents should not self-commit unless the lane explicitly allows it
 
 ### Spec Review
 

@@ -47,7 +47,8 @@
   - no hidden dependency on another lane's unimplemented boundary
 - Prefer 1-2 responsibilities per lane item.
 - When one lane-local MVC step is implemented and its planned verification passes, treat that MVC step as commit-worthy by default; do not keep stacking multiple completed MVC steps in one uncommitted worktree state.
-- If the execution environment may block sub-agent `git commit`, the sub-agent should hand off the completed MVC step, verification, and intended commit summary to the coordinator, and the coordinator should create the lane-item commit on its behalf.
+- In this repo's default NLSDD flow, sub-agents should not finalize `git commit` themselves. They should hand off the completed MVC step, verification, and intended commit summary through `READY_TO_COMMIT`, and the coordinator should create the lane-item commit on their behalf.
+- Only use sub-agent self-commit when the lane item explicitly says self-commit is allowed and the environment is known not to gate `git commit`.
 - If a task depends on another lane expanding a seam or boundary, split that dependency into its own lane item first.
 - Implementers do not update coordinator-owned tracking files unless the task explicitly says so.
 
@@ -109,7 +110,7 @@
 2. Pick the next unchecked item from one execution lane plan that either owns the just-freed slot or is next in the queued lane pool.
 3. Dispatch one implementer with the full lane-item spec.
 4. Wait for implementer status.
-5. If the planned MVC step is finished and verification passes, create the lane-item commit immediately. If the sub-agent may hit a commit permission/confirmation gate, it should report `READY_TO_COMMIT` with commit-ready handoff details so the coordinator can create that commit without waiting on the blocked agent.
+5. If the planned MVC step is finished and verification passes, create the lane-item commit immediately. In this repo's default NLSDD path, the implementer should report `READY_TO_COMMIT` and the coordinator should create that commit. Only lanes that are explicitly marked as self-commit-safe should end with the sub-agent running `git commit` directly.
 6. If `DONE` or `DONE_WITH_CONCERNS`, run spec review against the lane-item commit diff.
 7. If spec review fails, return to the same implementer for correction and re-review.
 8. If spec review passes, run code quality review against the same diff.

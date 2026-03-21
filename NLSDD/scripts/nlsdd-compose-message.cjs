@@ -40,7 +40,8 @@ function composeMessage(args) {
         `Write scope: ${context.scope}`,
         `Required verification: ${context.verification}`,
         'Required handoff format: lane name, MVC step completed, commit sha or READY_TO_COMMIT package, files changed, verification run, open concerns.',
-        'If sub-agent commit may be gated, hand back READY_TO_COMMIT with intended commit title/body summary so coordinator can commit for you.',
+        'Do not run git commit yourself unless this lane explicitly says self-commit is allowed.',
+        'Default NLSDD flow in this repo: hand back READY_TO_COMMIT with intended commit title/body summary so coordinator can commit for you.',
       ].join('\n');
     case 'spec-review':
       return [

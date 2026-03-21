@@ -30,6 +30,22 @@
 - [x] 將 `READY_TO_COMMIT` 納入 NLSDD 的正式狀態語彙與 handoff 要求
 - [x] 在 `NLSDD/AGENTS.md` 與 `tasks/lessons.md` 補上對應守則，避免 coordinator 再誤判 agent 無回應
 
+# 2026-03-21 NLSDD commit 情境分流
+
+- [x] 找出 commit 規則在 main agent 與 NLSDD subagent 之間的情境衝突
+- [x] 將 `spec/NLSDD`、`NLSDD/AGENTS.md`、repo `AGENTS.md` 改成情境分流規則
+- [x] 更新 message helper，明確要求 subagent 預設不要自己跑 `git commit`
+- [x] 補測試鎖住新的 implementer assignment 文案
+
+## Review
+
+- 根因不是單一 subagent 忘了規則，而是 repo 內同時存在兩條都合理但適用情境不同的 commit 規則：main agent 的「規則變更驗證後直接 commit」與 NLSDD 的「lane-local MVC 完成就要收斂成 commit」。
+- 若不把情境切開，新的 worker 很容易把 main agent 的自動 commit 規則誤套到 lane worktree，結果卡在 permission prompt，然後 coordinator 又以為 thread 沒反應。
+- 這次修正後的邊界是：
+  - main agent 直接做本地工作：驗證後直接 commit
+  - NLSDD subagent：預設不自己 `git commit`，而是交 `READY_TO_COMMIT`
+  - 只有 lane 明確標示 self-commit-safe 才能例外
+
 ## Review
 
 - 根因不是 subagent 卡死，而是 lane item 已經完成到只剩 `git commit`，但執行環境會跳 permission prompt；若這時 subagent 沒先回報，coordinator 只看 thread 會像是「人突然不動了」。
