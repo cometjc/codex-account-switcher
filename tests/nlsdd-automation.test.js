@@ -930,7 +930,7 @@ test('schedule marks clean implementing lane at same HEAD as stale-implementing'
     blockedBy: null,
     note: 'stale implementing candidate',
     correctionCount: 0,
-    updatedAt: '2026-03-21T10:00:00.000Z',
+    updatedAt: '2020-01-01T00:00:00.000Z',
   });
 
   const {computeExecutionSchedule} = freshRequire('NLSDD/scripts/nlsdd-lib.cjs');
@@ -940,4 +940,108 @@ test('schedule marks clean implementing lane at same HEAD as stale-implementing'
   assert.deepEqual(schedule.staleRows.map((row) => row.Lane), ['Lane 1']);
   assert.equal(schedule.staleRows[0].staleImplementing.kind, 'stale-implementing');
   assert.equal(schedule.availableSlots, 4);
+});
+
+test('dispatch cycle reconciles stale lanes and promotes next queued work', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-cycle-'));
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  const lane1Worktree = path.join(root, '.worktrees', 'lane-1-node');
+  const lane2Worktree = path.join(root, '.worktrees', 'lane-2-runtime');
+  setupTempGitRepo(lane1Worktree);
+  setupTempGitRepo(lane2Worktree);
+
+  const lane1Head = run('git', ['rev-parse', '--short', 'HEAD'], lane1Worktree);
+  const lane2Head = run('git', ['rev-parse', '--short', 'HEAD'], lane2Worktree);
+
+  fs.mkdirSync(path.join(root, 'NLSDD', 'executions', 'plot-mode'), {recursive: true});
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-1.md'),
+    `# Lane 1
+
+> NLSDD worktree: \`.worktrees/lane-1-node\`
+>
+> Lane-local verification:
+> \`git status --short\`
+
+## C - Controller
+
+- [ ] Future shell audit
+`,
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-2.md'),
+    `# Lane 2
+
+> NLSDD worktree: \`.worktrees/lane-2-runtime\`
+>
+> Lane-local verification:
+> \`git status --short\`
+
+## V - View
+
+- [ ] Runtime compare seam follow-up
+`,
+    'utf8',
+  );
+
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'scoreboard.md'),
+    `# NLSDD Scoreboard
+
+| Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| plot-mode | Lane 1 | Node contract + handoff | Future shell audit | parked | \`${lane1Head}\` | \`git status --short\` | none | none | parked truth |
+| plot-mode | Lane 2 | Rust runtime + boundary | Runtime compare seam follow-up | queued | \`${lane2Head}\` | \`git status --short\` | none | next runtime step | queued truth |
+`,
+    'utf8',
+  );
+
+  writeLaneState(root, 'plot-mode', 1, {
+    execution: 'plot-mode',
+    lane: 'Lane 1',
+    phase: 'implementing',
+    expectedNextPhase: 'spec-review-pending',
+    latestCommit: lane1Head,
+    lastReviewerResult: null,
+    lastVerification: ['git status --short'],
+    blockedBy: null,
+    note: 'stale implementing lane',
+    correctionCount: 0,
+    updatedAt: '2020-01-01T00:00:00.000Z',
+  });
+  writeLaneState(root, 'plot-mode', 2, {
+    execution: 'plot-mode',
+    lane: 'Lane 2',
+    phase: 'queued',
+    expectedNextPhase: 'implementing',
+    latestCommit: lane2Head,
+    lastReviewerResult: null,
+    lastVerification: ['git status --short'],
+    blockedBy: null,
+    note: 'next lane ready',
+    correctionCount: 0,
+    updatedAt: '2026-03-21T10:00:00.000Z',
+  });
+
+  const {runCycle} = freshRequire('NLSDD/scripts/nlsdd-run-cycle.cjs');
+  const result = runCycle(root, 'plot-mode', 2, false);
+
+  assert.deepEqual(result.reconciled.map((entry) => entry.lane), ['Lane 1']);
+  assert.deepEqual(result.promoted.map((entry) => entry.lane), ['Lane 2']);
+  assert.equal(result.idleSlots, 1);
+
+  const lane1State = JSON.parse(
+    fs.readFileSync(path.join(root, 'NLSDD', 'state', 'plot-mode', 'lane-1.json'), 'utf8'),
+  );
+  const lane2State = JSON.parse(
+    fs.readFileSync(path.join(root, 'NLSDD', 'state', 'plot-mode', 'lane-2.json'), 'utf8'),
+  );
+  assert.equal(lane1State.phase, 'parked');
+  assert.equal(lane2State.phase, 'implementing');
+
+  const finalSchedule = result.finalSchedule;
+  assert.deepEqual(finalSchedule.activeRows.map((row) => row.Lane), ['Lane 2']);
+  assert.deepEqual(finalSchedule.staleRows.map((row) => row.Lane), []);
 });

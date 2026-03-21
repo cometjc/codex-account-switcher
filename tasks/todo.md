@@ -762,3 +762,21 @@
 - [`NLSDD/scripts/nlsdd-lib.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-lib.cjs) 新增 `inspectLaneWorktree()` 與 `detectStaleImplementing()`，讓 schedule 在 lane journal 之外也會看 worktree truth。
 - [`NLSDD/scripts/nlsdd-suggest-schedule.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-suggest-schedule.cjs) 現在會額外輸出 `Stale implementing lanes`。
 - regression 在 [tests/nlsdd-automation.test.js](/home/jethro/repo/side-projects/codex-account-switcher/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-suggest-schedule.cjs --execution plot-mode` 已通過。
+
+# 2026-03-21 NLSDD dispatch cycle helper
+
+- [x] 將 deterministic coordinator work 收斂成單一 cycle helper
+- [x] 讓 cycle helper 一次完成 stale lane reconcile、runtime refresh 與下一批 lane promotion
+- [x] 讓 cycle helper 回傳 completed lanes、promoted lanes 與 idle slots
+- [x] 補 regression test，鎖住 cycle 會先收 stale lane 再 promote 下一條 queued lane
+
+## Review
+
+- 新增 [`NLSDD/scripts/nlsdd-run-cycle.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-run-cycle.cjs) 與 `npm run nlsdd:cycle`。
+- cycle helper 現在會先把可由 tracked phase 解決的 `stale-implementing` lane 收回 truthful phase，再按既有 plan/journal 自動 promote 下一批 dispatchable lanes。
+- 輸出會明確列出：
+  - `Reconciled lanes`
+  - `Promoted lanes`
+  - `Idle slots`
+  - `No dispatch reason`
+- regression 在 [tests/nlsdd-automation.test.js](/home/jethro/repo/side-projects/codex-account-switcher/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-run-cycle.cjs --execution plot-mode --json` 已通過。

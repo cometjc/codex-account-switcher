@@ -101,6 +101,7 @@ Use this file to keep NLSDD execution predictable, low-conflict, and easy to rev
 - When a sub-agent suggests a remediation, or coordinator notices a workflow issue or optimization opportunity during execution, prefer `node NLSDD/scripts/nlsdd-record-insight.cjs ...` over burying that observation only in thread history.
 - When coordinator needs a refreshed scoreboard snapshot, prefer `npm run nlsdd:scoreboard:refresh` and inspect `NLSDD/state/scoreboard.runtime.md` rather than staging runtime churn from the tracked scoreboard.
 - When coordinator changes the active/parked lane set for an execution, prefer `npm run nlsdd:active-set:replan -- --execution <id> --active ... --parked ...` so tracked `Phase` values and lane journals stay aligned.
+- When coordinator wants to do the routine, low-judgment part of dispatching in one step, prefer `npm run nlsdd:cycle -- --execution <id>`. The cycle helper should reconcile stale implementing lanes, promote the next safe queued/refill-ready lanes, refresh runtime state, and return a dispatch summary with completed lanes, newly promoted lanes, and idle slots.
 - Implementer assignments for NLSDD sub-agents should tell them not to run `git commit` themselves unless the lane explicitly says self-commit is allowed. The default end state is `READY_TO_COMMIT` with verification results and commit-ready handoff details.
 - Do not keep a completed MVC step uncommitted just because the lane may continue later; later refill items should start from the committed lane state, not from piled-up local progress.
 

@@ -28,6 +28,7 @@
 - Auto-refreshed runtime scoreboard output should be written under `NLSDD/state/`, not back into the tracked scoreboard.
 - The tracked scoreboard should keep only coordinator-owned manual fields; full auto-derived lane state belongs in the runtime scoreboard.
 - Runtime scoreboard rows may contain both manual coordinator fields and auto-derived fields; automation may suggest state, but the coordinator remains the decision-maker for dispatch.
+- NLSDD may expose a single dispatch-cycle helper that performs the deterministic coordinator work in one pass: reconcile stale implementing lanes, refresh runtime state, promote the next dispatchable lanes according to the tracked plan, and report the resulting scheduling status.
 - Not every lane row has to consume an active thread slot at all times; queued or parked lanes may remain visible in the scoreboard until a slot opens, then the coordinator can promote the next eligible queued lane into that slot.
 - A healthy execution should avoid collapsing into a single serial critical lane while the other active slots are effectively idle; when the remaining work starts converging that way, coordinator should re-plan instead of pretending the active cap is still meaningfully saturated.
 - When one execution no longer contains enough honest non-overlapping work to keep multiple slots productive, coordinator should prefer cutting 1-2 new independent lanes or advancing 2-3 plans/executions in parallel over keeping several slots pseudo-active behind one blocker.
@@ -122,6 +123,7 @@
 8. If spec review passes, run code quality review against the same diff.
 9. If quality review fails, return to the same implementer for correction and re-review.
 10. After both pass, coordinator marks the lane as `refill-ready`, updates tracking docs in batch, and either refills the same lane or allocates the freed slot to another queued lane.
+11. When enough of the sequence is deterministic, coordinator may run a dispatch-cycle helper to reconcile stale states and promote the next safe queued/refill-ready lanes in one command, then use the returned dispatch status to drive actual agent assignment.
 
 ## Lane Journal Contract
 

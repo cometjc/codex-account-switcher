@@ -399,6 +399,15 @@ function detectStaleImplementing(laneState, worktreeInspection) {
     return null;
   }
 
+  const updatedAt = laneState.updatedAt ? new Date(laneState.updatedAt) : null;
+  const staleAfterMs = Number(process.env.NLSDD_STALE_IMPLEMENTING_AFTER_MS || 60_000);
+  if (!updatedAt || Number.isNaN(updatedAt.getTime())) {
+    return null;
+  }
+  if (Date.now() - updatedAt.getTime() < staleAfterMs) {
+    return null;
+  }
+
   return {
     kind: 'stale-implementing',
     summary: 'lane journal still says implementing, but the worktree is clean at the same HEAD',

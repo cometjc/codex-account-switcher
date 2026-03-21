@@ -18,6 +18,7 @@
     "nlsdd:active-set:replan": "node NLSDD/scripts/nlsdd-replan-active-set.cjs",
     "nlsdd:refill:suggest": "node NLSDD/scripts/nlsdd-suggest-refill.cjs",
     "nlsdd:schedule:suggest": "node NLSDD/scripts/nlsdd-suggest-schedule.cjs",
+    "nlsdd:cycle": "node NLSDD/scripts/nlsdd-run-cycle.cjs",
     "nlsdd:compose": "node NLSDD/scripts/nlsdd-compose-message.cjs",
     "plot:viewer:build": "cargo build --manifest-path rust/plot-viewer/Cargo.toml",
     "plot:viewer:run": "cargo run --manifest-path rust/plot-viewer/Cargo.toml --",
