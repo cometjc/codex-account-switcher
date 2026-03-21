@@ -922,3 +922,15 @@
 - 根因不是 Lane 7 還沒做完，而是 `quality pass -> refill-ready` 的通用 phase 在沒有 fresh next item 時，會把同一個已完成 item 又推出來一次。
 - `e853688` 已經完成這輪 scheduler/runtime truth audit 的具體 delta：移除過度保守的 queued-only anti-convergence warning，並保留真正需要人工介入的警示條件。
 - 因此這次和 Lane 4 一樣，先把 honest truth 收乾淨：Lane 7 回到 `parked`，之後只在真的出現新的 scheduler/runtime truth finding 時再重開。
+
+# 2026-03-21 NLSDD tracked lane status projection sync
+
+- [x] 將 remaining self-hosting lane docs 同步成 honest parked/current-status wording
+- [x] 將 remaining plot-mode lane docs 同步成 honest parked/current-status wording
+- [x] 保持這批只收 tracked execution 狀態同步，不混入 runtime tooling 或產品線變更
+
+## Review
+
+- 這批變更沒有新增功能，目的是把舊的 lane-plan 文案從早期的 `Active lane item` / initial-active-set 敘述，收斂成現在 envelope/reducer 投影後的 honest `Current Lane Status`。
+- 內容上主要是把已經 no-op、已經完成、或已經 parked 的 lanes 寫成目前真實狀態，避免未來再讀 tracked docs 時以為它們還有未完成的 active item。
+- 這次刻意不碰 `nlsdd-refresh-scoreboard.cjs` 與產品線 WIP，避免把純 docs sync 和其他未驗證中的改動混在同一顆 commit。

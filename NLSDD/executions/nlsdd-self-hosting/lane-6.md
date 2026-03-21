@@ -15,7 +15,13 @@
 
 ## Current Lane Status
 
-- [ ] Queued follow-up lane until an active slot frees up and the first scheduler pass is integrated
+- [x] Projected phase: parked
+- [x] Current item: Post-rollout follow-up capture
+- [x] Latest commit: `3c2a967`
+- [x] Latest event: bootstrap-insight · Lane 6 coordinator follow-up capture landed
+- [x] Next expected phase: n/a
+- [x] Next refill target: Coordinator workflow follow-up
+- [x] Latest note: Self-hosting follow-up backlog is now committed in 89b89b5, giving the second execution a concrete completed lane instead of a pseudo-active placeholder.
 
 ## Refill Order
 

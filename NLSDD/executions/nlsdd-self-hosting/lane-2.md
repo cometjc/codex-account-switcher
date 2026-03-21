@@ -25,7 +25,14 @@
 
 ## Current Lane Status
 
-- [ ] Active lane item: connect scoreboard rows to the new multi-lane schedule helper in the initial active set
+- [x] Projected phase: parked
+- [x] Current item: Self-hosting scoreboard rows and schedule-facing refresh
+- [x] Latest commit: `n/a`
+- [x] Latest event: bootstrap-state · Bootstrapped lane state for Lane 2
+- [x] Next expected phase: n/a
+- [x] Next refill target: Schedule-facing scoreboard wording polish
+- [x] Blocked by: none
+- [x] Latest note: Lane 2 no-op confirmed; derived scoreboard columns already stable for current scheduler model.
 
 ## Refill Order
 

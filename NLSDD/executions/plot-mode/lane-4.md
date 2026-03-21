@@ -32,10 +32,10 @@
 - [x] Projected phase: parked
 - [x] Current item: Wait for a fresh panel-local item after adopted-target emphasis landed
 - [x] Latest commit: `6bb1fba`
-- [x] Latest event: state-update · Lane 4 adopted-target emphasis already landed in 6bb1fba
+- [x] Latest event: insight-recorded · Lane 4 compare panel needs render-boundary payload, not just model seam
 - [x] Next expected phase: n/a
 - [x] Next refill target: Extend panel structure only if later plot UX still needs richer side-panel content
-- [x] Latest note: The adopted-target emphasis shipped in 6bb1fba; keep Lane 4 parked until a fresh panel-local item appears.
+- [x] Latest note: That render-boundary payload landed through Lane 2 and Lane 4 consumed it in 6bb1fba, so the older adopted insight is now resolved.
 
 ## Refill Order
 

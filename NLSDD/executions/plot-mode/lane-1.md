@@ -34,11 +34,13 @@
 
 ## Current Lane Status
 
-- [x] First-round handoff verification landed and passed review
-- [x] Second-round shell confidence / retry messaging implementer commit landed
-- [x] Close the current correction / re-review loop for second-round commit `1d29843`
-- [x] Third-round snapshot semantics commit `baa7b8e` landed and passed spec + quality review
-- [x] This lane occupies one active slot in the execution's lane pool; additional plot-mode lanes may remain queued or parked outside this lane.
+- [x] Projected phase: parked
+- [x] Current item: Future shell polish only if Rust viewer launch UX changes again
+- [x] Latest commit: `baa7b8e`
+- [x] Latest event: bootstrap-insight · Lane 1 shell/handoff audit is already satisfied
+- [x] Next expected phase: n/a
+- [x] Next refill target: Re-activate only if plot launch/retry UX changes enough to justify fresh shell work
+- [x] Latest note: Current plot-mode shell and handoff tests already align with the recovery baseline, so the truthful next phase is parked rather than pseudo-active.
 
 ## Refill Order
 

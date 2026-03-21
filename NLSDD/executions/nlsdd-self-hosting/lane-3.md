@@ -24,7 +24,13 @@
 
 ## Current Lane Status
 
-- [ ] Active lane item: finish documentation alignment for self-hosting NLSDD scheduling in the initial active set
+- [x] Projected phase: parked
+- [x] Current item: Lane-pool + active-cap rules alignment
+- [x] Latest commit: `n/a`
+- [x] Latest event: bootstrap-insight · Lane 3 rules stream converged to honest no-op
+- [x] Next expected phase: n/a
+- [x] Next refill target: Execution-level wording cleanup
+- [x] Latest note: After queued-lane promotion and active-cap clarifications landed, there was no further reviewable spec-only step. Parked Lane 3 instead of inventing wording churn.
 
 ## Refill Order
 
