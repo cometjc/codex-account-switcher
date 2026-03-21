@@ -119,6 +119,49 @@
   - `npm run nlsdd:scoreboard:refresh`
   - `npm run build`
 
+# 2026-03-21 plot-mode next 4a NLSDD re-plan
+
+- [x] 重新盤點 `main` 上的 plot-mode lane docs、manual scoreboard、runtime schedule/refill 與 lane worktrees
+- [x] 確認 `main` 尚未正式承接 recovery branch 的 Lane 5 docs/operator-flow family
+- [x] 將主線 plot-mode execution 收斂成下一個 4a active set：Lane 2 + Lane 3 + Lane 4 + Lane 5
+- [x] 將 Lane 1 改為 parked，避免沒有新 reviewable item 時只靠慣性佔住 active slot
+- [x] 在主線新增 Lane 5 plan，讓 docs/operator flow 成為正式 lane family
+- [x] 記錄 lane journal 與 manual plan 目前存在漂移，要求下輪 dispatch 前先 refresh / rewrite journal
+
+## Review
+
+- 這次不是直接沿用 recovery branch 的舊 dispatch，而是重新比對了 `main` 上的 manual scoreboard、lane docs、runtime `schedule/refill` 輸出與 lane worktree probe。結果很明確：主線目前還沒有 Lane 5，但 Lane 1 也已經沒有新的 reviewable item，不適合再把它硬塞進 4a active set。
+- 因此新的 4a 規劃改成 `Lane 2 + Lane 3 + Lane 4 + Lane 5`。Lane 2 回到 runtime navigation/focus-flow family，Lane 3 負責 chart 對 richer focus/profile cycling 的相容性，Lane 4 負責 Compare panel 的 recommendation-rich content，Lane 5 則正式承接 README/operator flow/run instructions。
+- 另外也確認了一個執行面風險：目前 `NLSDD/state/plot-mode/lane-2..4.json` 還留著 recovery-branch dispatch 狀態，所以 runtime tooling 會顯示 `implementing`，但那不等於主線新的 manual 4a 計畫。這次先把風險寫進 overview 與 todo，要求下輪真正 dispatch 前先 refresh 或 rewrite lane journal。
+- 補充：原本替 Lane 5 寫的 `tests/plot-readme.test.js tests/plot-mode-shell.test.js` 驗證命令在目前主線 worktree 還不是穩定可跑，因此先把 lane-local required verification 收斂成 `npm run build`，等 docs 測試檔正式納入這條 workflow 再升回 required verification。
+- 已新增 `nlsdd-replan-active-set` helper，讓下次重排 `active/parked` lane set 時可以原子同步 tracked `Phase` 與 lane journal，不再只靠人工記得兩邊都要改。
+- 驗證：
+  - `node NLSDD/scripts/nlsdd-suggest-schedule.cjs --execution plot-mode --json`
+  - `node NLSDD/scripts/nlsdd-suggest-refill.cjs --execution plot-mode --json`
+  - `node NLSDD/scripts/nlsdd-probe-lane.cjs --execution plot-mode --lane 1`
+  - `node NLSDD/scripts/nlsdd-probe-lane.cjs --execution plot-mode --lane 2`
+  - `node NLSDD/scripts/nlsdd-probe-lane.cjs --execution plot-mode --lane 3`
+  - `node NLSDD/scripts/nlsdd-probe-lane.cjs --execution plot-mode --lane 4`
+
+# 2026-03-21 NLSDD active-set atomic replan helper
+
+- [x] 先補 failing test，鎖住 active-set replan 會同時更新 tracked scoreboard phase 與 lane journal
+- [x] 新增 `NLSDD/scripts/nlsdd-replan-active-set.cjs`
+- [x] 補 `package.json` script，讓 coordinator 可用固定命令重排 active set
+- [x] 將 helper 納入 `spec/NLSDD` 與 `NLSDD/AGENTS.md`
+- [x] 用 helper 將 `plot-mode` 的 `Lane 1 parked / Lane 2-5 queued` 同步到 journal，收掉目前的 planning drift
+
+## Review
+
+- 根因是 manual scoreboard / lane docs 與 lane journal 是分兩步更新，導致 coordinator 一旦先改 tracked 文件，`schedule/refill` 仍會被舊 journal 拉回上一輪 dispatch truth。
+- 這次新增 `nlsdd-replan-active-set`，把 replan 收斂成一個原子操作：它會改 tracked scoreboard 的 `Phase`，同步重寫指定 lanes 的 journal phase / nextExpectedPhase，最後再 refresh runtime scoreboard。
+- helper 目前專注解決最痛的 drift 邊界：`active` lanes 會被寫成 `queued -> implementing` 的下一步，`parked` lanes 會被寫成 `parked`。lane plan 文字內容仍維持手動，因為那屬於規劃敘述，不適合自動改寫。
+- 也已把 `plot-mode` 目前的 4a 計畫實際套用一次，讓 `Lane 1` journal 不再維持 `refill-ready`，`Lane 2-5` 則與 manual scoreboard 對齊成 queued/parked truth。
+- 驗證：
+  - `node --test tests/nlsdd-automation.test.js`
+  - `node NLSDD/scripts/nlsdd-replan-active-set.cjs --execution plot-mode --active 2,3,4,5 --parked 1 --note "manual 4a replan from tracked scoreboard"`
+  - `node NLSDD/scripts/nlsdd-suggest-schedule.cjs --execution plot-mode --json`
+
 - [x] 確認 `Usage Left`、`Time to reset`、`Drift` 目前被渲染成每列 label 的根因
 - [x] 先補回歸測試，鎖住三個欄位名只出現在 header
 - [x] 抽出並接回表格排版 helper，讓 row 只顯示值不重複印欄位名
@@ -635,3 +678,15 @@
 - 根因是 `resolveProjectRoot()` 先用 git common-dir 把 linked worktree 收斂回主 repo root，導致 recovery branch 內的 manual scoreboard 與 execution docs 即使不同，也會被 `refresh` / `schedule` / `refill` 忽略。
 - 修正後改成優先從 `cwd` 往上找最近的 `NLSDD/scoreboard.md` 或 `NLSDD/executions/`；只有找不到時才回退到原本的 canonical repo root 邏輯。
 - 這樣 `NLSDD` tooling 在 recovery branch / linked worktree 中會先吃當前 branch 的 execution surface，不再跨 branch 漂移。
+
+# 2026-03-21 NLSDD worktree pool root 解析修正
+
+- [x] 找出為什麼 recovery branch 讀到自己的 lane docs 後，`.worktrees/...` 仍會被誤判成 `missing-worktree`
+- [x] 將 lane plan 的 worktree 路徑解析改成使用 canonical worktree pool root，而不是 execution root
+- [x] 補 linked worktree 測試，鎖住「讀當前 branch 的 lane docs，但 worktree path 仍指向共用 repo `.worktrees/`」的行為
+
+## Review
+
+- 根因是 `loadLanePlan()` 先正確讀到了 recovery branch 自己的 lane docs，但仍把 `NLSDD worktree: .worktrees/...` 相對於 execution root 解析，導致 recovery branch 下的 probe/schedule 看到 `missing-worktree`。
+- 修正後新增 `resolveWorktreePoolRoot()`，讓 execution docs 仍取自當前 worktree，但 `.worktrees/...` 會回到 git common-dir 對應的 canonical repo root 解析。
+- 這讓 linked worktree / recovery branch 具備正確的雙 root 模型：`execution root` 負責文件與 scoreboard，`worktree pool root` 負責 lane worktree 實體位置。

@@ -29,6 +29,7 @@
 - Runtime scoreboard rows may contain both manual coordinator fields and auto-derived fields; automation may suggest state, but the coordinator remains the decision-maker for dispatch.
 - Not every lane row has to consume an active thread slot at all times; queued or parked lanes may remain visible in the scoreboard until a slot opens, then the coordinator can promote the next eligible queued lane into that slot.
 - Runtime tooling must resolve the canonical repo root even when invoked from a linked worktree, so lane plans, worktrees, and state files always point back to the same execution root.
+- When the coordinator redefines an execution's active set, it should update the tracked scoreboard and the lane journals as one atomic replan step, preferably through `nlsdd-replan-active-set`, rather than editing only the manual scoreboard first.
 
 ## Lane Worktree Rules
 

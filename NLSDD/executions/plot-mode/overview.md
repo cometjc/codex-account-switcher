@@ -27,6 +27,10 @@
   - Plan: `NLSDD/executions/plot-mode/lane-4.md`
   - Worktree: `.worktrees/lane-4-panels`
 
+- [x] Lane 5: Plot Viewer Docs and Operator Flow
+  - Plan: `NLSDD/executions/plot-mode/lane-5.md`
+  - Worktree: `.worktrees/lane-5-docs`
+
 ## Current Progress
 
 - [x] Lane 1 first-round real Rust viewer handoff verification landed and passed spec + quality review.
@@ -44,14 +48,27 @@
 
 ## Current 4-Active-Lane Plan
 
-- [x] The third-round 4-active-lane refill has now closed for Lane 1, Lane 3, and Lane 4 with accepted lane-local commits.
-- [x] Lane 2 no longer needs an active slot by default:
-  - keep it parked unless chart/panels work later proves that nested `usage` decoding became a real runtime blocker
-- [x] Do not invent Lane 5 just to keep four slots busy; refill only when a lane has a real reviewable next item.
+- [x] The earlier handoff/chart/panel foundation rounds are integrated enough that the next 4a set can move beyond Lane 1-first refill.
+- [x] Lane 1 is effectively exhausted for now:
+  - keep it parked unless Rust viewer launch UX changes enough to justify fresh shell work
+- [x] Lane 2 is promoted back into the next active set for runtime navigation and focus-flow work:
+  - use it for left/right profile cycling plus panel-detail refresh behavior
+- [x] Lane 3 stays active for chart-side focus compatibility:
+  - keep chart rendering aligned with the richer focus/navigation behavior landing through Lane 2
+- [x] Lane 4 stays active for richer compare/recommendation panel content:
+  - use it to surface real routing recommendation details rather than only the first visible skeleton
+- [x] Lane 5 enters the lane pool as the fourth active slot:
+  - use it for README/operator-flow/run-instruction cleanup once the recovery baseline becomes the trusted local workflow
 - [x] Prefer the next queued work in this order:
-  - Lane 3 -> later left/right profile cycling or richer focus behavior only if plot UX still needs it
-  - Lane 4 -> README/doc polish only if panel wording changes again
-  - Lane 1 -> future shell polish only if Rust viewer launch UX changes again
+  - Lane 2 -> focus/navigation flow that updates chart and panel details together
+  - Lane 3 -> chart compatibility with richer focus and profile cycling
+  - Lane 4 -> recommendation / compare-panel richness with stable visible copy
+  - Lane 5 -> README and local run instructions for the recovery-baseline workflow
+
+## Runtime-State Note
+
+- [x] Manual lane planning now diverges from the currently recorded lane journals for lanes 2-4.
+- [x] Before dispatching the next 4a execution round, refresh or rewrite the lane journals so runtime tooling reflects the new manual active set instead of the stale recovery-branch dispatch state.
 
 ## Refill Rules
 

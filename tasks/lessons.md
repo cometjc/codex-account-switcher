@@ -24,3 +24,5 @@
 - 若 subagent 所在環境容易被 `git commit` 權限提示擋住，應把 commit 職責收回 main agent：subagent 只回傳完成的 MVC、驗證結果與 commit-ready 摘要，由 main agent/coordinator 執行 commit。
 - NLSDD tooling 在 linked worktree / recovery branch 中不應直接回退到 git common-dir 對應的 canonical repo root；要先找當前 worktree 自己的 `NLSDD` surface，否則 schedule / refresh / refill 會誤讀別條 branch 的 manual scoreboard 與 execution docs。
 - NLSDD 的 `execution root` 和 `.worktrees/...` 的 `worktree pool root` 可能不是同一個目錄；linked worktree 內應讀自己的 execution docs，但 lane worktree 路徑仍要回到 canonical repo root 解析。
+- 當 manual scoreboard 或 lane plan 重新定義下一輪 active set 時，不能只改 tracked 文件；若 lane journal 還留著舊 dispatch 狀態，`schedule/refill` 仍會被 runtime state 拉回舊真相，所以要在下一輪 dispatch 前同步 refresh 或重寫 lane journal。
+- NLSDD 下若 active/parked lane set 需要重排，應優先用原子 helper 同步 tracked scoreboard phase 與 lane journal；不要分兩步人工更新，否則 scheduler 會在中間窗口讀到雙真相。

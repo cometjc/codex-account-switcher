@@ -716,3 +716,112 @@ test('lane state recorder writes execution-aware journal files for coordinator t
   assert.equal(state.correctionCount, 3);
   assert.equal(state.updatedAt, '2026-03-21T04:20:00.000Z');
 });
+
+test('active-set replan helper updates tracked phases and lane journals atomically', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-replan-'));
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  fs.mkdirSync(path.join(root, 'NLSDD', 'executions', 'plot-mode'), {recursive: true});
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'scoreboard.md'),
+    `# NLSDD Scoreboard
+
+| Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| plot-mode | Lane 1 | Node contract + handoff | Future shell polish only if Rust viewer launch UX changes again | refill-ready | \`baa7b8e\` | \`npm run build\`; \`node --test tests/plot-snapshot.test.js\` | none | Re-activate only if shell UX changes | accepted |
+| plot-mode | Lane 2 | Rust runtime + boundary | Live profile/focus navigation coherence on the recovery baseline | parked | \`3b62c5b\` | \`cargo test\`; \`cargo check\` | none | Revisit stronger nested usage decode only if needed | should re-activate |
+| plot-mode | Lane 3 | Rust chart surface | Chart compatibility with richer focus and profile cycling | refill-ready | \`35c8351\` | \`cargo test render::chart\`; \`cargo check\` | none | Widen only if chart UX still needs it | accepted |
+`,
+    'utf8',
+  );
+
+  writeLaneState(root, 'plot-mode', 1, {
+    execution: 'plot-mode',
+    lane: 'Lane 1',
+    phase: 'refill-ready',
+    expectedNextPhase: 'implementing',
+    latestCommit: 'baa7b8e',
+    lastReviewerResult: 'PASS',
+    lastVerification: ['npm run build'],
+    blockedBy: null,
+    note: 'accepted lane 1 state',
+    correctionCount: 0,
+    updatedAt: '2026-03-21T07:00:00.000Z',
+  });
+  writeLaneState(root, 'plot-mode', 2, {
+    execution: 'plot-mode',
+    lane: 'Lane 2',
+    phase: 'implementing',
+    expectedNextPhase: 'spec-review-pending',
+    latestCommit: '19ebd40',
+    lastReviewerResult: null,
+    lastVerification: [],
+    blockedBy: null,
+    note: 'stale dispatch state',
+    correctionCount: 0,
+    updatedAt: '2026-03-21T07:00:00.000Z',
+  });
+  writeLaneState(root, 'plot-mode', 3, {
+    execution: 'plot-mode',
+    lane: 'Lane 3',
+    phase: 'implementing',
+    expectedNextPhase: 'spec-review-pending',
+    latestCommit: '19ebd40',
+    lastReviewerResult: null,
+    lastVerification: [],
+    blockedBy: null,
+    note: 'stale dispatch state',
+    correctionCount: 0,
+    updatedAt: '2026-03-21T07:00:00.000Z',
+  });
+
+  const {replanActiveSet} = freshRequire('NLSDD/scripts/nlsdd-replan-active-set.cjs');
+  replanActiveSet(root, {
+    execution: 'plot-mode',
+    active: ['Lane 2', 'Lane 3'],
+    parked: ['Lane 1'],
+    note: 'manual 4a replan',
+    'updated-at': '2026-03-21T08:00:00.000Z',
+  });
+
+  const scoreboardText = fs.readFileSync(path.join(root, 'NLSDD', 'scoreboard.md'), 'utf8');
+  assert.match(scoreboardText, /\| plot-mode \| Lane 1 \| Node contract \+ handoff \| Future shell polish only if Rust viewer launch UX changes again \| parked \|/);
+  assert.match(scoreboardText, /\| plot-mode \| Lane 2 \| Rust runtime \+ boundary \| Live profile\/focus navigation coherence on the recovery baseline \| queued \|/);
+  assert.match(scoreboardText, /\| plot-mode \| Lane 3 \| Rust chart surface \| Chart compatibility with richer focus and profile cycling \| queued \|/);
+
+  const lane1State = JSON.parse(
+    fs.readFileSync(path.join(root, 'NLSDD', 'state', 'plot-mode', 'lane-1.json'), 'utf8'),
+  );
+  const lane2State = JSON.parse(
+    fs.readFileSync(path.join(root, 'NLSDD', 'state', 'plot-mode', 'lane-2.json'), 'utf8'),
+  );
+  const lane3State = JSON.parse(
+    fs.readFileSync(path.join(root, 'NLSDD', 'state', 'plot-mode', 'lane-3.json'), 'utf8'),
+  );
+
+  assert.equal(lane1State.phase, 'parked');
+  assert.equal(lane1State.expectedNextPhase, null);
+  assert.equal(lane1State.latestCommit, 'baa7b8e');
+  assert.equal(lane1State.note, 'manual 4a replan');
+
+  assert.equal(lane2State.phase, 'queued');
+  assert.equal(lane2State.expectedNextPhase, 'implementing');
+  assert.equal(lane2State.latestCommit, '3b62c5b');
+  assert.deepEqual(lane2State.lastVerification, ['cargo test', 'cargo check']);
+
+  assert.equal(lane3State.phase, 'queued');
+  assert.equal(lane3State.expectedNextPhase, 'implementing');
+  assert.equal(lane3State.latestCommit, '35c8351');
+
+  const {computeExecutionSchedule} = freshRequire('NLSDD/scripts/nlsdd-lib.cjs');
+  const schedule = computeExecutionSchedule(root, 'plot-mode', 4);
+  assert.equal(schedule.activeRows.length, 0);
+  assert.deepEqual(
+    schedule.queuedRows.map((row) => row.Lane),
+    ['Lane 2', 'Lane 3'],
+  );
+  assert.deepEqual(
+    schedule.refillReadyRows.map((row) => row.Lane),
+    [],
+  );
+});

@@ -79,6 +79,7 @@ Use this file to keep NLSDD execution predictable, low-conflict, and easy to rev
 - If correction loops exceed 2 rounds, escalate to coordinator arbitration.
 - When coordinator records a new lane state after review, correction, or blockage, prefer `node NLSDD/scripts/nlsdd-record-lane-state.cjs ...` over hand-editing journal JSON.
 - When coordinator needs a refreshed scoreboard snapshot, prefer `npm run nlsdd:scoreboard:refresh` and inspect `NLSDD/state/scoreboard.runtime.md` rather than staging runtime churn from the tracked scoreboard.
+- When coordinator changes the active/parked lane set for an execution, prefer `npm run nlsdd:active-set:replan -- --execution <id> --active ... --parked ...` so tracked `Phase` values and lane journals stay aligned.
 - If the environment may show permission prompts for `git commit` or similar lane-finalizing steps, implementer assignments should ask the sub-agent to report `READY_TO_COMMIT` with verification results and commit-ready handoff details rather than waiting silently at the end of the lane item.
 - Do not keep a completed MVC step uncommitted just because the lane may continue later; later refill items should start from the committed lane state, not from piled-up local progress.
 

@@ -14,6 +14,7 @@
     "nlsdd:scoreboard:refresh": "node NLSDD/scripts/nlsdd-refresh-scoreboard.cjs",
     "nlsdd:probe": "node NLSDD/scripts/nlsdd-probe-lane.cjs",
     "nlsdd:state:record": "node NLSDD/scripts/nlsdd-record-lane-state.cjs",
+    "nlsdd:active-set:replan": "node NLSDD/scripts/nlsdd-replan-active-set.cjs",
     "nlsdd:refill:suggest": "node NLSDD/scripts/nlsdd-suggest-refill.cjs",
     "nlsdd:schedule:suggest": "node NLSDD/scripts/nlsdd-suggest-schedule.cjs",
     "nlsdd:compose": "node NLSDD/scripts/nlsdd-compose-message.cjs",

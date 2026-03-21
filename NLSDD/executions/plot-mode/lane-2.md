@@ -15,7 +15,7 @@
 - [x] Align Rust `serde` schema with the TypeScript snapshot contract
 - [x] Add helpers for current/active profile lookup
 - [x] Add a source-level contract test guarding Rust/TS schema alignment
-- [ ] Tighten typed decoding for nested `usage` payload only when the viewer truly needs it
+- [x] Leave stronger nested `usage` decoding deferred unless another lane proves it is a real runtime blocker
 
 ## V - View / Shared Runtime Boundary
 
@@ -30,6 +30,7 @@
 - [x] Keep profile/focus navigation flowing through app state
 - [x] Add scaffold regression tests for crate/runtime surface
 - [x] Add a runtime smoke path that proves snapshot load plus clean quit against a real fixture
+- [ ] Tighten live profile/focus navigation so chart/panels detail refresh stays coherent when left/right or tab/shift-tab move focus
 
 ## Current Lane Status
 
@@ -37,10 +38,12 @@
 - [x] Second-round boundary API stabilization implementer commit landed
 - [x] Close the current correction / re-review loop for second-round commit `3b62c5b`
 - [x] Confirm by lane-local no-op review that stronger nested `usage` decoding is not yet required by chart/panels lanes
-- [x] This lane occupies one active slot in the execution's lane pool; coordinator may keep extra lanes queued or parked until a slot opens.
+- [ ] Reactivate this lane in the next 4a set for runtime navigation/focus-flow work on top of the recovery baseline
+- [x] This lane remains part of the execution lane pool; it is no longer active for speculative decode deepening, but it should be promoted first when the next runtime-navigation round starts.
 
 ## Refill Order
 
 - [x] First refill target after the current item: remaining Controller/runtime reliability work if any appear
 - [x] Then consume remaining View/runtime-boundary hardening
-- [x] Park the lane after the current correction closes unless another lane proves that nested `usage` decoding is now a real runtime blocker
+- [ ] Next active refill: make left/right profile cycling and focus changes update chart/panel details coherently on the recovery baseline
+- [ ] Only after that revisit stronger nested `usage` decoding if another lane proves it became a real runtime blocker
