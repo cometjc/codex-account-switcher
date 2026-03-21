@@ -63,6 +63,33 @@ function buildRecentThreadsSection(threads) {
   return lines.join('\n');
 }
 
+function buildRuntimePreamble(lines, headerIndex) {
+  const preamble = lines.slice(0, headerIndex);
+  const rewritten = preamble.map((line) => {
+    if (line.startsWith('> This tracked scoreboard keeps only coordinator-owned manual fields.')) {
+      return '> This runtime scoreboard expands the tracked manual scoreboard with derived lane state, probe results, and recent Codex thread activity.';
+    }
+    return line;
+  });
+
+  const hasRuntimeExplanation = rewritten.some((line) =>
+    line.includes('This runtime scoreboard expands the tracked manual scoreboard'),
+  );
+  if (hasRuntimeExplanation) {
+    return rewritten;
+  }
+
+  const insertion = [
+    '',
+    '> This runtime scoreboard expands the tracked manual scoreboard with derived lane state, probe results, and recent Codex thread activity.',
+    '',
+  ];
+  if (rewritten.length === 0) {
+    return ['# NLSDD Scoreboard', ...insertion];
+  }
+  return [rewritten[0], ...insertion, ...rewritten.slice(1)];
+}
+
 function updateScoreboard() {
   const scoreboardText = fs.readFileSync(scoreboardPath, 'utf8');
   const table = loadScoreboardTable(scoreboardText, scoreboardPath);
@@ -95,7 +122,7 @@ function updateScoreboard() {
   );
   const recentThreadsSection = buildRecentThreadsSection(readRecentThreads(projectRoot, 8));
   const nextLines = [
-    ...table.lines.slice(0, table.headerIndex),
+    ...buildRuntimePreamble(table.lines, table.headerIndex),
     joinRow(runtimeColumns),
     joinRow(runtimeColumns.map(() => '---')),
     ...renderedRows,
@@ -115,4 +142,5 @@ if (require.main === module) {
 module.exports = {
   updateScoreboard,
   buildRecentThreadsSection,
+  buildRuntimePreamble,
 };

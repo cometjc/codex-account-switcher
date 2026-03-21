@@ -281,6 +281,11 @@ test('scoreboard refresh v2 backfills effective phase and lane event metadata', 
   const trackedAfter = fs.readFileSync(process.env.NLSDD_SCOREBOARD_PATH, 'utf8');
   const runtimeText = fs.readFileSync(process.env.NLSDD_RUNTIME_SCOREBOARD_PATH, 'utf8');
   assert.equal(trackedAfter, trackedBefore);
+  assert.match(
+    runtimeText,
+    /This runtime scoreboard expands the tracked manual scoreboard with derived lane state, probe results, and recent Codex thread activity\./,
+  );
+  assert.doesNotMatch(runtimeText, /This tracked scoreboard keeps only coordinator-owned manual fields\./);
   assert.match(runtimeText, /\| plot-mode \| Lane 1 \|/);
   assert.match(runtimeText, /\| quality-review-pending \|/);
   assert.match(runtimeText, /PASS · Meitner · 2026-03-21 03:00:00Z/);
