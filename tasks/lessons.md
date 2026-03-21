@@ -20,4 +20,7 @@
 - `spec/NLSDD/` 只放已落地且已驗證的 NLSDD 定義；execution、scoreboard、scripts 與執行流程文件應放在 `NLSDD/`，不要把 runtime artifacts 收進 spec。
 - 會被 refresh / probe / agent activity 持續改寫的 NLSDD runtime 輸出，應放在 `NLSDD/state/` 並加入 ignore；不要讓 auto-refresh 直接覆寫 tracked 的 `NLSDD/scoreboard.md`。
 - 若執行環境在 subagent `git commit` 時會跳 permission prompt，不能把後續沉默直接解讀成 agent 沒反應；NLSDD 應要求 subagent 在 commit 前主動回 `READY_TO_COMMIT`，coordinator probe 也要把 permission gate 納入判讀。
+- NLSDD 下只要 lane-local MVC step 已完成且驗證通過，就應直接 commit；不要把多個已完成 MVC step 累積在同一個未提交 worktree，否則 review、probe 與 refill 邊界都會變模糊。
+- 若 subagent 所在環境容易被 `git commit` 權限提示擋住，應把 commit 職責收回 main agent：subagent 只回傳完成的 MVC、驗證結果與 commit-ready 摘要，由 main agent/coordinator 執行 commit。
 - NLSDD tooling 在 linked worktree / recovery branch 中不應直接回退到 git common-dir 對應的 canonical repo root；要先找當前 worktree 自己的 `NLSDD` surface，否則 schedule / refresh / refill 會誤讀別條 branch 的 manual scoreboard 與 execution docs。
+- NLSDD 的 `execution root` 和 `.worktrees/...` 的 `worktree pool root` 可能不是同一個目錄；linked worktree 內應讀自己的 execution docs，但 lane worktree 路徑仍要回到 canonical repo root 解析。

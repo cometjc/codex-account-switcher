@@ -31,7 +31,7 @@
 - Every reviewer or implementer handoff that changes lane state should include the next expected phase whenever it is knowable.
 - Examples:
   - implementer `DONE` => `next expected phase: spec-review-pending`
-  - implementer `READY_TO_COMMIT` => `next expected phase: commit-confirmation`
+  - implementer `READY_TO_COMMIT` => `next expected phase: coordinator-commit-pending`
   - spec `PASS` => `next expected phase: quality-review-pending`
   - quality `PASS` => `next expected phase: refill-ready`
   - `BLOCKED` => `next expected phase: blocked`
@@ -44,7 +44,10 @@
   - verification already completed
   - whether the worktree is otherwise clean
   - the exact gate it expects to hit
+  - a proposed commit title
+  - an optional commit body summary when the change is not single-purpose
 - Coordinator should treat `READY_TO_COMMIT` as a live lane state, not as an unresponsive thread.
+- Under this repo's default NLSDD flow, `READY_TO_COMMIT` means the sub-agent passes the commit-ready MVC handoff back to the main agent/coordinator, and the main agent performs the commit to avoid permission-block stalls.
 
 ## Blocker Reporting
 
@@ -68,6 +71,7 @@ These templates may be generated through `node NLSDD/scripts/nlsdd-compose-messa
 - acceptance intent
 - required verification
 - required handoff format
+- explicit instruction that commit-ready MVC work should be handed back to coordinator if sub-agent commit may be gated
 
 ### Spec Review
 
@@ -87,7 +91,7 @@ These templates may be generated through `node NLSDD/scripts/nlsdd-compose-messa
 - cite the failing commit sha
 - forward the exact reviewer finding
 - restate accepted write scope
-- require a new commit sha plus verification results
+- require either a new commit sha plus verification results, or a fresh `READY_TO_COMMIT` handoff package for coordinator commit
 - restate the next expected phase after the correction lands
 
 ### Blocker Escalation

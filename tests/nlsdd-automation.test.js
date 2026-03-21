@@ -404,6 +404,73 @@ test('schedule helper prefers the current linked worktree NLSDD surface over the
   }
 });
 
+test('lane plans in a linked worktree still resolve shared .worktrees paths from the canonical worktree pool root', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-pool-root-'));
+  fs.mkdirSync(path.join(root, '.worktrees'), {recursive: true});
+  run('git', ['init', '-q'], root);
+  run('git', ['config', 'user.name', 'Codex Test'], root);
+  run('git', ['config', 'user.email', 'codex@example.com'], root);
+  fs.mkdirSync(path.join(root, 'NLSDD', 'executions', 'plot-mode'), {recursive: true});
+  fs.writeFileSync(path.join(root, 'NLSDD', 'scoreboard.md'), '# root scoreboard\n', 'utf8');
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-1.md'),
+    `# Lane 1
+
+> NLSDD worktree: \`.worktrees/lane-1-node\`
+>
+> Lane-local verification:
+> \`echo root\`
+
+## M - Model
+
+- [ ] Root item
+`,
+    'utf8',
+  );
+  run('git', ['add', '.'], root);
+  run('git', ['commit', '-m', 'init'], root);
+  run('git', ['worktree', 'add', path.join(root, '.worktrees', 'lane-1-node'), '-b', 'lane-1-node'], root);
+
+  const recoveryRoot = path.join(root, '.worktrees', 'recovery');
+  run('git', ['worktree', 'add', recoveryRoot, '-b', 'recovery'], root);
+  fs.mkdirSync(path.join(recoveryRoot, 'NLSDD', 'executions', 'plot-mode'), {recursive: true});
+  fs.writeFileSync(path.join(recoveryRoot, 'NLSDD', 'scoreboard.md'), '# recovery scoreboard\n', 'utf8');
+  fs.writeFileSync(
+    path.join(recoveryRoot, 'NLSDD', 'executions', 'plot-mode', 'lane-1.md'),
+    `# Lane 1
+
+> NLSDD worktree: \`.worktrees/lane-1-node\`
+>
+> Lane-local verification:
+> \`echo recovery\`
+
+## M - Model
+
+- [ ] Recovery item
+`,
+    'utf8',
+  );
+
+  const originalCwd = process.cwd();
+  const modulePath = path.join(originalCwd, 'NLSDD', 'scripts', 'nlsdd-lib.cjs');
+  try {
+    delete process.env.NLSDD_PROJECT_ROOT;
+    delete process.env.NLSDD_WORKTREE_POOL_ROOT;
+    process.chdir(recoveryRoot);
+    delete require.cache[require.resolve(modulePath)];
+    const {loadLanePlan, resolveProjectRoot, resolveWorktreePoolRoot} = require(modulePath);
+    const projectRoot = resolveProjectRoot();
+    const lanePlan = loadLanePlan(projectRoot, 'plot-mode', 'Lane 1');
+
+    assert.equal(projectRoot, recoveryRoot);
+    assert.equal(resolveWorktreePoolRoot(projectRoot), root);
+    assert.equal(lanePlan.worktreePath, path.join(root, '.worktrees', 'lane-1-node'));
+    assert.equal(lanePlan.actionableItems[0].text, 'Recovery item');
+  } finally {
+    process.chdir(originalCwd);
+  }
+});
+
 test('probe helper reports source changes, artifact noise, and verification commands', () => {
   const fixture = setupNlsddFixture();
   writeLaneState(fixture.root, 'plot-mode', 1, {
@@ -590,8 +657,31 @@ test('message helper renders correction-loop text without opening direct reviewe
   assert.match(message, /Lane: Lane 1/);
   assert.match(message, /Failing commit: 1d29843/);
   assert.match(message, /Reviewer finding: FAIL \[src\/commands\/root\.ts:10\] missing retry hint/);
-  assert.match(message, /Return a new commit sha and verification results/);
+  assert.match(
+    message,
+    /Return a new commit sha and verification results, or READY_TO_COMMIT with a commit-ready summary if coordinator commit is required/,
+  );
   assert.doesNotMatch(message, /talk directly to reviewer/i);
+});
+
+test('message helper tells implementers to hand commit-ready mvc back to coordinator when commit may be gated', () => {
+  const {composeMessage} = freshRequire('NLSDD/scripts/nlsdd-compose-message.cjs');
+  const message = composeMessage({
+    phase: 'implementer-assignment',
+    execution: 'plot-mode',
+    lane: '4',
+    item: 'Recommendation-rich compare panel',
+    scope: 'rust/plot-viewer/src/render/panels.rs and related tests',
+    verification: 'cargo test --manifest-path rust/plot-viewer/Cargo.toml render::panels',
+  });
+
+  assert.match(message, /Execution: plot-mode/);
+  assert.match(message, /Lane: Lane 4/);
+  assert.match(message, /commit sha or READY_TO_COMMIT package/);
+  assert.match(
+    message,
+    /If sub-agent commit may be gated, hand back READY_TO_COMMIT with intended commit title\/body summary so coordinator can commit for you/,
+  );
 });
 
 test('lane state recorder writes execution-aware journal files for coordinator tooling', () => {

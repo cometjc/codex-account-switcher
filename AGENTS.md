@@ -19,6 +19,7 @@
 - Write rules for yourself that prevent the same mistake
 - Ruthlessly iterate on these lessons until mistake rate drops
 - Review lessons at session start for relevant project
+- 若此次請求本身是規則新增或規則修正，且正式規則文件已更新並完成驗證，預設直接 commit；不要停在「這批還沒 commit」等待額外提醒
 
 ---
 

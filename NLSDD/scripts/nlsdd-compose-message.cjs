@@ -39,7 +39,8 @@ function composeMessage(args) {
         `Lane item intent: ${context.item}`,
         `Write scope: ${context.scope}`,
         `Required verification: ${context.verification}`,
-        'Required handoff format: lane name, MVC step completed, commit sha, files changed, verification run, open concerns.',
+        'Required handoff format: lane name, MVC step completed, commit sha or READY_TO_COMMIT package, files changed, verification run, open concerns.',
+        'If sub-agent commit may be gated, hand back READY_TO_COMMIT with intended commit title/body summary so coordinator can commit for you.',
       ].join('\n');
     case 'spec-review':
       return [
@@ -70,7 +71,7 @@ function composeMessage(args) {
         `Accepted write scope: ${context.scope}`,
         `Relevant files: ${context.files}`,
         `Required verification: ${context.verification}`,
-        'Return a new commit sha and verification results.',
+        'Return a new commit sha and verification results, or READY_TO_COMMIT with a commit-ready summary if coordinator commit is required.',
       ].join('\n');
     default:
       throw new Error(
