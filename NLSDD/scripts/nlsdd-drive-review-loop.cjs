@@ -1,0 +1,194 @@
+#!/usr/bin/env node
+
+const fs = require('node:fs');
+const {
+  loadLanePlan,
+  loadScoreboardTable,
+  loadLaneState,
+  resolvePreferredScoreboardPath,
+  resolveProjectRoot,
+} = require('./nlsdd-lib.cjs');
+const {composeMessage} = require('./nlsdd-compose-message.cjs');
+
+function parseArgs(argv) {
+  const args = {};
+  for (let index = 0; index < argv.length; index += 1) {
+    const value = argv[index];
+    if (value === '--execution') {
+      args.execution = argv[index + 1];
+      index += 1;
+    } else if (value === '--lane') {
+      args.lane = `Lane ${argv[index + 1]}`.replace(/^Lane\s+Lane\s+/, 'Lane ');
+      index += 1;
+    } else if (value === '--json') {
+      args.json = true;
+    }
+  }
+  return args;
+}
+
+function phaseForAction(row, laneState) {
+  return (laneState?.phase || row['Effective phase'] || row.Phase || '').trim();
+}
+
+function buildContext(projectRoot, execution, row) {
+  const lanePlan = loadLanePlan(projectRoot, execution, row.Lane);
+  const laneState = loadLaneState(projectRoot, execution, row.Lane);
+  return {
+    row,
+    lanePlan,
+    laneState,
+    phase: phaseForAction(row, laneState),
+    item: row['Current item'],
+    commit:
+      laneState?.latestCommit ||
+      String(row['Item commit'] || '')
+        .replaceAll('`', '')
+        .trim() ||
+      'n/a',
+    scope:
+      lanePlan?.ownershipEntries?.join('; ') || 'Use the lane ownership family only.',
+    verification:
+      lanePlan?.verificationCommands?.join('; ') || 'Run the lane-local verification commands.',
+  };
+}
+
+function correctionReason(context) {
+  return (
+    context.laneState?.note ||
+    context.row['Latest event'] ||
+    context.row.Notes ||
+    'n/a'
+  );
+}
+
+function buildAction(context) {
+  switch (context.phase) {
+    case 'spec-review-pending':
+      return {
+        action: 'spec-review',
+        message: composeMessage({
+          phase: 'spec-review',
+          execution: context.row.Execution,
+          lane: context.row.Lane,
+          item: context.item,
+          commit: context.commit,
+        }),
+      };
+    case 'quality-review-pending':
+      return {
+        action: 'quality-review',
+        message: composeMessage({
+          phase: 'quality-review',
+          execution: context.row.Execution,
+          lane: context.row.Lane,
+          item: context.item,
+          commit: context.commit,
+        }),
+      };
+    case 'correction':
+      return {
+        action: 'correction-loop',
+        message: composeMessage({
+          phase: 'correction-loop',
+          execution: context.row.Execution,
+          lane: context.row.Lane,
+          item: context.item,
+          commit: context.commit,
+          scope: context.scope,
+          verification: context.verification,
+          files: context.scope,
+          'fail-reason': correctionReason(context),
+        }),
+      };
+    case 'coordinator-commit-pending':
+    case 'READY_TO_COMMIT':
+    case 'ready-to-commit':
+      return {
+        action: 'coordinator-commit-needed',
+        message: [
+          `Execution: ${context.row.Execution}`,
+          `Lane: ${context.row.Lane}`,
+          `Lane item: ${context.item}`,
+          `Commit-ready handoff: ${context.commit}`,
+          `Scope: ${context.scope}`,
+          `Verification: ${context.verification}`,
+          `Latest note: ${context.laneState?.note || 'n/a'}`,
+        ].join('\n'),
+      };
+    default:
+      return null;
+  }
+}
+
+function driveReviewLoop(projectRoot, execution, lane = null) {
+  const scoreboardPath = resolvePreferredScoreboardPath(projectRoot);
+  const scoreboardText = fs.readFileSync(scoreboardPath, 'utf8');
+  const table = loadScoreboardTable(scoreboardText, scoreboardPath);
+  const rows = table.objects.filter(
+    (row) => row.Execution === execution && (!lane || row.Lane === lane),
+  );
+
+  return rows
+    .map((row) => {
+      const context = buildContext(projectRoot, execution, row);
+      const action = buildAction(context);
+      if (!action) {
+        return null;
+      }
+      return {
+        execution,
+        lane: row.Lane,
+        phase: context.phase,
+        item: context.item,
+        commit: context.commit,
+        action: action.action,
+        message: action.message,
+      };
+    })
+    .filter(Boolean);
+}
+
+function renderActions(actions) {
+  if (actions.length === 0) {
+    return 'Review actions: none';
+  }
+
+  return [
+    'Review actions:',
+    ...actions.flatMap((entry) => [
+      `- ${entry.lane} · ${entry.action} · ${entry.item}`,
+      ...entry.message.split('\n').map((line) => `  ${line}`),
+    ]),
+  ].join('\n');
+}
+
+function main() {
+  const args = parseArgs(process.argv.slice(2));
+  if (!args.execution) {
+    throw new Error(
+      'Usage: node NLSDD/scripts/nlsdd-drive-review-loop.cjs --execution <id> [--lane <n>] [--json]',
+    );
+  }
+
+  const actions = driveReviewLoop(resolveProjectRoot(), args.execution, args.lane);
+  if (args.json) {
+    process.stdout.write(`${JSON.stringify(actions, null, 2)}\n`);
+    return;
+  }
+  process.stdout.write(`${renderActions(actions)}\n`);
+}
+
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  parseArgs,
+  phaseForAction,
+  buildContext,
+  correctionReason,
+  buildAction,
+  driveReviewLoop,
+  renderActions,
+};

@@ -792,3 +792,15 @@
 - 新增 [`NLSDD/scripts/nlsdd-launch-active-set.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-launch-active-set.cjs) 與 `npm run nlsdd:launch`，讓 coordinator 用一個指令就能拿到 `completed lanes`、`promoted lanes`、`idle slots` 與每條 promoted lane 的 handoff message。
 - [`NLSDD/scripts/nlsdd-lib.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-lib.cjs) 的 lane plan parser 現在會保留 `Ownership family`，避免 assignment bundle 只能回 generic scope。
 - regression 在 [tests/nlsdd-automation.test.js](/home/jethro/repo/side-projects/codex-account-switcher/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-launch-active-set.cjs --execution plot-mode --json --dry-run` 已通過。
+
+# 2026-03-21 NLSDD review-loop driver
+
+- [x] 新增 review helper，根據 lane 當前 phase 自動整理下一步 coordinator action
+- [x] 支援 `spec-review-pending`、`quality-review-pending`、`correction` 與 `coordinator-commit-pending`
+- [x] 補 regression test，鎖住 review helper 會產出正確的 review / correction bundle
+
+## Review
+
+- 新增 [`NLSDD/scripts/nlsdd-drive-review-loop.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-drive-review-loop.cjs) 與 `npm run nlsdd:review`，讓 coordinator 不必逐條掃 lane docs/journal，就能拿到下一步 review action。
+- helper 目前會優先吃 lane journal phase，再回退到 runtime/tracked scoreboard phase，並重用既有的 `spec-review`、`quality-review`、`correction-loop` 模板；若 lane 已進 `coordinator-commit-pending`，則輸出 commit intake bundle。
+- regression 在 [tests/nlsdd-automation.test.js](/home/jethro/repo/side-projects/codex-account-switcher/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-drive-review-loop.cjs --execution plot-mode --json` 已通過。

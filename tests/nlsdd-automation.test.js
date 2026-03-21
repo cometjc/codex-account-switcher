@@ -1160,3 +1160,103 @@ test('launch helper returns assignment bundles for newly promoted lanes', () => 
   assert.match(result.assignments[0].message, /Lane item intent: Runtime compare seam follow-up/);
   assert.match(result.assignments[0].message, /Write scope: rust\/plot-viewer\/src\/render\/mod\.rs/);
 });
+
+test('review loop driver returns coordinator-ready bundles for review and correction phases', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-review-'));
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  fs.mkdirSync(path.join(root, 'NLSDD', 'executions', 'plot-mode'), {recursive: true});
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-2.md'),
+    `# Lane 2
+
+> Ownership family:
+> \`rust/plot-viewer/src/render/mod.rs\`
+>
+> NLSDD worktree: \`.worktrees/lane-2-runtime\`
+>
+> Lane-local verification:
+> \`cargo test --manifest-path rust/plot-viewer/Cargo.toml\`
+> \`cargo check --manifest-path rust/plot-viewer/Cargo.toml\`
+
+## V - View
+
+- [ ] Runtime compare seam follow-up
+`,
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-4.md'),
+    `# Lane 4
+
+> Ownership family:
+> \`rust/plot-viewer/src/render/panels.rs\`
+>
+> NLSDD worktree: \`.worktrees/lane-4-panels\`
+>
+> Lane-local verification:
+> \`cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path rust/plot-viewer/Cargo.toml\`
+
+## C - Controller
+
+- [ ] Recommendation-rich Compare panel on the recovery baseline
+`,
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'scoreboard.md'),
+    `# NLSDD Scoreboard
+
+| Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| plot-mode | Lane 2 | Rust runtime + boundary | Runtime compare seam follow-up | spec-review-pending | \`abc1234\` | \`cargo test --manifest-path rust/plot-viewer/Cargo.toml\` | none | none | spec row |
+| plot-mode | Lane 4 | Rust panels + docs | Recommendation-rich Compare panel on the recovery baseline | correction | \`def5678\` | \`cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path rust/plot-viewer/Cargo.toml\` | none | none | correction row |
+`,
+    'utf8',
+  );
+
+  writeLaneState(root, 'plot-mode', 2, {
+    execution: 'plot-mode',
+    lane: 'Lane 2',
+    phase: 'spec-review-pending',
+    expectedNextPhase: 'quality-review-pending',
+    latestCommit: 'abc1234',
+    lastReviewerResult: null,
+    lastVerification: [
+      'cargo test --manifest-path rust/plot-viewer/Cargo.toml',
+      'cargo check --manifest-path rust/plot-viewer/Cargo.toml',
+    ],
+    blockedBy: null,
+    note: 'spec review next',
+    correctionCount: 0,
+    updatedAt: '2026-03-21T10:00:00.000Z',
+  });
+  writeLaneState(root, 'plot-mode', 4, {
+    execution: 'plot-mode',
+    lane: 'Lane 4',
+    phase: 'correction',
+    expectedNextPhase: 'spec-review-pending',
+    latestCommit: 'def5678',
+    lastReviewerResult: 'FAIL',
+    lastVerification: [
+      'cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path rust/plot-viewer/Cargo.toml',
+    ],
+    blockedBy: null,
+    note: 'Compare panel still re-derives label heuristics instead of consuming runtime-owned payload.',
+    correctionCount: 1,
+    updatedAt: '2026-03-21T10:05:00.000Z',
+  });
+
+  const {driveReviewLoop} = freshRequire('NLSDD/scripts/nlsdd-drive-review-loop.cjs');
+  const result = driveReviewLoop(root, 'plot-mode');
+
+  assert.equal(result.length, 2);
+  assert.equal(result[0].lane, 'Lane 2');
+  assert.equal(result[0].action, 'spec-review');
+  assert.match(result[0].message, /Review target commit: abc1234/);
+
+  assert.equal(result[1].lane, 'Lane 4');
+  assert.equal(result[1].action, 'correction-loop');
+  assert.match(result[1].message, /Reviewer finding: Compare panel still re-derives label heuristics/);
+  assert.match(result[1].message, /Accepted write scope: rust\/plot-viewer\/src\/render\/panels\.rs/);
+});
