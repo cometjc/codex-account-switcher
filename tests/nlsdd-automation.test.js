@@ -443,6 +443,44 @@ test('schedule suggestion prefers lane journal phase over stale scoreboard phase
   assert.equal(schedule.queuedRows.some((row) => row.Lane === 'Lane 5'), false);
 });
 
+test('schedule and refill helpers prefer runtime scoreboard when present', () => {
+  const fixture = setupNlsddFixture();
+  const runtimeScoreboardPath = path.join(
+    fixture.root,
+    'NLSDD',
+    'state',
+    'scoreboard.runtime.md',
+  );
+  fs.mkdirSync(path.dirname(runtimeScoreboardPath), {recursive: true});
+  fs.writeFileSync(
+    runtimeScoreboardPath,
+    `# NLSDD Scoreboard
+
+| Execution | Lane | Ownership | Current item | Phase | Effective phase | Item commit | Branch HEAD | Last verification | Last probe | Latest event | Correction count | Last activity | Blocked by | Next refill target | Noise | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| plot-mode | Lane 1 | Node contract + handoff | Viewer launch confidence / shell messaging | queued | refill-ready | \`abc1234\` | \`abc1234\` | \`git status --short\` | n/a | PASS · runtime · 2026-03-21 03:40:00Z | 0 | 2026-03-21 03:40:00Z | none | Tighten snapshot builder semantics when real 7d history evolves | none | runtime row |
+`,
+    'utf8',
+  );
+
+  process.env.NLSDD_PROJECT_ROOT = fixture.root;
+  process.env.NLSDD_RUNTIME_SCOREBOARD_PATH = runtimeScoreboardPath;
+
+  const {computeExecutionSchedule} = freshRequire('NLSDD/scripts/nlsdd-lib.cjs');
+  const {suggestRefill} = freshRequire('NLSDD/scripts/nlsdd-suggest-refill.cjs');
+
+  const schedule = computeExecutionSchedule(fixture.root, 'plot-mode', 4);
+  const suggestion = suggestRefill(fixture.root, 'plot-mode', 'Lane 1');
+
+  assert.equal(schedule.refillReadyRows.some((row) => row.Lane === 'Lane 1'), true);
+  assert.equal(schedule.queuedRows.some((row) => row.Lane === 'Lane 1'), false);
+  assert.equal(suggestion.outcome, 'refill-target');
+  assert.equal(
+    suggestion.nextItem,
+    'Tighten snapshot builder semantics when real 7d history evolves',
+  );
+});
+
 test('message helper renders correction-loop text without opening direct reviewer channels', () => {
   const {composeMessage} = freshRequire('NLSDD/scripts/nlsdd-compose-message.cjs');
   const message = composeMessage({

@@ -2,9 +2,8 @@
 
 const {
   loadScoreboardTable,
-  readRecentThreads,
   resolveProjectRoot,
-  resolveScoreboardPath,
+  resolvePreferredScoreboardPath,
   findNextRefillItem,
 } = require('./nlsdd-lib.cjs');
 
@@ -26,8 +25,9 @@ function parseArgs(argv) {
 }
 
 function suggestRefill(projectRoot, execution, lane = null) {
-  const scoreboardText = require('node:fs').readFileSync(resolveScoreboardPath(projectRoot), 'utf8');
-  const table = loadScoreboardTable(scoreboardText, resolveScoreboardPath(projectRoot));
+  const scoreboardPath = resolvePreferredScoreboardPath(projectRoot);
+  const scoreboardText = require('node:fs').readFileSync(scoreboardPath, 'utf8');
+  const table = loadScoreboardTable(scoreboardText, scoreboardPath);
   const candidates = table.objects.filter((row) => row.Execution === execution);
   const rows = lane ? candidates.filter((row) => row.Lane === lane) : candidates;
 

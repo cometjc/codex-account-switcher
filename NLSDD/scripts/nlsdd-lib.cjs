@@ -53,6 +53,14 @@ function resolveRuntimeScoreboardPath(projectRoot = resolveProjectRoot()) {
   return path.join(projectRoot, 'NLSDD', 'state', 'scoreboard.runtime.md');
 }
 
+function resolvePreferredScoreboardPath(projectRoot = resolveProjectRoot()) {
+  const runtimeScoreboardPath = resolveRuntimeScoreboardPath(projectRoot);
+  if (fs.existsSync(runtimeScoreboardPath)) {
+    return runtimeScoreboardPath;
+  }
+  return resolveScoreboardPath(projectRoot);
+}
+
 function resolveCodexStateDbPath() {
   return process.env.CODEX_STATE_DB_PATH || path.join(os.homedir(), '.codex', 'state_5.sqlite');
 }
@@ -625,8 +633,9 @@ function phaseIsDispatchable(phase) {
 }
 
 function computeExecutionSchedule(projectRoot, execution, maxActiveThreads = 4) {
-  const scoreboardText = fs.readFileSync(resolveScoreboardPath(projectRoot), 'utf8');
-  const table = loadScoreboardTable(scoreboardText, resolveScoreboardPath(projectRoot));
+  const scoreboardPath = resolvePreferredScoreboardPath(projectRoot);
+  const scoreboardText = fs.readFileSync(scoreboardPath, 'utf8');
+  const table = loadScoreboardTable(scoreboardText, scoreboardPath);
   const rows = table.objects.filter((row) => row.Execution === execution);
 
   const enrichedRows = rows.map((row) => {
@@ -680,6 +689,7 @@ module.exports = {
   resolveProjectRoot,
   resolveScoreboardPath,
   resolveRuntimeScoreboardPath,
+  resolvePreferredScoreboardPath,
   resolveCodexStateDbPath,
   resolveCodexSessionsRoot,
   run,
