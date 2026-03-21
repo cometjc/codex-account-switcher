@@ -10,7 +10,7 @@
 - `scripts/` 放 `NLSDD` 執行輔助腳本；若路徑或輸出格式變更，需同步更新 `package.json` scripts、tests 與相關文件。
 - 若要記錄執行期 insight，優先使用 `NLSDD/scripts/nlsdd-record-insight.cjs`；不要把這類動態觀察只留在 thread history 裡。
 - 若要記錄任何會改變 lane state 的 handoff，優先使用 `NLSDD/scripts/nlsdd-envelope.cjs`；`nlsdd-record-lane-state.cjs` 與 `nlsdd-record-insight.cjs` 只保留為相容 wrapper。
-- 若 `NLSDD` flow 的 prompt 包含 `review`，除了看 lane state / reviewer 結果外，也要一併檢視並規劃處理 `execution-insights` journal；至少要看 open / adopted insights 是否需要升級成 lane item、回寫 lesson，或標記為 resolved / rejected。
+- 若工作正處於 `NLSDD` 階段，或剛完成 `NLSDD` 階段，而 prompt 包含 `review`，除了看 lane state / reviewer 結果外，也要一併檢視並規劃處理 `execution-insights` journal；至少要看 open / adopted insights 是否需要升級成 lane item、回寫 lesson，或標記為 resolved / rejected。
 - 若要重排某個 execution 的 active/parked lane set，優先使用 `NLSDD/scripts/nlsdd-replan-active-set.cjs`，不要只改 tracked scoreboard 而忘記同步 lane journal。
 - 若只是要跑一輪低判斷成本的 lane 調度，優先使用 `NLSDD/scripts/nlsdd-run-cycle.cjs`；它應一次完成 stale lane 收尾、runtime refresh、下一批 lane promotion，並回傳完成/派送/閒置 slot 狀態。
 - 若要把同一輪 cycle 的 promotion 直接轉成 coordinator-ready implementer assignment，優先使用 `NLSDD/scripts/nlsdd-launch-active-set.cjs`；它應在 cycle 之後回傳每條 promoted lane 的 scope、verification 與可直接轉發的 handoff 文案。

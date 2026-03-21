@@ -28,4 +28,4 @@
 - 當 manual scoreboard 或 lane plan 重新定義下一輪 active set 時，不能只改 tracked 文件；若 lane journal 還留著舊 dispatch 狀態，`schedule/refill` 仍會被 runtime state 拉回舊真相，所以要在下一輪 dispatch 前同步 refresh 或重寫 lane journal。
 - NLSDD 下若 active/parked lane set 需要重排，應優先用原子 helper 同步 tracked scoreboard phase 與 lane journal；不要分兩步人工更新，否則 scheduler 會在中間窗口讀到雙真相。
 - NLSDD 的目標不是維持表面上的 4-active，而是維持真實的並行前進；若 execution 已收束成單一 critical lane，導致 2-3 個 slot 只是在等它，就應立即 replan，切新 lane 或並行推進其他 plans/executions。
-- execution-insights journal 若只有 append 沒有 read/use path，很快就會變成埋在 runtime state 裡的黑洞；只要 NLSDD flow 進入 `review`，就應同步檢視 open / adopted insights 並規劃是否升級成 lane item、lesson 或 resolved/rejected 狀態。
+- execution-insights journal 若只有 append 沒有 read/use path，很快就會變成埋在 runtime state 裡的黑洞；只要工作處於或剛結束 NLSDD 階段且進入 `review`，就應同步檢視 open / adopted insights 並規劃是否升級成 lane item、lesson 或 resolved/rejected 狀態。
