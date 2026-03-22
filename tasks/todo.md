@@ -1,5 +1,26 @@
 # 2026-03-22 NLSDD worker telemetry 與並行下降診斷設計
 
+# 2026-03-22 nlsdd-go for all plans together：收斂 plan drift
+
+- [x] 重新盤點 `plan/*.md` 所有未勾項，區分真正未完成工作與歷史 checklist drift
+- [x] 以 code / tests / specs / README 對回 `multi-phase` 與 `ratatui plot-mode` 兩份舊 plan 的剩餘項目
+- [x] 將已落地但未回寫的 plot-mode checklist 同步成完成態
+- [x] 將條件式 follow-up 收斂成明確 closure note，避免 `nlsdd-go` 一直被觀察項卡住
+- [x] 驗證 `plan/` 目錄已無未完成 checkbox
+
+## Review
+
+- 這輪的根因不是 NLSDD execution 還有漏跑 lane，而是舊 plan 還留著兩種 drift：
+  - `plan/2026-03-20-ratatui-plot-mode-implementation-plan.md` 的 step checklist 已被後續 NLSDD lanes 與 2026-03-22 reactivation work 實作完，但沒有把歷史 checkbox 勾回真相。
+  - `plan/2026-03-20-multi-phase-routing-plan.md` 的 follow-up track 混入了「已完成但未回寫」與「條件式未來觀察」兩種不同性質的項目。
+- 這次已把 ratatui plot-mode plan 全部同步成 historical-complete，並在 plan 內明寫這是 checklist sync，不是今天重新實作一遍。
+- `multi-phase` 那 3 個殘留 follow-up 也已 truthfully 收斂：
+  - Rust plot-mode 一直都維持獨立視覺化 stream，後續也透過 reactivation plan 繼續推進。
+  - table/body indicator 已以 `W:*` / `5H:*` 落地；而 workload tier 是否單獨進 body row，後續決策已明確收斂成「tier 留在 shared status line、row/body marker 只表達 window truth」。
+  - 額外 condensed density level 目前仍屬未來觀察項，現況沒有證據顯示已上線的 `condensed` fallback 不足，因此以 closure note 結案，不再當作 active 未完成工作。
+- 驗證：
+  - `rg -n "^- \\[ \\]" plan/*.md`
+
 - [x] 盤點現有 NLSDD event / lane state / insight surfaces，確認可直接投影每分鐘 worker 指標的基礎資料
 - [x] 將雙軌 worker 指標、總運作時間、command-blocked 沉默 worker 納入正式設計
 - [x] 設計 execution 結束後的自動回顧輸出，包含每段並行下降原因與資訊不足時的補資訊建議

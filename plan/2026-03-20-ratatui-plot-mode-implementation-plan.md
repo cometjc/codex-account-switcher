@@ -10,6 +10,9 @@
 
 ## NLSDD Execution Status
 
+Historical sync note:
+- The step-by-step checklist below was fully landed across the original plot-mode lane rounds plus the 2026-03-22 reactivation work. Its checkboxes are now synced back to implementation truth so `nlsdd-go for all plans together` can treat this plan as completed rather than stale checklist drift.
+
 - [x] Lane 1 landed real-binary handoff verification against the Rust viewer and passed spec + quality review.
 - [x] Lane 2 landed the drawable panel boundary seam and passed spec + quality review.
 - [x] Lane 3 landed a local `ChartViewModel` extraction in `chart.rs` and passed spec + quality review.
@@ -63,7 +66,7 @@
 - Create: `src/lib/plot/plot-snapshot.ts`
 - Create: `src/lib/plot/index.ts`
 
-- [ ] **Step 1: Define TypeScript snapshot interfaces**
+- [x] **Step 1: Define TypeScript snapshot interfaces**
 
 Create TS types for:
 - `PlotSnapshot`
@@ -79,7 +82,7 @@ Required fields:
 - 5h projected band lower/upper bounds expressed in 7d-plot Y units
 - summary labels already shown by the current CLI (`Time to reset`, `Usage Left`, `Drift`, `Pacing Status`)
 
-- [ ] **Step 2: Add a pure builder function**
+- [x] **Step 2: Add a pure builder function**
 
 Add a single exported function that converts the current `UsageResponse` / saved-profile menu data into `PlotSnapshot`.
 
@@ -90,16 +93,16 @@ Rules:
   - `bandHeight = (delta7dPercent / delta5hPercent) * 100`
 - If `delta5hPercent <= 0`, omit the band and mark it unavailable.
 
-- [ ] **Step 3: Add serialization helper**
+- [x] **Step 3: Add serialization helper**
 
 Add a function that returns stable pretty JSON for the Rust viewer.
 
-- [ ] **Step 4: Verify TypeScript build**
+- [x] **Step 4: Verify TypeScript build**
 
 Run: `npm run build`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/lib/plot src/commands/root.ts package.json
@@ -112,39 +115,39 @@ git commit -m "feat: define plot snapshot contract"
 - Modify: `src/commands/root.ts`
 - Modify: `package.json`
 
-- [ ] **Step 1: Add a new mode state**
+- [x] **Step 1: Add a new mode state**
 
 Extend the current mode model so the UI can switch between:
 - `quota`
 - `delta`
 - `plot`
 
-- [ ] **Step 2: Build snapshot from current menu state**
+- [x] **Step 2: Build snapshot from current menu state**
 
 When `plot` is selected:
 - gather all rendered profiles
 - build `PlotSnapshot`
 - write it to a temp file under the repo temp/writable area
 
-- [ ] **Step 3: Spawn the Rust viewer process**
+- [x] **Step 3: Spawn the Rust viewer process**
 
 Use a non-interactive child process launch from Node:
 - pass snapshot path as CLI arg
 - forward stdio to terminal
 - return to Node flow after the viewer exits
 
-- [ ] **Step 4: Add package scripts**
+- [x] **Step 4: Add package scripts**
 
 Add scripts for:
 - Rust viewer build
 - Rust viewer run (for local testing)
 
-- [ ] **Step 5: Verify Node build**
+- [x] **Step 5: Verify Node build**
 
 Run: `npm run build`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/commands/root.ts package.json
@@ -160,7 +163,7 @@ git commit -m "feat: add plot mode handoff from node cli"
 - Create: `rust/plot-viewer/src/model.rs`
 - Create: `rust/plot-viewer/src/input.rs`
 
-- [ ] **Step 1: Create Cargo package**
+- [x] **Step 1: Create Cargo package**
 
 Add dependencies:
 - `ratatui`
@@ -169,34 +172,34 @@ Add dependencies:
 - `serde_json`
 - `anyhow`
 
-- [ ] **Step 2: Mirror the snapshot schema in Rust**
+- [x] **Step 2: Mirror the snapshot schema in Rust**
 
 Implement `serde` structs matching the TypeScript snapshot exactly.
 
-- [ ] **Step 3: Add snapshot loader**
+- [x] **Step 3: Add snapshot loader**
 
 Read snapshot JSON from the CLI arg path and deserialize into app state.
 
-- [ ] **Step 4: Add terminal lifecycle**
+- [x] **Step 4: Add terminal lifecycle**
 
 Implement:
 - enter alternate screen
 - raw mode on/off
 - graceful restore on panic/error
 
-- [ ] **Step 5: Add basic event loop**
+- [x] **Step 5: Add basic event loop**
 
 Support:
 - `q` / `Esc` to exit
 - left/right to cycle profiles
 - tab / shift-tab to cycle focus if multiple panels are added later
 
-- [ ] **Step 6: Verify Rust compile**
+- [x] **Step 6: Verify Rust compile**
 
 Run: `cargo check --manifest-path rust/plot-viewer/Cargo.toml`
 Expected: PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add rust/plot-viewer
@@ -209,7 +212,7 @@ git commit -m "feat: scaffold rust plot viewer"
 - Create: `rust/plot-viewer/src/render/mod.rs`
 - Create: `rust/plot-viewer/src/render/chart.rs`
 
-- [ ] **Step 1: Render the main chart with `Canvas`**
+- [x] **Step 1: Render the main chart with `Canvas`**
 
 Use `ratatui::widgets::canvas::Canvas` rather than `Chart`.
 
@@ -218,14 +221,14 @@ Render:
 - current profile emphasized
 - per-profile local X bounds derived from that profile’s 7d window
 
-- [ ] **Step 2: Draw the current 5h parallel band**
+- [x] **Step 2: Draw the current 5h parallel band**
 
 For the focused profile:
 - compute the x-range of the active 5h window relative to the 7d local axis
 - draw two orange parallel guide lines
 - keep line spacing equal to the projected band height in 7d Y units
 
-- [ ] **Step 3: Add axis labels and legend text**
+- [x] **Step 3: Add axis labels and legend text**
 
 Show:
 - 7d start/end
@@ -233,18 +236,18 @@ Show:
 - focused profile label
 - small legend for line colors and 5h band meaning
 
-- [ ] **Step 4: Add empty/fallback rendering**
+- [x] **Step 4: Add empty/fallback rendering**
 
 If a profile lacks enough data for a band:
 - still draw the 7d curve
 - show a text note: `5h band unavailable`
 
-- [ ] **Step 5: Verify visual rendering**
+- [x] **Step 5: Verify visual rendering**
 
 Run: `cargo run --manifest-path rust/plot-viewer/Cargo.toml -- <snapshot-path>`
 Expected: viewer opens, chart draws, exit cleanly with `q`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add rust/plot-viewer/src/render
@@ -257,7 +260,7 @@ git commit -m "feat: render 7d plot and 5h projection band"
 - Create: `rust/plot-viewer/src/render/panels.rs`
 - Modify: `rust/plot-viewer/src/app.rs`
 
-- [ ] **Step 1: Add profile summary panel**
+- [x] **Step 1: Add profile summary panel**
 
 Render for focused profile:
 - `Pacing Status`
@@ -267,22 +270,22 @@ Render for focused profile:
 - `Time to reset`
 - `Usage Left`
 
-- [ ] **Step 2: Add compare panel**
+- [x] **Step 2: Add compare panel**
 
 Show ranked profiles with:
 - profile name
 - recommendation label
 - bottleneck source `[W]/[5H]`
 
-- [ ] **Step 3: Highlight routing recommendation**
+- [x] **Step 3: Highlight routing recommendation**
 
 Apply stronger style to the recommended target profile.
 
-- [ ] **Step 4: Verify focus changes**
+- [x] **Step 4: Verify focus changes**
 
 Arrow keys or tab should update focused profile and panel details.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add rust/plot-viewer/src/app.rs rust/plot-viewer/src/render/panels.rs
@@ -296,21 +299,21 @@ git commit -m "feat: add routing side panels to plot viewer"
 - Modify: `package.json`
 - Modify: `src/commands/root.ts`
 
-- [ ] **Step 1: Add explicit “Rust viewer is Phase 1 migration” notes**
+- [x] **Step 1: Add explicit “Rust viewer is Phase 1 migration” notes**
 
 Document that:
 - Node remains source of truth for data access
 - Rust owns only rendering in this phase
 - later phases can move data logic over incrementally
 
-- [ ] **Step 2: Add local run instructions**
+- [x] **Step 2: Add local run instructions**
 
 Document exact commands to:
 - build TS
 - build Rust viewer
 - launch plot mode
 
-- [ ] **Step 3: End-to-end verification**
+- [x] **Step 3: End-to-end verification**
 
 Run:
 - `npm run build`
@@ -320,7 +323,7 @@ Expected:
 - both pass
 - no broken Node CLI build
 
-- [ ] **Step 4: Final commit**
+- [x] **Step 4: Final commit**
 
 ```bash
 git add README.md package.json src/commands/root.ts rust/plot-viewer

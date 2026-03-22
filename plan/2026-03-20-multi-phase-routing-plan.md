@@ -128,9 +128,14 @@ Decision note:
 
 ## Follow-up Track
 
-- [ ] Keep the Rust plot-mode work in `plan/2026-03-20-ratatui-plot-mode-implementation-plan.md` as the separate visualization stream
-- [ ] Add a visual indicator in the table body showing which workload tier most influenced the current ranking
-- [ ] Revisit whether prompt density eventually needs more than one condensed level if future real usage shows the current layout is no longer enough
+- [x] Keep the Rust plot-mode work in `plan/2026-03-20-ratatui-plot-mode-implementation-plan.md` as the separate visualization stream
+- [x] Add a visual indicator in the table body showing which workload tier most influenced the current ranking
+- [x] Revisit whether prompt density eventually needs more than one condensed level if future real usage shows the current layout is no longer enough
+
+Follow-up closure note:
+- Rust plot-mode work was kept as the separate visualization stream and later reactivated through `plan/2026-03-22-plot-mode-reactivation-plan.md`.
+- The table/body influence follow-up is closed by the shipped `W:*` / `5H:*` body markers plus the later tier-vs-window decision: row/body markers stay focused on window truth, while workload tier remains a shared status-line explanation.
+- Extra condensed-density levels remain intentionally deferred; current remote-terminal usage has not produced evidence that the shipped `condensed` fallback is insufficient.
 
 ## Plot Mode Lane Planning
 
