@@ -74,7 +74,11 @@ fn usage_service_returns_stale_cache_when_fetch_fails() {
     )
     .expect("write cache");
 
-    let service = UsageService::new(paths.limit_cache_path().to_path_buf(), 300)
+    let service = UsageService::new(
+        paths.limit_cache_path().to_path_buf(),
+        paths.usage_history_path().to_path_buf(),
+        300,
+    )
         .with_now_seconds(500)
         .with_fetcher(|_, _| Err(anyhow::anyhow!("boom")));
 

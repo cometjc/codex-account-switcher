@@ -177,7 +177,8 @@ mod tests {
 
     use super::*;
     use crate::render::{
-        ChartPoint, FiveHourBandState, RenderProfile, SelectionState,
+        ChartPoint, ChartSeries, ChartSeriesStyle, FiveHourBandState, FiveHourSubframeState,
+        RenderProfile, SelectionState,
     };
 
     #[derive(Debug, Clone)]
@@ -236,6 +237,25 @@ mod tests {
                 focus: FocusTarget::Chart,
             },
             chart: ChartState {
+                series: vec![ChartSeries {
+                    profile: RenderProfile {
+                        id: "alpha",
+                        label: "Alpha",
+                        is_current: false,
+                    },
+                    style: ChartSeriesStyle {
+                        color_slot: 0,
+                        is_selected: true,
+                        is_current: false,
+                    },
+                    points: vec![
+                        ChartPoint { x: 0.0, y: 8.0 },
+                        ChartPoint { x: 1.0, y: 18.0 },
+                        ChartPoint { x: 3.5, y: 44.0 },
+                        ChartPoint { x: 5.0, y: 58.0 },
+                        ChartPoint { x: 7.0, y: 76.0 },
+                    ],
+                }],
                 seven_day_points: vec![
                     ChartPoint { x: 0.0, y: 8.0 },
                     ChartPoint { x: 1.0, y: 18.0 },
@@ -251,6 +271,15 @@ mod tests {
                     delta_five_hour_percent: Some(1.5),
                     reason: None,
                 },
+                five_hour_subframe: FiveHourSubframeState {
+                    available: true,
+                    start_x: Some(5.0),
+                    end_x: Some(6.0),
+                    lower_y: Some(20.0),
+                    upper_y: Some(35.0),
+                    reason: None,
+                },
+                total_points: 5,
             },
         };
 
@@ -292,6 +321,23 @@ mod tests {
                 focus: FocusTarget::Summary,
             },
             chart: ChartState {
+                series: vec![ChartSeries {
+                    profile: RenderProfile {
+                        id: "alpha",
+                        label: "Alpha",
+                        is_current: true,
+                    },
+                    style: ChartSeriesStyle {
+                        color_slot: 0,
+                        is_selected: true,
+                        is_current: true,
+                    },
+                    points: vec![
+                        ChartPoint { x: 0.0, y: 12.0 },
+                        ChartPoint { x: 4.0, y: 40.0 },
+                        ChartPoint { x: 7.0, y: 61.0 },
+                    ],
+                }],
                 seven_day_points: vec![
                     ChartPoint { x: 0.0, y: 12.0 },
                     ChartPoint { x: 4.0, y: 40.0 },
@@ -305,6 +351,15 @@ mod tests {
                     delta_five_hour_percent: None,
                     reason: Some("insufficient 5h overlap"),
                 },
+                five_hour_subframe: FiveHourSubframeState {
+                    available: false,
+                    start_x: None,
+                    end_x: None,
+                    lower_y: None,
+                    upper_y: None,
+                    reason: Some("insufficient 5h overlap"),
+                },
+                total_points: 3,
             },
         };
 

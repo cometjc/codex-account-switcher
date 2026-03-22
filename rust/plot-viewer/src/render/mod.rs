@@ -73,6 +73,20 @@ pub struct ChartPoint {
     pub y: f64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChartSeriesStyle {
+    pub color_slot: usize,
+    pub is_selected: bool,
+    pub is_current: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChartSeries<'a> {
+    pub profile: RenderProfile<'a>,
+    pub style: ChartSeriesStyle,
+    pub points: Vec<ChartPoint>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FiveHourBandState<'a> {
     pub available: bool,
@@ -83,10 +97,23 @@ pub struct FiveHourBandState<'a> {
     pub reason: Option<&'a str>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FiveHourSubframeState<'a> {
+    pub available: bool,
+    pub start_x: Option<f64>,
+    pub end_x: Option<f64>,
+    pub lower_y: Option<f64>,
+    pub upper_y: Option<f64>,
+    pub reason: Option<&'a str>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChartState<'a> {
+    pub series: Vec<ChartSeries<'a>>,
     pub seven_day_points: Vec<ChartPoint>,
     pub five_hour_band: FiveHourBandState<'a>,
+    pub five_hour_subframe: FiveHourSubframeState<'a>,
+    pub total_points: usize,
 }
 
 pub trait RenderState {

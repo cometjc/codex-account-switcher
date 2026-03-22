@@ -12,10 +12,13 @@ use serde_json::Value;
 use crate::input::{self, InputAction};
 use crate::render;
 use crate::render::{
-    ChartPoint, ChartState, FiveHourBandState, FocusTarget, RenderProfile, SelectionState,
+    ChartPoint, ChartSeries, ChartSeriesStyle, ChartState, FiveHourBandState, FiveHourSubframeState,
+    FocusTarget, RenderProfile, SelectionState,
 };
 use crate::store::{AccountStore, SavedProfile};
-use crate::usage::{UsageReadResult, UsageResponse, UsageService, UsageSource, UsageWindow};
+use crate::usage::{
+    UsageReadResult, UsageResponse, UsageService, UsageSource, UsageWindow, UsageWindowHistory,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewMode {
@@ -57,6 +60,34 @@ struct ProfileEntry {
     usage_view: UsageReadResult,
     account_id: Option<String>,
     is_current: bool,
+    chart_data: ProfileChartData,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct ProfileChartData {
+    seven_day_points: Vec<ChartPoint>,
+    five_hour_band: OwnedFiveHourBandState,
+    five_hour_subframe: OwnedFiveHourSubframeState,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct OwnedFiveHourBandState {
+    available: bool,
+    lower_y: Option<f64>,
+    upper_y: Option<f64>,
+    delta_seven_day_percent: Option<f64>,
+    delta_five_hour_percent: Option<f64>,
+    reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct OwnedFiveHourSubframeState {
+    available: bool,
+    start_x: Option<f64>,
+    end_x: Option<f64>,
+    lower_y: Option<f64>,
+    upper_y: Option<f64>,
+    reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,6 +122,30 @@ pub(crate) struct AppRenderState<'a> {
     focus: FocusPanel,
 }
 
+impl ProfileChartData {
+    fn empty(reason: &str) -> Self {
+        Self {
+            seven_day_points: Vec::new(),
+            five_hour_band: OwnedFiveHourBandState {
+                available: false,
+                lower_y: None,
+                upper_y: None,
+                delta_seven_day_percent: None,
+                delta_five_hour_percent: None,
+                reason: Some(reason.to_string()),
+            },
+            five_hour_subframe: OwnedFiveHourSubframeState {
+                available: false,
+                start_x: None,
+                end_x: None,
+                lower_y: None,
+                upper_y: None,
+                reason: Some(reason.to_string()),
+            },
+        }
+    }
+}
+
 impl App {
     pub fn load(store: AccountStore, usage_service: UsageService) -> Result<Self> {
         let profiles = load_profiles(&store, &usage_service, false, None)?;
@@ -123,6 +178,7 @@ impl App {
                 },
                 account_id: Some(format!("acct-{index}")),
                 is_current: index == selected_profile_index,
+                chart_data: ProfileChartData::empty("no usage data"),
             })
             .collect::<Vec<_>>();
 
@@ -514,10 +570,7 @@ impl render::RenderState for AppRenderState<'_> {
     }
 
     fn chart_state(&self) -> ChartState<'_> {
-        let Some(profile) = self.selected_profile() else {
-            return empty_chart_state("no selected profile");
-        };
-        build_chart_state(profile.usage_view.usage.as_ref())
+        build_chart_state(self.profiles, self.selected_profile_index)
     }
 }
 
@@ -585,6 +638,12 @@ fn load_profiles(
                 force_current,
                 false,
             )?;
+            usage_service.record_usage_snapshot(current_account_id.as_deref(), usage_view.usage.as_ref())?;
+            let chart_data = build_profile_chart_data(
+                current_account_id.as_deref(),
+                usage_view.usage.as_ref(),
+                usage_service,
+            )?;
             profiles.push(ProfileEntry {
                 saved_name: None,
                 profile_name: format!(
@@ -595,6 +654,7 @@ fn load_profiles(
                 is_current: true,
                 snapshot,
                 usage_view,
+                chart_data,
             });
         }
     }
@@ -620,6 +680,8 @@ fn build_saved_entry(
         force_this_profile,
         false,
     )?;
+    usage_service.record_usage_snapshot(account_id.as_deref(), usage_view.usage.as_ref())?;
+    let chart_data = build_profile_chart_data(account_id.as_deref(), usage_view.usage.as_ref(), usage_service)?;
 
     Ok(ProfileEntry {
         saved_name: Some(profile.name.clone()),
@@ -628,6 +690,7 @@ fn build_saved_entry(
         usage_view,
         account_id: account_id.clone(),
         is_current: current_account_id.as_deref() == account_id.as_deref(),
+        chart_data,
     })
 }
 
@@ -766,77 +829,208 @@ fn sanitize_name_part(input: Option<&str>) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn build_chart_state(usage: Option<&UsageResponse>) -> ChartState<'static> {
-    let Some(usage) = usage else {
-        return empty_chart_state("no usage data");
-    };
-    let weekly = pick_weekly_window(usage);
-    let five_hour = pick_five_hour_window(usage);
-
-    let seven_day_points = weekly
-        .map(build_weekly_points)
-        .unwrap_or_else(|| vec![ChartPoint { x: 0.0, y: 0.0 }]);
-    let five_hour_band = if let Some(window) = five_hour {
-        let used = window.used_percent.clamp(0.0, 100.0);
-        let lower = (used - 10.0).max(0.0);
-        let upper = (used + 10.0).min(100.0);
-        FiveHourBandState {
-            available: true,
-            lower_y: Some(lower),
-            upper_y: Some(upper),
-            delta_seven_day_percent: weekly.map(|weekly| used - weekly.used_percent),
-            delta_five_hour_percent: Some(0.0),
-            reason: None,
-        }
-    } else {
-        FiveHourBandState {
+fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: usize) -> ChartState<'a> {
+    let selected_profile = profiles.get(selected_profile_index);
+    let selected_label = selected_profile
+        .map(|profile| profile.profile_name.as_str())
+        .unwrap_or("no selected profile");
+    let selected_series = selected_profile
+        .map(|profile| profile.chart_data.seven_day_points.clone())
+        .unwrap_or_default();
+    let selected_band = selected_profile
+        .map(|profile| FiveHourBandState {
+            available: profile.chart_data.five_hour_band.available,
+            lower_y: profile.chart_data.five_hour_band.lower_y,
+            upper_y: profile.chart_data.five_hour_band.upper_y,
+            delta_seven_day_percent: profile.chart_data.five_hour_band.delta_seven_day_percent,
+            delta_five_hour_percent: profile.chart_data.five_hour_band.delta_five_hour_percent,
+            reason: profile.chart_data.five_hour_band.reason.as_deref(),
+        })
+        .unwrap_or(FiveHourBandState {
             available: false,
             lower_y: None,
             upper_y: None,
             delta_seven_day_percent: None,
             delta_five_hour_percent: None,
-            reason: Some("no 5h window"),
-        }
+            reason: Some("no selected profile"),
+        });
+    let selected_subframe = selected_profile
+        .map(|profile| FiveHourSubframeState {
+            available: profile.chart_data.five_hour_subframe.available,
+            start_x: profile.chart_data.five_hour_subframe.start_x,
+            end_x: profile.chart_data.five_hour_subframe.end_x,
+            lower_y: profile.chart_data.five_hour_subframe.lower_y,
+            upper_y: profile.chart_data.five_hour_subframe.upper_y,
+            reason: profile.chart_data.five_hour_subframe.reason.as_deref(),
+        })
+        .unwrap_or(FiveHourSubframeState {
+            available: false,
+            start_x: None,
+            end_x: None,
+            lower_y: None,
+            upper_y: None,
+            reason: Some("no selected profile"),
+        });
+
+    let series = profiles
+        .iter()
+        .enumerate()
+        .map(|(index, profile)| ChartSeries {
+            profile: RenderProfile {
+                id: profile.account_id.as_deref().unwrap_or(profile.profile_name.as_str()),
+                label: profile.profile_name.as_str(),
+                is_current: profile.is_current,
+            },
+            style: ChartSeriesStyle {
+                color_slot: index,
+                is_selected: index == selected_profile_index,
+                is_current: profile.is_current,
+            },
+            points: profile.chart_data.seven_day_points.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    let total_points = series.iter().map(|series| series.points.len()).sum();
+    let mut chart_state = ChartState {
+        series,
+        seven_day_points: selected_series,
+        five_hour_band: selected_band,
+        five_hour_subframe: selected_subframe,
+        total_points,
     };
 
-    ChartState {
+    if chart_state.series.is_empty() && chart_state.seven_day_points.is_empty() {
+        chart_state.five_hour_band.reason = Some(selected_label);
+        chart_state.five_hour_subframe.reason = Some(selected_label);
+    }
+
+    chart_state
+}
+
+fn build_profile_chart_data(
+    account_id: Option<&str>,
+    usage: Option<&UsageResponse>,
+    usage_service: &UsageService,
+) -> Result<ProfileChartData> {
+    let Some(usage) = usage else {
+        return Ok(ProfileChartData::empty("no usage data"));
+    };
+    let Some(account_id) = account_id else {
+        return Ok(ProfileChartData::empty("no account id"));
+    };
+
+    let history = usage_service.profile_history(Some(account_id))?;
+    let weekly_window = pick_weekly_window(usage);
+    let five_hour_window = pick_five_hour_window(usage);
+    let seven_day_points = weekly_window
+        .and_then(|window| find_matching_window(&history.weekly_windows, window))
+        .map(project_history_points)
+        .unwrap_or_default();
+    let five_hour_band = build_five_hour_band(weekly_window, five_hour_window);
+    let five_hour_subframe = build_five_hour_subframe(weekly_window, five_hour_window);
+
+    Ok(ProfileChartData {
         seven_day_points,
         five_hour_band,
-    }
+        five_hour_subframe,
+    })
 }
 
-fn empty_chart_state(reason: &'static str) -> ChartState<'static> {
-    ChartState {
-        seven_day_points: Vec::new(),
-        five_hour_band: FiveHourBandState {
+fn build_five_hour_band(
+    weekly_window: Option<&UsageWindow>,
+    five_hour_window: Option<&UsageWindow>,
+) -> OwnedFiveHourBandState {
+    let Some(five_hour_window) = five_hour_window else {
+        return OwnedFiveHourBandState {
             available: false,
             lower_y: None,
             upper_y: None,
             delta_seven_day_percent: None,
             delta_five_hour_percent: None,
-            reason: Some(reason),
-        },
+            reason: Some("no 5h window".to_string()),
+        };
+    };
+    let used = five_hour_window.used_percent.clamp(0.0, 100.0);
+    OwnedFiveHourBandState {
+        available: true,
+        lower_y: Some((used - 10.0).max(0.0)),
+        upper_y: Some((used + 10.0).min(100.0)),
+        delta_seven_day_percent: weekly_window.map(|weekly| used - weekly.used_percent),
+        delta_five_hour_percent: Some(0.0),
+        reason: None,
     }
 }
 
-fn build_weekly_points(window: &UsageWindow) -> Vec<ChartPoint> {
-    let total = (window.limit_window_seconds as f64).max(1.0);
-    let elapsed = (total - (window.reset_after_seconds as f64).max(0.0)).clamp(0.0, total);
-    let progress_days = (elapsed / total) * 7.0;
-    let used = window.used_percent.clamp(0.0, 100.0);
+fn build_five_hour_subframe(
+    weekly_window: Option<&UsageWindow>,
+    five_hour_window: Option<&UsageWindow>,
+) -> OwnedFiveHourSubframeState {
+    let Some(weekly_window) = weekly_window else {
+        return OwnedFiveHourSubframeState {
+            available: false,
+            start_x: None,
+            end_x: None,
+            lower_y: None,
+            upper_y: None,
+            reason: Some("no 7d window".to_string()),
+        };
+    };
+    let Some(five_hour_window) = five_hour_window else {
+        return OwnedFiveHourSubframeState {
+            available: false,
+            start_x: None,
+            end_x: None,
+            lower_y: None,
+            upper_y: None,
+            reason: Some("no 5h window".to_string()),
+        };
+    };
+    let weekly_start = weekly_window.reset_at - weekly_window.limit_window_seconds;
+    let weekly_duration = weekly_window.limit_window_seconds as f64;
+    let five_hour_start = five_hour_window.reset_at - five_hour_window.limit_window_seconds;
+    let start_x = (((five_hour_start - weekly_start) as f64) / weekly_duration * 7.0).clamp(0.0, 7.0);
+    let end_x = (((five_hour_window.reset_at - weekly_start) as f64) / weekly_duration * 7.0).clamp(0.0, 7.0);
+    let used = five_hour_window.used_percent.clamp(0.0, 100.0);
 
-    vec![
-        ChartPoint { x: 0.0, y: 0.0 },
-        ChartPoint {
-            x: (progress_days / 2.0).clamp(0.0, 7.0),
-            y: (used / 2.0).clamp(0.0, 100.0),
-        },
-        ChartPoint {
-            x: progress_days.clamp(0.0, 7.0),
-            y: used,
-        },
-        ChartPoint { x: 7.0, y: used },
-    ]
+    OwnedFiveHourSubframeState {
+        available: true,
+        start_x: Some(start_x),
+        end_x: Some(end_x.max(start_x)),
+        lower_y: Some((used - 10.0).max(0.0)),
+        upper_y: Some((used + 10.0).min(100.0)),
+        reason: None,
+    }
+}
+
+fn find_matching_window<'a>(
+    windows: &'a [UsageWindowHistory],
+    window: &UsageWindow,
+) -> Option<&'a UsageWindowHistory> {
+    let start_at = window.reset_at - window.limit_window_seconds;
+    windows.iter().find(|candidate| {
+        candidate.limit_window_seconds == window.limit_window_seconds
+            && candidate.start_at == start_at
+            && candidate.end_at == window.reset_at
+    })
+}
+
+fn project_history_points(window: &UsageWindowHistory) -> Vec<ChartPoint> {
+    let total = (window.end_at - window.start_at) as f64;
+    if total <= 0.0 {
+        return Vec::new();
+    }
+
+    let mut points = window
+        .observations
+        .iter()
+        .map(|observation| ChartPoint {
+            x: (((observation.observed_at - window.start_at) as f64 / total) * 7.0).clamp(0.0, 7.0),
+            y: observation.used_percent.clamp(0.0, 100.0),
+        })
+        .collect::<Vec<_>>();
+    points.sort_by(|left, right| left.x.total_cmp(&right.x));
+    points.dedup_by(|left, right| (left.x - right.x).abs() < f64::EPSILON && (left.y - right.y).abs() < f64::EPSILON);
+    points
 }
 
 fn pick_five_hour_window(usage: &UsageResponse) -> Option<&UsageWindow> {
@@ -901,23 +1095,54 @@ mod tests {
     }
 
     #[test]
-    fn weekly_window_becomes_simple_visible_line_series() {
-        let usage = UsageResponse {
-            email: Some("a@example.com".to_string()),
-            plan_type: Some("plus".to_string()),
-            rate_limit: Some(crate::usage::UsageRateLimit {
-                primary_window: None,
-                secondary_window: Some(UsageWindow {
-                    used_percent: 42.0,
-                    limit_window_seconds: 604_800,
-                    reset_after_seconds: 302_400,
-                    reset_at: 123,
-                }),
-            }),
+    fn matching_window_history_projects_real_observation_points() {
+        let history = UsageWindowHistory {
+            limit_window_seconds: 604_800,
+            start_at: 100,
+            end_at: 604_900,
+            observations: vec![
+                crate::usage::UsageObservation {
+                    observed_at: 100,
+                    used_percent: 12.0,
+                },
+                crate::usage::UsageObservation {
+                    observed_at: 302_500,
+                    used_percent: 44.0,
+                },
+                crate::usage::UsageObservation {
+                    observed_at: 604_900,
+                    used_percent: 70.0,
+                },
+            ],
         };
 
-        let chart = build_chart_state(Some(&usage));
-        assert_eq!(chart.seven_day_points.len(), 4);
-        assert!(chart.seven_day_points.iter().any(|point| point.y > 0.0));
+        let points = project_history_points(&history);
+        assert_eq!(points.len(), 3);
+        assert_eq!(points[0], ChartPoint { x: 0.0, y: 12.0 });
+        assert!(points[1].x > 3.4 && points[1].x < 3.6);
+        assert_eq!(points[2], ChartPoint { x: 7.0, y: 70.0 });
+    }
+
+    #[test]
+    fn five_hour_subframe_is_bounded_inside_weekly_chart_space() {
+        let weekly = UsageWindow {
+            used_percent: 60.0,
+            limit_window_seconds: 604_800,
+            reset_after_seconds: 86_400,
+            reset_at: 604_800,
+        };
+        let five_hour = UsageWindow {
+            used_percent: 30.0,
+            limit_window_seconds: 18_000,
+            reset_after_seconds: 1_800,
+            reset_at: 540_000,
+        };
+
+        let subframe = build_five_hour_subframe(Some(&weekly), Some(&five_hour));
+        assert!(subframe.available);
+        assert!(subframe.start_x.unwrap() < subframe.end_x.unwrap());
+        assert!(subframe.end_x.unwrap() <= 7.0);
+        assert_eq!(subframe.lower_y, Some(20.0));
+        assert_eq!(subframe.upper_y, Some(40.0));
     }
 }
