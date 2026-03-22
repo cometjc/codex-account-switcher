@@ -320,3 +320,44 @@ test('legacy review and intake helpers read executor-backed lane outcomes after 
   assert.equal(intake.entries[0].commit, 'results/demo-flow/lane-1-final');
   assert.match(intake.entries[0].note, /executor result branch/);
 });
+
+test('legacy cycle and launch helpers emit executor-backed promotions after migration', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-executor-launch-'));
+  writeFixture(root);
+  runExecutor(root, 'import-plans', '--cleanup', '--json');
+
+  const cycle = JSON.parse(
+    run(
+      'node',
+      [
+        repoRoot('NLSDD', 'scripts', 'nlsdd-run-cycle.cjs'),
+        '--execution',
+        'demo-flow',
+        '--dry-run',
+        '--json',
+      ],
+      root,
+    ),
+  );
+  assert.equal(cycle.source, 'executor');
+  assert.deepEqual(cycle.promoted.map((entry) => entry.lane), ['Lane 1']);
+  assert.equal(cycle.idleSlots, 3);
+
+  const launch = JSON.parse(
+    run(
+      'node',
+      [
+        repoRoot('NLSDD', 'scripts', 'nlsdd-launch-active-set.cjs'),
+        '--execution',
+        'demo-flow',
+        '--dry-run',
+        '--json',
+      ],
+      root,
+    ),
+  );
+  assert.equal(launch.source, 'executor');
+  assert.equal(launch.assignments.length, 1);
+  assert.equal(launch.assignments[0].lane, 'Lane 1');
+  assert.match(launch.assignments[0].message, /Lane branch: nlsdd\/demo-flow\/lane-1/);
+});

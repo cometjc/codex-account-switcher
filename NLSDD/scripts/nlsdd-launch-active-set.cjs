@@ -2,6 +2,10 @@
 
 const {composeMessage} = require('./nlsdd-compose-message.cjs');
 const {loadLanePlan, resolveProjectRoot} = require('./nlsdd-lib.cjs');
+const {
+  buildLaunchFromExecutor,
+  hasExecutorDb,
+} = require('./nlsdd-executor-lib.cjs');
 const {runCycle} = require('./nlsdd-run-cycle.cjs');
 
 function parseArgs(argv) {
@@ -63,6 +67,9 @@ function buildAssignmentBundle(projectRoot, execution, promotedEntry) {
 }
 
 function launchActiveSet(projectRoot, execution, maxActive = 4, dryRun = false) {
+  if (hasExecutorDb(projectRoot)) {
+    return buildLaunchFromExecutor(projectRoot, execution, maxActive, dryRun);
+  }
   const cycle = runCycle(projectRoot, execution, maxActive, dryRun);
   const assignments = cycle.promoted.map((entry) =>
     buildAssignmentBundle(projectRoot, execution, entry),

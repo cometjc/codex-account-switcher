@@ -5,6 +5,10 @@ const {
   loadLaneState,
   resolveProjectRoot,
 } = require('./nlsdd-lib.cjs');
+const {
+  buildCycleFromExecutor: buildExecutorCycle,
+  hasExecutorDb: hasExecutorDbState,
+} = require('./nlsdd-executor-lib.cjs');
 const {prepareExecutionState} = require('./nlsdd-envelope.cjs');
 const {recordLaneState} = require('./nlsdd-record-lane-state.cjs');
 const {updateScoreboard} = require('./nlsdd-refresh-scoreboard.cjs');
@@ -120,6 +124,9 @@ function promoteSuggestedRows(projectRoot, execution, schedule, dryRun = false) 
 }
 
 function runCycle(projectRoot, execution, maxActive = 4, dryRun = false) {
+  if (hasExecutorDbState(projectRoot)) {
+    return buildExecutorCycle(projectRoot, execution, maxActive, dryRun);
+  }
   prepareExecutionState(projectRoot, execution);
   const before = computeExecutionSchedule(projectRoot, execution, maxActive);
   const observedDegradedScoreboardLoad = before.scoreboardLoad?.degraded

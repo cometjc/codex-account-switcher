@@ -508,6 +508,92 @@ function buildCoordinatorLoopFromExecutor(
   };
 }
 
+function buildCycleFromExecutor(
+  projectRoot = resolveProjectRoot(),
+  execution,
+  maxActive = 4,
+  dryRun = false,
+) {
+  const coordinator = buildCoordinatorLoopFromExecutor(projectRoot, execution, maxActive, dryRun);
+  return {
+    source: 'executor',
+    execution,
+    maxActiveThreads: maxActive,
+    dryRun,
+    reconciled: [],
+    promoted: coordinator.launch.promoted.map((entry, index) => ({
+      slot: index + 1,
+      lane: entry.lane,
+      from: 'queued',
+      to: 'implementing',
+      nextItem:
+        coordinator.launch.assignments.find((assignment) => assignment.lane === entry.lane)?.nextItem || null,
+      nextItemSection: null,
+    })),
+    observedDegradedScoreboardLoad: null,
+    idleSlots: coordinator.idleSlots,
+    completedLanes: [],
+    noDispatchReason: coordinator.noDispatchReason,
+    finalSchedule: {
+      source: 'executor',
+      activeRows: [],
+      queuedRows: [],
+      staleRows: [],
+      availableSlots: coordinator.idleSlots,
+      dispatchSuggestions: [],
+    },
+  };
+}
+
+function buildLaunchFromExecutor(
+  projectRoot = resolveProjectRoot(),
+  execution,
+  maxActive = 4,
+  dryRun = false,
+) {
+  const coordinator = buildCoordinatorLoopFromExecutor(projectRoot, execution, maxActive, dryRun);
+  return {
+    source: 'executor',
+    execution,
+    maxActiveThreads: maxActive,
+    dryRun,
+    reconciled: [],
+    promoted: coordinator.launch.promoted.map((entry, index) => ({
+      slot: index + 1,
+      lane: entry.lane,
+      from: 'queued',
+      to: 'implementing',
+      nextItem:
+        coordinator.launch.assignments.find((assignment) => assignment.lane === entry.lane)?.nextItem || null,
+      nextItemSection: null,
+    })),
+    observedDegradedScoreboardLoad: null,
+    idleSlots: coordinator.idleSlots,
+    completedLanes: [],
+    noDispatchReason: coordinator.noDispatchReason,
+    finalSchedule: {
+      source: 'executor',
+      activeRows: [],
+      queuedRows: [],
+      staleRows: [],
+      availableSlots: coordinator.idleSlots,
+      dispatchSuggestions: [],
+    },
+    assignments: coordinator.launch.assignments.map((assignment, index) => ({
+      slot: index + 1,
+      lane: assignment.lane,
+      currentPhase: 'queued',
+      promotedPhase: 'implementing',
+      nextItem: assignment.nextItem,
+      nextItemSection: null,
+      scope: assignment.scope.join('; '),
+      verification: assignment.verification,
+      worktreePath: assignment.worktreePath,
+      message: assignment.message,
+    })),
+  };
+}
+
 function buildReviewLoopFromExecutor(projectRoot = resolveProjectRoot(), execution, lane = null) {
   ensureExecutorDb(projectRoot);
   const actions = runSqlRows(
@@ -731,7 +817,9 @@ where execution_name = ${sqliteEscape(execution)} and lane_name = ${sqliteEscape
 }
 
 module.exports = {
+  buildCycleFromExecutor,
   buildCoordinatorLoopFromExecutor,
+  buildLaunchFromExecutor,
   buildCommitIntakeFromExecutor,
   buildReviewLoopFromExecutor,
   auditExecutor,
