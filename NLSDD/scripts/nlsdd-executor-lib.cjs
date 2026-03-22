@@ -508,6 +508,105 @@ function buildCoordinatorLoopFromExecutor(
   };
 }
 
+function buildReviewLoopFromExecutor(projectRoot = resolveProjectRoot(), execution, lane = null) {
+  ensureExecutorDb(projectRoot);
+  const actions = runSqlRows(
+    projectRoot,
+    `
+select
+  l.lane_name,
+  coalesce(l.current_item, ''),
+  coalesce(l.worktree_path, ''),
+  coalesce(r.result_branch, ''),
+  coalesce(r.verification_summary, '')
+from lanes l
+join lane_results r
+  on r.id = (
+    select lr.id
+    from lane_results lr
+    where lr.execution_name = l.execution_name and lr.lane_name = l.lane_name
+    order by lr.id desc
+    limit 1
+  )
+where l.execution_name = ${sqliteEscape(execution)}
+  and l.result_status = 'READY_FOR_REVIEW'
+  ${lane ? `and l.lane_name = ${sqliteEscape(lane)}` : ''}
+order by l.lane_name;
+    `,
+  ).map(([laneName, currentItem, worktreePath, resultBranch, verificationSummary]) => ({
+    execution,
+    lane: laneName,
+    phase: 'review-pending',
+    item: currentItem,
+    commit: resultBranch,
+    action: 'spec-review',
+    message: [
+      `Execution: ${execution}`,
+      `Lane: ${laneName}`,
+      `Lane item: ${currentItem || 'n/a'}`,
+      `Result branch: ${resultBranch || 'n/a'}`,
+      `Worktree: ${worktreePath || 'n/a'}`,
+      `Verification: ${verificationSummary || 'n/a'}`,
+    ].join('\n'),
+  }));
+
+  return {
+    source: 'executor',
+    execution,
+    lane: lane || null,
+    actions,
+    insightSummary: emptyInsightSummary(),
+  };
+}
+
+function buildCommitIntakeFromExecutor(projectRoot = resolveProjectRoot(), execution, lane = null) {
+  ensureExecutorDb(projectRoot);
+  const entries = runSqlRows(
+    projectRoot,
+    `
+select
+  l.lane_name,
+  coalesce(l.current_item, ''),
+  coalesce(l.worktree_path, ''),
+  coalesce(r.result_branch, ''),
+  coalesce(r.verification_summary, ''),
+  coalesce(l.ownership, '')
+from lanes l
+join lane_results r
+  on r.id = (
+    select lr.id
+    from lane_results lr
+    where lr.execution_name = l.execution_name and lr.lane_name = l.lane_name
+    order by lr.id desc
+    limit 1
+  )
+where l.execution_name = ${sqliteEscape(execution)}
+  and l.result_status = 'DONE'
+  ${lane ? `and l.lane_name = ${sqliteEscape(lane)}` : ''}
+order by l.lane_name;
+    `,
+  ).map(([laneName, currentItem, worktreePath, resultBranch, verificationSummary, ownership]) => ({
+    execution,
+    lane: laneName,
+    phase: 'done',
+    item: currentItem,
+    commit: resultBranch,
+    proposedCommitTitle: null,
+    proposedCommitBody: null,
+    scope: ownership ? [ownership] : [],
+    verification: verificationSummary ? [verificationSummary] : [],
+    note: `executor result branch: ${resultBranch || 'n/a'}`,
+    nextExpectedPhase: null,
+    worktreePath: worktreePath || null,
+  }));
+
+  return {
+    source: 'executor',
+    entries,
+    degradedSurfaces: [],
+  };
+}
+
 function claimAssignment(projectRoot = resolveProjectRoot(), execution, lane) {
   ensureExecutorDb(projectRoot);
   const laneJson = runSql(
@@ -633,6 +732,8 @@ where execution_name = ${sqliteEscape(execution)} and lane_name = ${sqliteEscape
 
 module.exports = {
   buildCoordinatorLoopFromExecutor,
+  buildCommitIntakeFromExecutor,
+  buildReviewLoopFromExecutor,
   auditExecutor,
   claimAssignment,
   ensureExecutorDb,

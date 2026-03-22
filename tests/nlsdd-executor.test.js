@@ -246,3 +246,77 @@ test('legacy coordinator and dispatch helpers degrade to executor-backed summari
   assert.equal(dispatchPlan.queue[0].kind, 'launch-assignment');
   assert.equal(dispatchPlan.queue[0].lane, 'Lane 1');
 });
+
+test('legacy review and intake helpers read executor-backed lane outcomes after migration', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-executor-review-'));
+  writeFixture(root);
+  runExecutor(root, 'import-plans', '--cleanup', '--json');
+  runExecutor(
+    root,
+    'report-result',
+    '--execution',
+    'demo-flow',
+    '--lane',
+    'Lane 1',
+    '--status',
+    'READY_FOR_REVIEW',
+    '--result-branch',
+    'results/demo-flow/lane-1-review',
+    '--verification-summary',
+    'node --test tests/nlsdd-executor.test.js',
+    '--json',
+  );
+
+  const review = JSON.parse(
+    run(
+      'node',
+      [
+        repoRoot('NLSDD', 'scripts', 'nlsdd-drive-review-loop.cjs'),
+        '--execution',
+        'demo-flow',
+        '--json',
+      ],
+      root,
+    ),
+  );
+  assert.equal(review.source, 'executor');
+  assert.equal(review.actions.length, 1);
+  assert.equal(review.actions[0].lane, 'Lane 1');
+  assert.equal(review.actions[0].action, 'spec-review');
+  assert.match(review.actions[0].message, /results\/demo-flow\/lane-1-review/);
+
+  runExecutor(
+    root,
+    'report-result',
+    '--execution',
+    'demo-flow',
+    '--lane',
+    'Lane 1',
+    '--status',
+    'DONE',
+    '--result-branch',
+    'results/demo-flow/lane-1-final',
+    '--verification-summary',
+    'node --test tests/nlsdd-executor.test.js',
+    '--json',
+  );
+
+  const intake = JSON.parse(
+    run(
+      'node',
+      [
+        repoRoot('NLSDD', 'scripts', 'nlsdd-intake-ready-to-commit.cjs'),
+        '--execution',
+        'demo-flow',
+        '--json',
+      ],
+      root,
+    ),
+  );
+  assert.equal(intake.source, 'executor');
+  assert.equal(intake.entries.length, 1);
+  assert.equal(intake.entries[0].lane, 'Lane 1');
+  assert.equal(intake.entries[0].phase, 'done');
+  assert.equal(intake.entries[0].commit, 'results/demo-flow/lane-1-final');
+  assert.match(intake.entries[0].note, /executor result branch/);
+});

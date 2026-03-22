@@ -2,6 +2,10 @@
 
 const fs = require('node:fs');
 const {
+  buildReviewLoopFromExecutor,
+  hasExecutorDb,
+} = require('./nlsdd-executor-lib.cjs');
+const {
   loadLanePlan,
   loadScoreboardTable,
   loadLaneState,
@@ -126,6 +130,9 @@ function buildAction(context) {
 }
 
 function driveReviewLoop(projectRoot, execution, lane = null) {
+  if (hasExecutorDb(projectRoot)) {
+    return buildReviewLoopFromExecutor(projectRoot, execution, lane);
+  }
   prepareExecutionState(projectRoot, execution);
   const scoreboardPath = resolvePreferredScoreboardPath(projectRoot);
   const scoreboardText = fs.readFileSync(scoreboardPath, 'utf8');

@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 
 const {
+  buildCommitIntakeFromExecutor,
+  hasExecutorDb,
+} = require('./nlsdd-executor-lib.cjs');
+const {
   loadLanePlan,
   loadLaneState,
   loadPreferredScoreboardTable,
@@ -54,6 +58,9 @@ function buildCommitIntake(projectRoot, execution, row) {
 }
 
 function intakeReadyToCommit(projectRoot, execution, lane = null) {
+  if (hasExecutorDb(projectRoot)) {
+    return buildCommitIntakeFromExecutor(projectRoot, execution, lane).entries;
+  }
   prepareExecutionState(projectRoot, execution);
   const table = loadPreferredScoreboardTable(projectRoot);
   const rows = table.objects.filter(
@@ -63,6 +70,9 @@ function intakeReadyToCommit(projectRoot, execution, lane = null) {
 }
 
 function intakeReadyToCommitWithContext(projectRoot, execution, lane = null) {
+  if (hasExecutorDb(projectRoot)) {
+    return buildCommitIntakeFromExecutor(projectRoot, execution, lane);
+  }
   try {
     const entries = intakeReadyToCommit(projectRoot, execution, lane);
     const table = loadPreferredScoreboardTable(projectRoot);
@@ -120,12 +130,12 @@ function main() {
     );
   }
 
-  const result = intakeReadyToCommit(resolveProjectRoot(), args.execution, args.lane);
+  const contextResult = intakeReadyToCommitWithContext(resolveProjectRoot(), args.execution, args.lane);
   if (args.json) {
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify(contextResult, null, 2)}\n`);
     return;
   }
-  process.stdout.write(`${renderIntake(result)}\n`);
+  process.stdout.write(`${renderIntake(contextResult.entries)}\n`);
 }
 
 if (require.main === module) {
