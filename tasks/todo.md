@@ -181,6 +181,22 @@
 - 驗證：
   - `node --test tests/nlsdd-automation.test.js`
 
+# 2026-03-22 nlsdd-go 推進 dev-flow improvement Chunk 2
+
+- [x] 先補 stale implementing reconciliation regression，鎖住 execution-truth sync helper 的最小行為
+- [x] 新增 `NLSDD/scripts/nlsdd-sync-execution-truth.cjs`，用既有 schedule/probe logic 找出 stale lanes 並收回 parked
+- [x] 讓 sync helper 重用現有 reducer / recordLaneState / scoreboard refresh，而不是造第二套 state sync 邏輯
+- [x] 重跑 `node --test tests/nlsdd-automation.test.js` 與 `npm run nlsdd:scoreboard:refresh`
+
+## Review
+
+- 這次的最小切片先只處理 phase/state truth，不擴成整份 lane plan body rewrite。`nlsdd-sync-execution-truth.cjs` 會掃 execution schedule 的 `staleRows`，把 clean-at-same-HEAD 的 implementing lane 收回 `parked`。
+- helper 沒有另造 reconciliation state machine，而是直接重用現有 `computeExecutionSchedule()`、`recordLaneState()` 與 `updateScoreboard()`，維持單一 truth pipeline。
+- regression 也直接鎖住這條最重要路徑：tracked scoreboard 與 lane journal 都還寫著 `implementing` 時，只要 worktree clean 且 HEAD 等於 latest commit，sync helper 就要把它收斂回 parked 並回傳 machine-readable summary。
+- 驗證：
+  - `node --test tests/nlsdd-automation.test.js`
+  - `npm run nlsdd:scoreboard:refresh`
+
 # 2026-03-20 limits 欄位 header 修正
 
 # 2026-03-21 plot-mode integration branch 收斂

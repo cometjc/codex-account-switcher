@@ -82,7 +82,7 @@ git commit -m "fix(nlsdd): 避免 runtime scoreboard 缺失時協調流程崩潰
 - Modify: `NLSDD/scripts/nlsdd-refresh-scoreboard.cjs`
 - Test: `tests/nlsdd-automation.test.js`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add coverage for an execution where:
 - tracked scoreboard says `implementing`
@@ -96,12 +96,12 @@ Assert the sync helper:
 - refreshes tracked scoreboard row
 - returns a machine-readable summary of reconciled lanes
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `node --test tests/nlsdd-automation.test.js`
 Expected: FAIL because no execution-truth sync helper exists.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Implement a helper that:
 - scans one execution via existing schedule/probe logic
@@ -111,7 +111,7 @@ Implement a helper that:
 
 Do not auto-edit plan bodies yet in this task; keep the first version focused on phase/state truth.
 
-- [ ] **Step 4: Run verification**
+- [x] **Step 4: Run verification**
 
 Run:
 - `node --test tests/nlsdd-automation.test.js`
@@ -119,7 +119,7 @@ Run:
 
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/nlsdd-automation.test.js NLSDD/scripts/nlsdd-lib.cjs NLSDD/scripts/nlsdd-refresh-scoreboard.cjs NLSDD/scripts/nlsdd-sync-execution-truth.cjs
