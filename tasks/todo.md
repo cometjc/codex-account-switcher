@@ -166,6 +166,16 @@
 - 根因不是單一回覆 wording 不夠清楚，而是我把 `nlsdd-go` 錯切成「先盤點 execution truth、再停下來等待下一句 `proceed`」；這和使用者期待的固定口令語意不一致。
 - 現在規則已補清楚：`nlsdd-go` 代表 main agent 要先同步 execution/runtime truth，然後直接續推 active lanes、review/correction、commit intake，或下一批 honest dispatchable lanes；只有遇到需要使用者決策的分岔時才停。
 
+# 2026-03-22 `nlsdd-go` 終點條件修正
+
+- [x] 將 `nlsdd-go` 的終點條件從「execution 暫時 no-op」改成「所有相關 plan 都完成」
+- [x] 將這次使用者修正寫進 `AGENTS.md`、`NLSDD/AGENTS.md` 與 `tasks/lessons.md`
+
+## Review
+
+- 根因不是 `nlsdd-go` 不會繼續推進，而是我仍然把它的停止條件綁在「目前 execution 沒 lane 可跑」。這會把「execution 暫時空了」誤講成「整輪 plan 都完成」。
+- 現在規則已補清楚：`nlsdd-go` 只有在所有相關 plan 真正完成，或已被 truthfully 轉成新的後續 plan 並完成交接時，才算結束。若 `plan/` 仍有未完成項，就必須繼續做 drift-vs-real-work 判讀、必要時 replan/reopen execution，而不是停在 `no-dispatchable-lane`。
+
 # 2026-03-22 nlsdd-go 推進 dev-flow improvement Chunk 1
 
 - [x] 先在 automation tests 補上 malformed runtime scoreboard regression，鎖住 commit-intake / coordinator fail-soft 行為

@@ -34,3 +34,4 @@
 - 若使用者已經用 `proceed` 明確授權 main agent 持續收斂本地 integration flow，commit 成功後不要機械式停在「下一步要不要我幫你推」；若下一步只有單一、低風險、可逆的 finishing 動作，就應直接自動接續。
 - 同一種狀態只能有單一權威來源；其餘文件若需要呈現同類資訊，必須明確是 projection/derived view，且所有更新都要走同一個 sync 介面，不能混用手改與 script 回寫。
 - `nlsdd-go` 不是只做一次 truth scan；它語意上包含「補齊 truth 後繼續推進」。除非遇到需要使用者選路的分岔，否則不該停在 active lanes 已存在但尚未繼續執行的中間態。
+- `nlsdd-go` 的終點不能只看當前 execution 是否 no-op；要看相關 plan 是否真的跑完。若 execution 沒 lane 可跑但 plan 還有未完成項，應繼續 replan / reopen truthful work，而不是把「execution 暫時空了」誤報成整輪完成。

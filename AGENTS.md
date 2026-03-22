@@ -14,6 +14,7 @@
 - 若使用者輸入 `nlsdd-go`，將其視為固定口令：`proceed plan/*.md via nlsdd, reuse existing lanes`
 - `nlsdd-go` 預設行為是優先挑選 `plan/` 下目前 in-progress 的 plan，並優先沿用既有 `NLSDD` lanes / worktrees / execution；只有 lane 不足或 runtime truth 不一致時才 replan
 - `nlsdd-go` 包含繼續推進：main agent 應先補齊 execution/runtime truth，再直接推進目前 active lanes、review loop、commit intake 或下一批可派工項目；若沒有多路徑決策，不要停在中間只回報狀態等下一句 `proceed`
+- `nlsdd-go` 的執行終點是「所有相關 plan 都跑完」，不是「目前既有 NLSDD execution 沒有誠實可續跑的 lane」。若 execution 暫時 no-op，但 `plan/` 還有未完成項，main agent 應繼續做 drift-vs-real-work 判讀、必要時 replan/reopen execution，直到所有相關 plan 完成或被 truthfully 轉成新的後續 plan。
 
 ---
 

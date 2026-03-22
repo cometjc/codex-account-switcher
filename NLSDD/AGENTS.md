@@ -34,6 +34,7 @@
 - 若使用者輸入 `nlsdd-go`，將其視為 coordinator 快捷指令：`proceed plan/*.md via nlsdd, reuse existing lanes`。
 - `nlsdd-go` 應優先從 `plan/` 中挑選 in-progress plan，並盡量沿用既有 lane family、worktree 與 execution；只有無法 truthful 派工時才建立新 lane 或 replan active set。
 - `nlsdd-go` 不只是盤點 truth；它包含後續推進。main agent 應先補齊 active set、tracked surfaces 與 runtime truth，接著直接往下推進 active lanes、review/correction、commit intake，或下一批 honest dispatchable lanes；若沒有需要使用者決策的分岔，不要停在中間只回報目前狀態。
+- `nlsdd-go` 的完成條件是所有相關 plan 都完成，而不是單一 execution 暫時回到 `no-dispatchable-lane`。如果目前 execution 沒有可續跑 lane，但 `plan/` 還有未完成項，coordinator 應繼續區分哪些是 checkbox drift、哪些是真未完成工作，必要時把真工作 replan 回 honest lanes / execution，再繼續推進。
 - `NLSDD/` 只放實際執行所需 artefacts；通用定義、規格與不依賴單次 execution 的治理文件應維護在 `spec/NLSDD/`。
 - 只要一個 lane-local MVC step 已完成且驗證通過，就應預設立即收斂成 lane-item commit；不要把多個已完成 MVC step 疊在同一個未提交狀態裡。
 - 若某個 execution 開始收束成單一 critical lane，導致其他 slot 只是在等它完成，就應視為需要 replan 的訊號；優先切出新的獨立 lane，或改成同時推進 2-3 個 plans/executions，而不是維持假的 4-active 表象。
