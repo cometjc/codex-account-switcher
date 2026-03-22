@@ -10,6 +10,9 @@
 - `scripts/` 放 `NLSDD` 執行輔助腳本；若路徑或輸出格式變更，需同步更新 `package.json` scripts、tests 與相關文件。
 - 若要記錄執行期 insight，優先使用 `NLSDD/scripts/nlsdd-record-insight.cjs`；不要把這類動態觀察只留在 thread history 裡。
 - 若要記錄任何會改變 lane state 的 handoff，優先使用 `NLSDD/scripts/nlsdd-envelope.cjs`；`nlsdd-record-lane-state.cjs` 與 `nlsdd-record-insight.cjs` 只保留為相容 wrapper。
+- 若 worker 要執行有意義的 command，尤其是長時間、可能失敗、或可能沉默的 command，應優先用 `NLSDD/scripts/nlsdd-record-command-event.cjs` 記錄 `command-started`，並在結束後補 `command-finished` / `command-failed`。
+- 若 command 看起來卡住、沉默、或疑似被環境阻擋，worker 應補 `command-blocked`，並盡量附上 `blockKind`；若有 `ps` / `pstree` / `pgrep` 類旁證，應再補一筆 `command-probe`，不要只讓 coordinator 從 thread silence 猜。
+- `ps` / `pstree` / `pgrep` 只視為 worker-local 輔助證據，不應取代 event truth；coordinator 不應因為自己看不到另一個 agent 的 process tree，就直接推論該 worker idle。
 - 若工作正處於 `NLSDD` 階段，或剛完成 `NLSDD` 階段，而 prompt 包含 `review`，除了看 lane state / reviewer 結果外，也要一併檢視並規劃處理 `execution-insights` journal；至少要看 open / adopted insights 是否仍是 actionable execution-local insight、是否應升級成 lane item、是否該先 graduate 到 tracked spec / lessons，或是否應在 runtime journal 中標記為 resolved / rejected。
 - 若要重排某個 execution 的 active/parked lane set，優先使用 `NLSDD/scripts/nlsdd-replan-active-set.cjs`，不要只改 tracked scoreboard 而忘記同步 lane journal。
 - 若只是要跑一輪低判斷成本的 lane 調度，優先使用 `NLSDD/scripts/nlsdd-run-cycle.cjs`；它應一次完成 stale lane 收尾、runtime refresh、下一批 lane promotion，並回傳完成/派送/閒置 slot 狀態。

@@ -35,6 +35,23 @@ const ENVELOPE_EVENT_TYPES = [
   'adopted-insight',
   'resolved-insight',
   'insight-recorded',
+  'command-started',
+  'command-finished',
+  'command-failed',
+  'command-blocked',
+  'command-probe',
+];
+
+const COMMAND_BLOCK_KINDS = [
+  'dependency',
+  'environment',
+  'permission',
+  'tool',
+  'network',
+  'policy',
+  'waiting',
+  'review',
+  'other',
 ];
 
 function normalizeLane(value) {
@@ -45,6 +62,46 @@ function normalizeLane(value) {
     return value;
   }
   return `Lane ${value}`.replace(/^Lane\s+Lane\s+/, 'Lane ');
+}
+
+function parseOptionalNumber(value) {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeCommandStatus(eventType, status) {
+  if (status) {
+    return status;
+  }
+  switch (eventType) {
+    case 'command-started':
+      return 'started';
+    case 'command-finished':
+      return 'finished';
+    case 'command-failed':
+      return 'failed';
+    case 'command-blocked':
+      return 'blocked';
+    case 'command-probe':
+      return 'probe';
+    default:
+      return null;
+  }
+}
+
+function normalizeCommandBlockKind(value) {
+  if (value == null || value === '') {
+    return null;
+  }
+  if (!COMMAND_BLOCK_KINDS.includes(value)) {
+    throw new Error(
+      `Unknown command blockKind "${value}". Expected one of: ${COMMAND_BLOCK_KINDS.join(', ')}`,
+    );
+  }
+  return value;
 }
 
 function eventLogPath(projectRoot, execution) {
@@ -166,6 +223,12 @@ function normalizeEnvelope(projectRoot, rawEnvelope) {
     throw new Error(`Unknown NLSDD envelope eventType "${eventType}"`);
   }
 
+  const command = rawEnvelope.command || null;
+  const isCommandEvent = eventType.startsWith('command-');
+  if (isCommandEvent && !command) {
+    throw new Error(`command is required for NLSDD command telemetry eventType "${eventType}"`);
+  }
+
   const normalizedInsights = (rawEnvelope.insights || []).map((insight) => {
     validateInsight(insight);
     return {
@@ -184,7 +247,12 @@ function normalizeEnvelope(projectRoot, rawEnvelope) {
     };
   });
 
-  return {
+  const blockKind =
+    rawEnvelope.blockKind !== undefined
+      ? normalizeCommandBlockKind(rawEnvelope.blockKind)
+      : normalizeCommandBlockKind(rawEnvelope['block-kind']);
+
+  const envelope = {
     execution,
     lane,
     role,
@@ -215,6 +283,28 @@ function normalizeEnvelope(projectRoot, rawEnvelope) {
       rawEnvelope.eventId ||
       `${timestamp}-${lane.replace(/\s+/g, '-').toLowerCase()}-${eventType}`,
   };
+
+  if (isCommandEvent) {
+    envelope.command = command;
+    envelope.cwd = rawEnvelope.cwd || null;
+    envelope.status = normalizeCommandStatus(eventType, rawEnvelope.status || null);
+    envelope.exitCode =
+      rawEnvelope.exitCode !== undefined || rawEnvelope['exit-code'] !== undefined
+        ? parseOptionalNumber(rawEnvelope.exitCode ?? rawEnvelope['exit-code'])
+        : null;
+    envelope.durationMs =
+      rawEnvelope.durationMs !== undefined || rawEnvelope['duration-ms'] !== undefined
+        ? parseOptionalNumber(rawEnvelope.durationMs ?? rawEnvelope['duration-ms'])
+        : null;
+    envelope.blockKind = blockKind;
+    envelope.probeSummary = rawEnvelope.probeSummary || rawEnvelope['probe-summary'] || null;
+    envelope.pid =
+      rawEnvelope.pid !== undefined || rawEnvelope['pid'] !== undefined
+        ? parseOptionalNumber(rawEnvelope.pid ?? rawEnvelope['pid'])
+        : null;
+  }
+
+  return envelope;
 }
 
 function loadEnvelopeEvents(projectRoot, execution) {
@@ -338,6 +428,8 @@ function applyEventToLaneState(projectRoot, previous, event, rowMap) {
   const rowCurrentItem = emptyToNull(row?.['Current item']);
   const rowNextRefillTarget = emptyToNull(row?.['Next refill target']);
   const clearsProjectedFields = ['parked', 'noop-satisfied', 'resolved-blocker'].includes(event.eventType);
+  const isCommandEvent = event.eventType.startsWith('command-');
+  const isReviewerResultEvent = ['pass', 'fail'].includes(event.eventType);
   const explicitCurrentItem = Object.prototype.hasOwnProperty.call(event, 'currentItem');
   const explicitNextRefillTarget = Object.prototype.hasOwnProperty.call(event, 'nextRefillTarget');
   const explicitNextExpectedPhase = Object.prototype.hasOwnProperty.call(event, 'nextExpectedPhase');
@@ -357,7 +449,7 @@ function applyEventToLaneState(projectRoot, previous, event, rowMap) {
     proposedCommitBody:
       event.proposedCommitBody ?? previous.proposedCommitBody ?? null,
     lastReviewerResult:
-      event.eventType === 'bootstrap-state'
+      event.eventType === 'bootstrap-state' || !isReviewerResultEvent
         ? previous.lastReviewerResult || null
         : event.eventType,
     lastVerification:
@@ -371,6 +463,38 @@ function applyEventToLaneState(projectRoot, previous, event, rowMap) {
         ? previous.correctionCount || 0
         : Number(event.correctionCount),
     updatedAt: event.timestamp,
+    command:
+      isCommandEvent && Object.prototype.hasOwnProperty.call(event, 'command')
+        ? event.command
+        : previous.command ?? null,
+    cwd:
+      isCommandEvent && Object.prototype.hasOwnProperty.call(event, 'cwd')
+        ? event.cwd
+        : previous.cwd ?? null,
+    status:
+      isCommandEvent && Object.prototype.hasOwnProperty.call(event, 'status')
+        ? event.status
+        : previous.status ?? null,
+    exitCode:
+      isCommandEvent && Object.prototype.hasOwnProperty.call(event, 'exitCode')
+        ? event.exitCode
+        : previous.exitCode ?? null,
+    durationMs:
+      isCommandEvent && Object.prototype.hasOwnProperty.call(event, 'durationMs')
+        ? event.durationMs
+        : previous.durationMs ?? null,
+    blockKind:
+      isCommandEvent && Object.prototype.hasOwnProperty.call(event, 'blockKind')
+        ? event.blockKind
+        : previous.blockKind ?? null,
+    probeSummary:
+      isCommandEvent && Object.prototype.hasOwnProperty.call(event, 'probeSummary')
+        ? event.probeSummary
+        : previous.probeSummary ?? null,
+    pid:
+      isCommandEvent && Object.prototype.hasOwnProperty.call(event, 'pid')
+        ? event.pid
+        : previous.pid ?? null,
     currentItem:
       explicitCurrentItem
         ? event.currentItem
@@ -439,6 +563,14 @@ function projectLaneStateFiles(projectRoot, execution, states) {
           note: state.note,
           correctionCount: state.correctionCount,
           updatedAt: state.updatedAt,
+          command: state.command,
+          cwd: state.cwd,
+          status: state.status,
+          exitCode: state.exitCode,
+          durationMs: state.durationMs,
+          blockKind: state.blockKind,
+          probeSummary: state.probeSummary,
+          pid: state.pid,
           currentItem: state.currentItem,
           nextRefillTarget: state.nextRefillTarget,
           lastEventType: state.lastEventType,
@@ -584,4 +716,5 @@ module.exports = {
   prepareExecutionState,
   recordEnvelope,
   replaceCurrentLaneStatusSection,
+  COMMAND_BLOCK_KINDS,
 };

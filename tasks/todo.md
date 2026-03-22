@@ -1,3 +1,22 @@
+# 2026-03-22 NLSDD worker telemetry 與並行下降診斷設計
+
+- [x] 盤點現有 NLSDD event / lane state / insight surfaces，確認可直接投影每分鐘 worker 指標的基礎資料
+- [x] 將雙軌 worker 指標、總運作時間、command-blocked 沉默 worker 納入正式設計
+- [x] 設計 execution 結束後的自動回顧輸出，包含每段並行下降原因與資訊不足時的補資訊建議
+- [x] 將實驗結果收斂成 implementation plan，寫入 `plan/2026-03-22-nlsdd-worker-telemetry-implementation-plan.md`
+- [x] 依 plan 進入 TDD 實作與驗證
+
+## Review
+
+- 設計已收斂成 event-first telemetry：主資料源是 `events.ndjson`，不是 coordinator 側的全域 `ps` / `pstree`。
+- 實驗確認了三種不同情境都要分流：正常完成、快速失敗、以及可能的 blocked/waiting；不能把所有「無回覆」都當成 prompt gate。
+- 已落地 command lifecycle telemetry event、worker-local record helper、`telemetry-summary.json` 聚合，以及 `telemetry-review.md` renderer。
+- coordinator loop 現在會在 telemetry summary/review 存在時把 minute bucket 與 drop segment 摘要帶出來，`NLSDD/AGENTS.md` 也補上 worker 何時記 command events / probes 的規則。
+- 驗證已通過：
+  - `node --test tests/nlsdd-automation.test.js`
+  - `npm run nlsdd:scoreboard:refresh`
+  - `npm run build`
+
 # 2026-03-20 limits 欄位 header 修正
 
 # 2026-03-21 plot-mode integration branch 收斂

@@ -1,9 +1,14 @@
 #!/usr/bin/env node
 
-const {resolveProjectRoot, summarizeExecutionInsights} = require('./nlsdd-lib.cjs');
+const {
+  resolveProjectRoot,
+  summarizeExecutionInsights,
+} = require('./nlsdd-lib.cjs');
 const {launchActiveSet} = require('./nlsdd-launch-active-set.cjs');
 const {driveReviewLoop} = require('./nlsdd-drive-review-loop.cjs');
 const {intakeReadyToCommit} = require('./nlsdd-intake-ready-to-commit.cjs');
+const {summarizeTelemetry} = require('./nlsdd-summarize-telemetry.cjs');
+const {renderTelemetryReviewFile} = require('./nlsdd-render-telemetry-review.cjs');
 
 function parseArgs(argv) {
   const args = {maxActive: 4};
@@ -30,6 +35,8 @@ function runCoordinatorLoop(projectRoot, execution, maxActive = 4, dryRun = fals
   const reviewActions = reviewResult.actions;
   const commitIntake = intakeReadyToCommit(projectRoot, execution);
   const insightSummary = reviewResult.insightSummary || summarizeExecutionInsights(projectRoot, execution);
+  const telemetrySummary = summarizeTelemetry(projectRoot, execution);
+  const telemetryReview = renderTelemetryReviewFile(projectRoot, execution);
   return {
     execution,
     maxActiveThreads: maxActive,
@@ -44,6 +51,8 @@ function runCoordinatorLoop(projectRoot, execution, maxActive = 4, dryRun = fals
     reviewLaneCount: reviewActions.length,
     commitLaneCount: commitIntake.length,
     noDispatchReason: launch.noDispatchReason,
+    telemetrySummary,
+    telemetryReviewPath: telemetryReview.outputPath,
   };
 }
 
@@ -60,6 +69,15 @@ function renderCoordinatorLoop(result) {
     `Actionable insights: ${result.insightSummary.actionableCount}`,
     `Durable global learnings: ${result.insightSummary.durableLearningCount}`,
   ];
+
+  if (result.telemetrySummary) {
+    lines.push(
+      `Telemetry summary: ${result.telemetrySummary.minuteBuckets.length} minute bucket(s), ${result.telemetrySummary.dropSegments.length} drop segment(s)`,
+    );
+  }
+  if (result.telemetryReviewPath) {
+    lines.push(`Telemetry review: ${result.telemetryReviewPath}`);
+  }
 
   if (result.noDispatchReason) {
     lines.push(`No dispatch reason: ${result.noDispatchReason}`);

@@ -120,6 +120,20 @@ function resolvePreferredScoreboardPath(projectRoot = resolveProjectRoot()) {
   return resolveScoreboardPath(projectRoot);
 }
 
+function telemetrySummaryPath(projectRoot = resolveProjectRoot(), execution) {
+  if (!projectRoot || !execution) {
+    return null;
+  }
+  return path.join(projectRoot, 'NLSDD', 'state', execution, 'telemetry-summary.json');
+}
+
+function telemetryReviewPath(projectRoot = resolveProjectRoot(), execution) {
+  if (!projectRoot || !execution) {
+    return null;
+  }
+  return path.join(projectRoot, 'NLSDD', 'state', execution, 'telemetry-review.md');
+}
+
 function executionInsightsPath(projectRoot, execution) {
   if (!projectRoot || !execution) {
     return null;
@@ -135,6 +149,35 @@ function normalizeInsightLane(value) {
     return value;
   }
   return `Lane ${value}`.replace(/^Lane\s+Lane\s+/, 'Lane ');
+}
+
+function normalizeTelemetryMinuteOffset(firstActivityAt, timestamp) {
+  const startMs = new Date(firstActivityAt).getTime();
+  const eventMs = new Date(timestamp).getTime();
+  if (Number.isNaN(startMs) || Number.isNaN(eventMs)) {
+    return null;
+  }
+  return Math.max(0, Math.floor((eventMs - startMs) / 60_000));
+}
+
+function groupTelemetryEventsByMinuteAndLane(entries, firstActivityAt) {
+  const grouped = new Map();
+  for (const entry of entries) {
+    const minute = normalizeTelemetryMinuteOffset(firstActivityAt, entry.timestamp);
+    if (minute == null) {
+      continue;
+    }
+    if (!grouped.has(minute)) {
+      grouped.set(minute, new Map());
+    }
+    const minuteGroup = grouped.get(minute);
+    const lane = normalizeInsightLane(entry.lane || 'global');
+    if (!minuteGroup.has(lane)) {
+      minuteGroup.set(lane, []);
+    }
+    minuteGroup.get(lane).push(entry);
+  }
+  return grouped;
 }
 
 function loadExecutionInsights(projectRoot, execution) {
@@ -949,8 +992,12 @@ module.exports = {
   resolveScoreboardPath,
   resolveRuntimeScoreboardPath,
   resolvePreferredScoreboardPath,
+  telemetrySummaryPath,
+  telemetryReviewPath,
   executionInsightsPath,
   normalizeInsightLane,
+  normalizeTelemetryMinuteOffset,
+  groupTelemetryEventsByMinuteAndLane,
   loadExecutionInsights,
   collapseExecutionInsights,
   summarizeExecutionInsights,

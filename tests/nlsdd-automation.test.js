@@ -33,6 +33,16 @@ function writeLaneState(root, execution, laneNumber, state) {
   );
 }
 
+function writeTelemetryEvents(root, execution, events) {
+  const stateDir = path.join(root, 'NLSDD', 'state', execution);
+  fs.mkdirSync(stateDir, {recursive: true});
+  fs.writeFileSync(
+    path.join(stateDir, 'events.ndjson'),
+    `${events.map((event) => JSON.stringify(event)).join('\n')}\n`,
+    'utf8',
+  );
+}
+
 function setupTempGitRepo(dir) {
   fs.mkdirSync(dir, {recursive: true});
   run('git', ['init', '-q'], dir);
@@ -728,6 +738,679 @@ test('lane state recorder writes execution-aware journal files for coordinator t
   const event = JSON.parse(eventLines[0]);
   assert.equal(event.eventType, 'pass');
   assert.equal(event.phaseAfter, 'quality-review-pending');
+});
+
+test('envelope recorder preserves command telemetry fields for command lifecycle events', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-command-envelope-'));
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  const {loadEnvelopeEvents, recordEnvelope} = freshRequire('NLSDD/scripts/nlsdd-envelope.cjs');
+  const cases = [
+    {
+      eventType: 'command-started',
+      status: 'started',
+      exitCode: null,
+      durationMs: null,
+      blockKind: null,
+      probeSummary: null,
+    },
+    {
+      eventType: 'command-finished',
+      status: 'finished',
+      exitCode: 0,
+      durationMs: 1200,
+      blockKind: null,
+      probeSummary: null,
+    },
+    {
+      eventType: 'command-failed',
+      status: 'failed',
+      exitCode: 2,
+      durationMs: 2400,
+      blockKind: null,
+      probeSummary: null,
+    },
+    {
+      eventType: 'command-blocked',
+      status: 'blocked',
+      exitCode: null,
+      durationMs: 9000,
+      blockKind: 'dependency',
+      probeSummary: null,
+    },
+    {
+      eventType: 'command-probe',
+      status: 'probe',
+      exitCode: null,
+      durationMs: 4500,
+      blockKind: null,
+      probeSummary: 'stdout silent; worker still alive',
+    },
+  ];
+
+  for (const entry of cases) {
+    recordEnvelope(root, {
+      execution: 'plot-mode',
+      lane: 'Lane 1',
+      role: 'worker',
+      eventType: entry.eventType,
+      command: 'npm run nlsdd:probe',
+      cwd: '/tmp/codex-worker',
+      status: entry.status,
+      exitCode: entry.exitCode,
+      durationMs: entry.durationMs,
+      blockKind: entry.blockKind,
+      probeSummary: entry.probeSummary,
+      pid: 4321,
+      summary: `${entry.eventType} telemetry`,
+      timestamp: '2026-03-22T01:00:00.000Z',
+    });
+  }
+
+  const events = loadEnvelopeEvents(root, 'plot-mode').filter((event) =>
+    event.eventType.startsWith('command-'),
+  );
+
+  assert.equal(events.length, cases.length);
+  for (const entry of cases) {
+    const event = events.find((candidate) => candidate.eventType === entry.eventType);
+    assert.ok(event, `missing ${entry.eventType}`);
+    assert.equal(event.command, 'npm run nlsdd:probe');
+    assert.equal(event.cwd, '/tmp/codex-worker');
+    assert.equal(event.status, entry.status);
+    assert.equal(event.exitCode, entry.exitCode);
+    assert.equal(event.durationMs, entry.durationMs);
+    assert.equal(event.blockKind, entry.blockKind);
+    assert.equal(event.probeSummary, entry.probeSummary);
+    assert.equal(event.pid, 4321);
+  }
+});
+
+test('envelope recorder rejects invalid command block kinds', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-command-blockkind-'));
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  const {recordEnvelope} = freshRequire('NLSDD/scripts/nlsdd-envelope.cjs');
+
+  assert.throws(
+    () =>
+      recordEnvelope(root, {
+        execution: 'plot-mode',
+        lane: 'Lane 1',
+        role: 'worker',
+        eventType: 'command-blocked',
+        command: 'npm run nlsdd:probe',
+        cwd: '/tmp/codex-worker',
+        status: 'blocked',
+        blockKind: 'unmapped-kind',
+        summary: 'command-blocked telemetry',
+        timestamp: '2026-03-22T01:00:00.000Z',
+      }),
+    /blockKind/i,
+  );
+});
+
+test('command telemetry survives later ordinary lane updates without changing reviewer state', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-command-state-'));
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  const {recordEnvelope} = freshRequire('NLSDD/scripts/nlsdd-envelope.cjs');
+
+  recordEnvelope(root, {
+    execution: 'plot-mode',
+    lane: 'Lane 1',
+    role: 'worker',
+    eventType: 'pass',
+    phaseAfter: 'quality-review-pending',
+    currentItem: 'Record command lifecycle events',
+    summary: 'lane passed review',
+    timestamp: '2026-03-22T01:00:00.000Z',
+  });
+  recordEnvelope(root, {
+    execution: 'plot-mode',
+    lane: 'Lane 1',
+    role: 'worker',
+    eventType: 'command-blocked',
+    command: 'npm run nlsdd:probe',
+    cwd: '/tmp/codex-worker',
+    status: 'blocked',
+    blockKind: 'dependency',
+    durationMs: 9000,
+    pid: 4321,
+    summary: 'command-blocked telemetry',
+    timestamp: '2026-03-22T01:01:00.000Z',
+  });
+  recordEnvelope(root, {
+    execution: 'plot-mode',
+    lane: 'Lane 1',
+    role: 'worker',
+    eventType: 'state-update',
+    phaseAfter: 'refill-ready',
+    summary: 'ordinary lane state update',
+    timestamp: '2026-03-22T01:02:00.000Z',
+  });
+
+  const laneState = JSON.parse(
+    fs.readFileSync(path.join(root, 'NLSDD', 'state', 'plot-mode', 'lane-1.json'), 'utf8'),
+  );
+  assert.equal(laneState.lastReviewerResult, 'pass');
+  assert.equal(laneState.command, 'npm run nlsdd:probe');
+  assert.equal(laneState.cwd, '/tmp/codex-worker');
+  assert.equal(laneState.status, 'blocked');
+  assert.equal(laneState.blockKind, 'dependency');
+  assert.equal(laneState.durationMs, 9000);
+  assert.equal(laneState.pid, 4321);
+});
+
+test('command telemetry helper records canonical envelopes and is wired to npm scripts', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-command-cli-'));
+  const originalProjectRoot = process.env.NLSDD_PROJECT_ROOT;
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  try {
+    const packageJson = JSON.parse(fs.readFileSync(repoRoot('package.json'), 'utf8'));
+    assert.equal(
+      packageJson.scripts['nlsdd:command:record'],
+      'node NLSDD/scripts/nlsdd-record-command-event.cjs',
+    );
+
+    const executionDir = path.join(root, 'NLSDD', 'executions', 'plot-mode');
+    fs.mkdirSync(executionDir, {recursive: true});
+    fs.writeFileSync(
+      path.join(executionDir, 'lane-1.md'),
+      `# Lane 1
+
+> Ownership family:
+> \`tests/nlsdd-automation.test.js\`
+
+NLSDD worktree: \`.worktrees/lane-1-worker\`
+
+Lane-local verification:
+\`node --test tests/nlsdd-automation.test.js\`
+`,
+      'utf8',
+    );
+    fs.mkdirSync(path.join(root, 'NLSDD'), {recursive: true});
+    fs.writeFileSync(
+      path.join(root, 'NLSDD', 'scoreboard.md'),
+      `# NLSDD Scoreboard
+
+| Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| plot-mode | Lane 1 | Worker telemetry | Record command lifecycle events | queued | \`n/a\` | \`node --test tests/nlsdd-automation.test.js\` | none | n/a | telemetry lane |
+`,
+      'utf8',
+    );
+
+    const commandCli = repoRoot('NLSDD/scripts/nlsdd-record-command-event.cjs');
+    run(
+      'node',
+      [
+        commandCli,
+        '--execution',
+        'plot-mode',
+        '--lane',
+        '1',
+        '--event-type',
+        'command-probe',
+        '--command',
+        'npm run nlsdd:probe',
+        '--cwd',
+        '/tmp/codex-worker',
+        '--status',
+        'probe',
+        '--duration-ms',
+        '4500',
+        '--probe-summary',
+        'stdout silent; worker still alive',
+        '--pid',
+        '4321',
+        '--timestamp',
+        '2026-03-22T01:05:00.000Z',
+      ],
+      root,
+    );
+    run(
+      'node',
+      [
+        commandCli,
+        '--execution',
+        'plot-mode',
+        '--lane',
+        '1',
+        '--event-type',
+        'command-blocked',
+        '--command',
+        'npm run nlsdd:probe',
+        '--cwd',
+        '/tmp/codex-worker',
+        '--status',
+        'blocked',
+        '--block-kind',
+        'dependency',
+        '--duration-ms',
+        '9000',
+        '--pid',
+        '4321',
+        '--timestamp',
+        '2026-03-22T01:06:00.000Z',
+      ],
+      root,
+    );
+    run(
+      'node',
+      [
+        commandCli,
+        '--execution',
+        'plot-mode',
+        '--lane',
+        '1',
+        '--event-type',
+        'command-failed',
+        '--command',
+        'npm run nlsdd:test',
+        '--cwd',
+        '/tmp/codex-worker',
+        '--status',
+        'failed',
+        '--exit-code',
+        '2',
+        '--duration-ms',
+        '1200',
+        '--pid',
+        '4321',
+        '--timestamp',
+        '2026-03-22T01:07:00.000Z',
+      ],
+      root,
+    );
+
+    const eventsPath = path.join(root, 'NLSDD', 'state', 'plot-mode', 'events.ndjson');
+    const events = fs
+      .readFileSync(eventsPath, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    const recordedProbe = events.find((event) => event.eventType === 'command-probe');
+    const recordedBlocked = events.find((event) => event.eventType === 'command-blocked');
+    const recordedFailed = events.find((event) => event.eventType === 'command-failed');
+    assert.ok(recordedProbe, 'command-probe event was not recorded');
+    assert.ok(recordedBlocked, 'command-blocked event was not recorded');
+    assert.ok(recordedFailed, 'command-failed event was not recorded');
+    assert.equal(recordedProbe.command, 'npm run nlsdd:probe');
+    assert.equal(recordedProbe.cwd, '/tmp/codex-worker');
+    assert.equal(recordedProbe.status, 'probe');
+    assert.equal(recordedProbe.durationMs, 4500);
+    assert.equal(recordedProbe.probeSummary, 'stdout silent; worker still alive');
+    assert.equal(recordedProbe.pid, 4321);
+    assert.equal(recordedBlocked.blockKind, 'dependency');
+    assert.equal(recordedBlocked.status, 'blocked');
+    assert.equal(recordedBlocked.durationMs, 9000);
+    assert.equal(recordedBlocked.pid, 4321);
+    assert.equal(recordedFailed.exitCode, 2);
+    assert.equal(recordedFailed.status, 'failed');
+    assert.equal(recordedFailed.durationMs, 1200);
+    assert.equal(recordedFailed.pid, 4321);
+  } finally {
+    if (originalProjectRoot === undefined) {
+      delete process.env.NLSDD_PROJECT_ROOT;
+    } else {
+      process.env.NLSDD_PROJECT_ROOT = originalProjectRoot;
+    }
+  }
+});
+
+test('telemetry summarizer projects minute buckets and drop diagnostics from execution events', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-telemetry-'));
+  const execution = 'plot-mode';
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  writeTelemetryEvents(root, execution, [
+    {
+      execution,
+      lane: 'Lane 1',
+      role: 'coordinator',
+      eventType: 'bootstrap-state',
+      phaseAfter: 'implementing',
+      summary: 'Lane 1 is actively implementing',
+      timestamp: '2026-03-22T01:00:00.000Z',
+    },
+    {
+      execution,
+      lane: 'Lane 2',
+      role: 'coordinator',
+      eventType: 'bootstrap-state',
+      phaseAfter: 'implementing',
+      summary: 'Lane 2 is actively implementing',
+      timestamp: '2026-03-22T01:00:00.000Z',
+    },
+    {
+      execution,
+      lane: 'Lane 3',
+      role: 'coordinator',
+      eventType: 'bootstrap-state',
+      phaseAfter: 'implementing',
+      summary: 'Lane 3 is actively implementing',
+      timestamp: '2026-03-22T01:00:00.000Z',
+    },
+    {
+      execution,
+      lane: 'Lane 4',
+      role: 'coordinator',
+      eventType: 'bootstrap-state',
+      phaseAfter: 'implementing',
+      summary: 'Lane 4 is actively implementing',
+      timestamp: '2026-03-22T01:00:00.000Z',
+    },
+    {
+      execution,
+      lane: 'Lane 5',
+      role: 'coordinator',
+      eventType: 'bootstrap-state',
+      phaseAfter: 'implementing',
+      summary: 'Lane 5 is actively implementing',
+      timestamp: '2026-03-22T01:00:00.000Z',
+    },
+    {
+      execution,
+      lane: 'Lane 1',
+      role: 'worker',
+      eventType: 'ready-to-commit',
+      phaseAfter: 'coordinator-commit-pending',
+      summary: 'Lane 1 is waiting for the coordinator commit gate',
+      timestamp: '2026-03-22T01:01:00.000Z',
+    },
+    {
+      execution,
+      lane: 'Lane 2',
+      role: 'worker',
+      eventType: 'command-started',
+      command: 'curl google.com',
+      cwd: '/tmp/codex-worker',
+      status: 'started',
+      summary: 'Lane 2 started a network probe',
+      timestamp: '2026-03-22T01:02:00.000Z',
+    },
+    {
+      execution,
+      lane: 'Lane 2',
+      role: 'worker',
+      eventType: 'command-failed',
+      command: 'curl google.com',
+      cwd: '/tmp/codex-worker',
+      status: 'failed',
+      exitCode: 6,
+      durationMs: 900,
+      summary: 'curl failed fast on DNS resolution',
+      timestamp: '2026-03-22T01:02:20.000Z',
+    },
+    {
+      execution,
+      lane: 'Lane 3',
+      role: 'worker',
+      eventType: 'command-probe',
+      command: 'npm run nlsdd:probe',
+      cwd: '/tmp/codex-worker',
+      status: 'probe',
+      durationMs: 4500,
+      probeSummary: 'stdout silent; worker still alive',
+      summary: 'Lane 3 is still alive but silent',
+      timestamp: '2026-03-22T01:03:00.000Z',
+    },
+    {
+      execution,
+      lane: 'Lane 3',
+      role: 'worker',
+      eventType: 'command-blocked',
+      command: 'npm run nlsdd:probe',
+      cwd: '/tmp/codex-worker',
+      status: 'blocked',
+      blockKind: 'dependency',
+      durationMs: 9000,
+      summary: 'Lane 3 is blocked on a dependency with probe evidence',
+      timestamp: '2026-03-22T01:03:10.000Z',
+    },
+    {
+      execution,
+      lane: 'Lane 4',
+      role: 'coordinator',
+      eventType: 'state-update',
+      phaseAfter: 'blocked',
+      blockedBy: 'dependency',
+      summary: 'Lane 4 is blocked by a dependency',
+      timestamp: '2026-03-22T01:04:00.000Z',
+    },
+    {
+      execution,
+      lane: 'Lane 5',
+      role: 'coordinator',
+      eventType: 'state-update',
+      phaseAfter: 'queued',
+      summary: 'Lane 5 fell silent without diagnostic evidence',
+      timestamp: '2026-03-22T01:05:00.000Z',
+    },
+  ]);
+
+  const {telemetrySummaryPath, summarizeTelemetry} = freshRequire(
+    'NLSDD/scripts/nlsdd-summarize-telemetry.cjs',
+  );
+  const summary = summarizeTelemetry(root, execution);
+  const summaryPath = telemetrySummaryPath(root, execution);
+  const summaryOnDisk = JSON.parse(fs.readFileSync(summaryPath, 'utf8'));
+
+  assert.equal(summaryPath, path.join(root, 'NLSDD', 'state', execution, 'telemetry-summary.json'));
+  assert.deepEqual(summaryOnDisk, summary);
+  assert.equal(summary.execution, execution);
+  assert.equal(summary.firstActivityAt, '2026-03-22T01:00:00.000Z');
+  assert.equal(summary.lastActivityAt, '2026-03-22T01:05:00.000Z');
+  assert.equal(summary.wallClockDurationMs, 300000);
+  assert.equal(summary.minuteBuckets.length, 6);
+  assert.deepEqual(
+    summary.minuteBuckets.map((bucket) => ({
+      minute: bucket.minute,
+      minuteStartAt: bucket.minuteStartAt,
+      activeWorkers: bucket.activeWorkers,
+      productiveWorkers: bucket.productiveWorkers,
+    })),
+    [
+      {minute: 0, minuteStartAt: '2026-03-22T01:00:00.000Z', activeWorkers: 5, productiveWorkers: 5},
+      {minute: 1, minuteStartAt: '2026-03-22T01:01:00.000Z', activeWorkers: 5, productiveWorkers: 4},
+      {minute: 2, minuteStartAt: '2026-03-22T01:02:00.000Z', activeWorkers: 4, productiveWorkers: 3},
+      {minute: 3, minuteStartAt: '2026-03-22T01:03:00.000Z', activeWorkers: 4, productiveWorkers: 2},
+      {minute: 4, minuteStartAt: '2026-03-22T01:04:00.000Z', activeWorkers: 4, productiveWorkers: 1},
+      {minute: 5, minuteStartAt: '2026-03-22T01:05:00.000Z', activeWorkers: 3, productiveWorkers: 0},
+    ],
+  );
+
+  const segmentsByReason = new Map();
+  for (const segment of summary.dropSegments) {
+    if (!segmentsByReason.has(segment.reason)) {
+      segmentsByReason.set(segment.reason, []);
+    }
+    segmentsByReason.get(segment.reason).push(segment);
+  }
+  assert.equal(segmentsByReason.size, 5);
+  for (const reason of [
+    'handoff-wait',
+    'fast-fail',
+    'command-blocked-with-probe-evidence',
+    'dependency-blocked',
+    'unknown-silence',
+  ]) {
+    assert.ok(segmentsByReason.has(reason), `missing drop segment reason: ${reason}`);
+  }
+
+  const handoffWait = segmentsByReason.get('handoff-wait').find(
+    (segment) => segment.metric === 'productiveWorkers',
+  );
+  assert.equal(handoffWait.metric, 'productiveWorkers');
+  assert.equal(handoffWait.fromMinute, '2026-03-22T01:00:00.000Z');
+  assert.equal(handoffWait.toMinute, '2026-03-22T01:01:00.000Z');
+  assert.ok(handoffWait.supportingEvents.some((event) => event.eventType === 'ready-to-commit'));
+  assert.ok(Array.isArray(handoffWait.missingSignals));
+  assert.equal(handoffWait.confidence, 'high');
+
+  const fastFail = segmentsByReason.get('fast-fail').find(
+    (segment) => segment.metric === 'activeWorkers',
+  );
+  assert.equal(fastFail.metric, 'activeWorkers');
+  assert.equal(fastFail.fromMinute, '2026-03-22T01:01:00.000Z');
+  assert.equal(fastFail.toMinute, '2026-03-22T01:02:00.000Z');
+  assert.ok(fastFail.supportingEvents.some((event) => event.eventType === 'command-failed'));
+  assert.ok(fastFail.supportingEvents.some((event) => event.command === 'curl google.com'));
+  assert.equal(fastFail.confidence, 'high');
+
+  const blockedWithProbe = segmentsByReason.get('command-blocked-with-probe-evidence').find(
+    (segment) => segment.metric === 'productiveWorkers',
+  );
+  assert.equal(blockedWithProbe.metric, 'productiveWorkers');
+  assert.equal(blockedWithProbe.fromMinute, '2026-03-22T01:02:00.000Z');
+  assert.equal(blockedWithProbe.toMinute, '2026-03-22T01:03:00.000Z');
+  assert.ok(blockedWithProbe.supportingEvents.some((event) => event.eventType === 'command-probe'));
+  assert.ok(blockedWithProbe.supportingEvents.some((event) => event.eventType === 'command-blocked'));
+  assert.equal(blockedWithProbe.confidence, 'high');
+
+  const dependencyBlocked = segmentsByReason.get('dependency-blocked').find(
+    (segment) => segment.metric === 'productiveWorkers',
+  );
+  assert.equal(dependencyBlocked.metric, 'productiveWorkers');
+  assert.equal(dependencyBlocked.fromMinute, '2026-03-22T01:03:00.000Z');
+  assert.equal(dependencyBlocked.toMinute, '2026-03-22T01:04:00.000Z');
+  assert.ok(dependencyBlocked.supportingEvents.some((event) => event.blockedBy === 'dependency'));
+  assert.equal(dependencyBlocked.confidence, 'high');
+
+  const unknownSilence = segmentsByReason.get('unknown-silence').find(
+    (segment) => segment.metric === 'activeWorkers',
+  );
+  assert.equal(unknownSilence.metric, 'activeWorkers');
+  assert.equal(unknownSilence.fromMinute, '2026-03-22T01:04:00.000Z');
+  assert.equal(unknownSilence.toMinute, '2026-03-22T01:05:00.000Z');
+  assert.deepEqual(unknownSilence.missingSignals, [
+    'command lifecycle events',
+    'worker-local probe evidence',
+  ]);
+  assert.equal(unknownSilence.confidence, 'low');
+});
+
+test('telemetry review renderer writes coordinator-readable markdown output', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-telemetry-review-'));
+  const execution = 'plot-mode';
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  const stateDir = path.join(root, 'NLSDD', 'state', execution);
+  fs.mkdirSync(stateDir, {recursive: true});
+  fs.writeFileSync(
+    path.join(stateDir, 'telemetry-summary.json'),
+    `${JSON.stringify(
+      {
+        execution,
+        firstActivityAt: '2026-03-22T01:00:00.000Z',
+        lastActivityAt: '2026-03-22T01:05:00.000Z',
+        wallClockDurationMs: 300000,
+        minuteBuckets: [
+          {
+            minute: 0,
+            minuteStartAt: '2026-03-22T01:00:00.000Z',
+            activeWorkers: 5,
+            productiveWorkers: 5,
+          },
+          {
+            minute: 1,
+            minuteStartAt: '2026-03-22T01:01:00.000Z',
+            activeWorkers: 5,
+            productiveWorkers: 4,
+          },
+        ],
+        dropSegments: [
+          {
+            fromMinute: '2026-03-22T01:00:00.000Z',
+            toMinute: '2026-03-22T01:01:00.000Z',
+            metric: 'productiveWorkers',
+            reason: 'handoff-wait',
+            confidence: 'high',
+            missingSignals: ['coordinator commit acknowledgement'],
+          },
+        ],
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  );
+
+  const {renderTelemetryReviewFile} = freshRequire(
+    'NLSDD/scripts/nlsdd-render-telemetry-review.cjs',
+  );
+  const {outputPath, content} = renderTelemetryReviewFile(root, execution);
+
+  assert.equal(outputPath, path.join(stateDir, 'telemetry-review.md'));
+  assert.equal(fs.existsSync(outputPath), true);
+  assert.match(content, /# plot-mode Telemetry Review/);
+  assert.match(content, /Wall clock duration: 300000 ms/);
+  assert.match(content, /\| Minute \| Active workers \| Productive workers \|/);
+  assert.match(content, /handoff-wait \[productiveWorkers\]/);
+  assert.match(content, /Missing signals: coordinator commit acknowledgement/);
+});
+
+test('telemetry summarizer keeps implementing lanes productive after command-finished and avoids generic blocked->dependency diagnosis', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-telemetry-edge-'));
+  const execution = 'plot-mode';
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  writeTelemetryEvents(root, execution, [
+    {
+      execution,
+      lane: 'Lane 1',
+      role: 'coordinator',
+      eventType: 'bootstrap-state',
+      phaseAfter: 'implementing',
+      summary: 'Lane 1 implementing',
+      timestamp: '2026-03-22T02:00:00.000Z',
+    },
+    {
+      execution,
+      lane: 'Lane 1',
+      role: 'worker',
+      eventType: 'command-finished',
+      command: 'npm test',
+      cwd: '/tmp/lane-1',
+      status: 'finished',
+      durationMs: 1200,
+      summary: 'Lane 1 command finished',
+      timestamp: '2026-03-22T02:00:10.000Z',
+    },
+    {
+      execution,
+      lane: 'Lane 2',
+      role: 'coordinator',
+      eventType: 'bootstrap-state',
+      phaseAfter: 'implementing',
+      summary: 'Lane 2 implementing',
+      timestamp: '2026-03-22T02:00:00.000Z',
+    },
+    {
+      execution,
+      lane: 'Lane 2',
+      role: 'coordinator',
+      eventType: 'state-update',
+      phaseAfter: 'blocked',
+      blockedBy: 'permission-prompt',
+      summary: 'Lane 2 blocked on permission prompt',
+      timestamp: '2026-03-22T02:01:00.000Z',
+    },
+  ]);
+
+  const {summarizeTelemetry} = freshRequire('NLSDD/scripts/nlsdd-summarize-telemetry.cjs');
+  const summary = summarizeTelemetry(root, execution);
+
+  assert.equal(summary.minuteBuckets[0].productiveWorkers, 2);
+  assert.equal(summary.minuteBuckets[1].productiveWorkers, 1);
+
+  const unknownSilence = summary.dropSegments.find(
+    (segment) =>
+      segment.reason === 'unknown-silence' && segment.metric === 'productiveWorkers',
+  );
+  assert.ok(unknownSilence, 'expected unknown-silence productive drop');
 });
 
 test('envelope reducer projects tracked scoreboard and lane status from a single handoff event', () => {
@@ -2048,6 +2731,118 @@ test('coordinator loop combines launch, review, and commit intake into one summa
   assert.equal(result.reviewActions.some((entry) => entry.lane === 'Lane 5' && entry.action === 'coordinator-commit-needed'), true);
   assert.equal(result.commitIntake[0].lane, 'Lane 5');
   assert.equal(result.commitIntake[0].proposedCommitTitle, 'docs(plot): 補上 recovery baseline 操作說明');
+});
+
+test('coordinator loop surfaces telemetry summary and review path when present', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-loop-telemetry-'));
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  const lane2Worktree = path.join(root, '.worktrees', 'lane-2-runtime');
+  setupTempGitRepo(lane2Worktree);
+  const lane2Head = run('git', ['rev-parse', '--short', 'HEAD'], lane2Worktree);
+
+  fs.mkdirSync(path.join(root, 'NLSDD', 'executions', 'plot-mode'), {recursive: true});
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-2.md'),
+    `# Lane 2
+
+> Ownership family:
+> \`rust/plot-viewer/src/render/mod.rs\`
+>
+> NLSDD worktree: \`.worktrees/lane-2-runtime\`
+>
+> Lane-local verification:
+> \`cargo test --manifest-path rust/plot-viewer/Cargo.toml\`
+
+## V - View
+
+- [ ] Runtime compare seam follow-up
+`,
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'scoreboard.md'),
+    `# NLSDD Scoreboard
+
+| Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| plot-mode | Lane 2 | Rust runtime + boundary | Runtime compare seam follow-up | queued | \`${lane2Head}\` | \`cargo test --manifest-path rust/plot-viewer/Cargo.toml\` | none | none | queued row |
+`,
+    'utf8',
+  );
+  writeLaneState(root, 'plot-mode', 2, {
+    execution: 'plot-mode',
+    lane: 'Lane 2',
+    phase: 'queued',
+    'expected-next-phase': 'implementing',
+    commit: lane2Head,
+    verification: ['cargo test --manifest-path rust/plot-viewer/Cargo.toml'],
+    note: 'ready to dispatch',
+    'updated-at': '2026-03-21T11:30:00.000Z',
+  });
+
+  const stateDir = path.join(root, 'NLSDD', 'state', 'plot-mode');
+  fs.mkdirSync(stateDir, {recursive: true});
+  fs.writeFileSync(
+    path.join(stateDir, 'telemetry-summary.json'),
+    `${JSON.stringify(
+      {
+        execution: 'plot-mode',
+        firstActivityAt: '2026-03-22T01:00:00.000Z',
+        lastActivityAt: '2026-03-22T01:05:00.000Z',
+        wallClockDurationMs: 300000,
+        minuteBuckets: [
+          {
+            minute: 0,
+            minuteStartAt: '2026-03-22T01:00:00.000Z',
+            activeWorkers: 1,
+            productiveWorkers: 1,
+          },
+        ],
+        dropSegments: [
+          {
+            fromMinute: '2026-03-22T01:00:00.000Z',
+            toMinute: '2026-03-22T01:01:00.000Z',
+            metric: 'productiveWorkers',
+            reason: 'handoff-wait',
+            confidence: 'high',
+            missingSignals: [],
+          },
+        ],
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(stateDir, 'telemetry-review.md'),
+    '# plot-mode Telemetry Review\n',
+    'utf8',
+  );
+
+  const {runCoordinatorLoop, renderCoordinatorLoop} = freshRequire(
+    'NLSDD/scripts/nlsdd-run-coordinator-loop.cjs',
+  );
+  const packageJson = JSON.parse(fs.readFileSync(repoRoot('package.json'), 'utf8'));
+  const result = runCoordinatorLoop(root, 'plot-mode', 4, false);
+  const rendered = renderCoordinatorLoop(result);
+
+  assert.equal(
+    packageJson.scripts['nlsdd:telemetry:summarize'],
+    'node NLSDD/scripts/nlsdd-summarize-telemetry.cjs',
+  );
+  assert.equal(
+    packageJson.scripts['nlsdd:telemetry:review'],
+    'node NLSDD/scripts/nlsdd-render-telemetry-review.cjs',
+  );
+  assert.ok(result.telemetrySummary.minuteBuckets.length >= 1);
+  assert.equal(
+    result.telemetryReviewPath,
+    path.join(root, 'NLSDD', 'state', 'plot-mode', 'telemetry-review.md'),
+  );
+  assert.match(rendered, /Telemetry summary: \d+ minute bucket\(s\), \d+ drop segment\(s\)/);
+  assert.match(rendered, /Telemetry review:/);
 });
 
 test('dispatch plan helper builds a prioritized action queue from autopilot output', () => {
