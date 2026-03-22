@@ -594,6 +594,82 @@ function buildLaunchFromExecutor(
   };
 }
 
+function buildScheduleFromExecutor(
+  projectRoot = resolveProjectRoot(),
+  execution,
+  maxActive = 4,
+) {
+  ensureExecutorDb(projectRoot);
+  const lanes = listLanes(projectRoot, execution);
+  const activeRows = lanes
+    .filter((entry) => entry.phase === 'implementing')
+    .map((entry) => ({Lane: entry.laneName, schedulingPhase: entry.phase, 'Current item': entry.currentItem}));
+  const refillReadyRows = lanes
+    .filter((entry) => entry.phase === 'refill-ready')
+    .map((entry) => ({Lane: entry.laneName, schedulingPhase: entry.phase, 'Current item': entry.currentItem}));
+  const queuedRows = lanes
+    .filter((entry) => entry.phase === 'queued')
+    .map((entry) => ({Lane: entry.laneName, schedulingPhase: entry.phase, 'Current item': entry.currentItem}));
+  const blockedRows = lanes
+    .filter((entry) => entry.phase === 'blocked')
+    .map((entry) => ({Lane: entry.laneName, schedulingPhase: entry.phase, 'Current item': entry.currentItem}));
+  const availableSlots = Math.max(0, maxActive - activeRows.length);
+
+  return {
+    source: 'executor',
+    execution,
+    maxActiveThreads: maxActive,
+    activeRows,
+    refillReadyRows,
+    queuedRows,
+    blockedRows,
+    staleRows: [],
+    availableSlots,
+    dispatchSuggestions: queuedRows.slice(0, availableSlots).map((row, index) => ({
+      slot: index + 1,
+      lane: row.Lane,
+      phase: row.schedulingPhase,
+      nextItem: row['Current item'],
+      nextItemSection: 'Imported lane item',
+    })),
+  };
+}
+
+function suggestRefillFromExecutor(projectRoot = resolveProjectRoot(), execution, lane = null) {
+  ensureExecutorDb(projectRoot);
+  const rows = runSqlRows(
+    projectRoot,
+    `
+select
+  lane_name,
+  coalesce(current_item, ''),
+  phase,
+  coalesce(next_refill_target, '')
+from lanes
+where execution_name = ${sqliteEscape(execution)}
+${lane ? `and lane_name = ${sqliteEscape(lane)}` : ''}
+order by lane_name;
+    `,
+  ).map(([laneName, currentItem, phase, nextRefillTarget]) => ({
+    source: 'executor',
+    execution,
+    lane: laneName,
+    eligible: phase === 'refill-ready',
+    currentItem,
+    effectivePhase: phase,
+    nextItem: nextRefillTarget || null,
+    nextItemSection: nextRefillTarget ? 'Imported refill target' : null,
+    outcome:
+      phase === 'refill-ready'
+        ? nextRefillTarget
+          ? 'refill-target'
+          : 'lane-exhausted'
+        : 'not-ready',
+  }));
+
+  return lane ? rows[0] || null : rows;
+}
+
 function buildReviewLoopFromExecutor(projectRoot = resolveProjectRoot(), execution, lane = null) {
   ensureExecutorDb(projectRoot);
   const actions = runSqlRows(
@@ -822,6 +898,7 @@ module.exports = {
   buildLaunchFromExecutor,
   buildCommitIntakeFromExecutor,
   buildReviewLoopFromExecutor,
+  buildScheduleFromExecutor,
   auditExecutor,
   claimAssignment,
   ensureExecutorDb,
@@ -831,4 +908,5 @@ module.exports = {
   importPlanFiles,
   reportResult,
   resolveExecutorDbPath,
+  suggestRefillFromExecutor,
 };

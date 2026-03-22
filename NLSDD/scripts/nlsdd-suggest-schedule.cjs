@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 
 const {computeExecutionSchedule, resolveProjectRoot} = require('./nlsdd-lib.cjs');
+const {
+  buildScheduleFromExecutor,
+  hasExecutorDb,
+} = require('./nlsdd-executor-lib.cjs');
 const {prepareExecutionState} = require('./nlsdd-envelope.cjs');
 
 function parseArgs(argv) {
@@ -67,6 +71,15 @@ function main() {
     );
   }
   const projectRoot = resolveProjectRoot();
+  if (hasExecutorDb(projectRoot)) {
+    const schedule = buildScheduleFromExecutor(projectRoot, args.execution, args.maxActive);
+    if (args.json) {
+      process.stdout.write(`${JSON.stringify(schedule, null, 2)}\n`);
+      return;
+    }
+    process.stdout.write(`${renderSchedule(schedule)}\n`);
+    return;
+  }
   prepareExecutionState(projectRoot, args.execution);
   const schedule = computeExecutionSchedule(projectRoot, args.execution, args.maxActive);
   if (args.json) {

@@ -6,6 +6,10 @@ const {
   resolvePreferredScoreboardPath,
   findNextRefillItem,
 } = require('./nlsdd-lib.cjs');
+const {
+  hasExecutorDb,
+  suggestRefillFromExecutor,
+} = require('./nlsdd-executor-lib.cjs');
 const {prepareExecutionState} = require('./nlsdd-envelope.cjs');
 
 function parseArgs(argv) {
@@ -26,6 +30,9 @@ function parseArgs(argv) {
 }
 
 function suggestRefill(projectRoot, execution, lane = null) {
+  if (hasExecutorDb(projectRoot)) {
+    return suggestRefillFromExecutor(projectRoot, execution, lane);
+  }
   prepareExecutionState(projectRoot, execution);
   const scoreboardPath = resolvePreferredScoreboardPath(projectRoot);
   const scoreboardText = require('node:fs').readFileSync(scoreboardPath, 'utf8');

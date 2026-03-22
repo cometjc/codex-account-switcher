@@ -361,3 +361,46 @@ test('legacy cycle and launch helpers emit executor-backed promotions after migr
   assert.equal(launch.assignments[0].lane, 'Lane 1');
   assert.match(launch.assignments[0].message, /Lane branch: nlsdd\/demo-flow\/lane-1/);
 });
+
+test('legacy schedule and refill helpers read executor-backed state after migration', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-executor-schedule-'));
+  writeFixture(root);
+  runExecutor(root, 'import-plans', '--cleanup', '--json');
+
+  const schedule = JSON.parse(
+    run(
+      'node',
+      [
+        repoRoot('NLSDD', 'scripts', 'nlsdd-suggest-schedule.cjs'),
+        '--execution',
+        'demo-flow',
+        '--json',
+      ],
+      root,
+    ),
+  );
+  assert.equal(schedule.source, 'executor');
+  assert.equal(schedule.availableSlots, 4);
+  assert.deepEqual(schedule.queuedRows.map((row) => row.Lane), ['Lane 1']);
+  assert.deepEqual(schedule.dispatchSuggestions.map((entry) => entry.lane), ['Lane 1']);
+
+  const refill = JSON.parse(
+    run(
+      'node',
+      [
+        repoRoot('NLSDD', 'scripts', 'nlsdd-suggest-refill.cjs'),
+        '--execution',
+        'demo-flow',
+        '--lane',
+        '1',
+        '--json',
+      ],
+      root,
+    ),
+  );
+  assert.equal(refill.source, 'executor');
+  assert.equal(refill.lane, 'Lane 1');
+  assert.equal(refill.eligible, false);
+  assert.equal(refill.outcome, 'not-ready');
+  assert.equal(refill.nextItem, 'Route lane result exchange through result branches');
+});

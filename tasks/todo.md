@@ -8,6 +8,7 @@
 - [x] 讓 `nlsdd:autopilot` / `nlsdd:dispatch-plan` 在 executor mode 下回傳 executor-backed summary，而不是硬依賴舊 markdown flow
 - [x] 讓 `nlsdd:review` / `nlsdd:intake` 在 executor mode 下直接讀取 executor-backed review/result bundles
 - [x] 讓 `nlsdd:cycle` / `nlsdd:launch` 在 executor mode 下直接產出 executor-backed promotion 與 assignment
+- [x] 讓 `nlsdd:schedule:suggest` / `nlsdd:refill:suggest` 在 executor mode 下直接讀取 executor-backed lane state
 
 ## Review
 
@@ -21,6 +22,7 @@
 - 這輪後續又補了一步 compatibility 收口：當 repo 已完成 migration 且 `.nlsdd/executor.sqlite` 存在時，`nlsdd-run-coordinator-loop.cjs` 與 `nlsdd-build-dispatch-plan.cjs` 會優先回傳 executor-backed summary；沒有 executor DB 的舊 fixture / legacy root 仍維持原有流程，方便逐步退場。
 - 這輪再往前補到 review/intake façade：`nlsdd-drive-review-loop.cjs` 會從 executor 的 `READY_FOR_REVIEW` 結果產出 review action；`nlsdd-intake-ready-to-commit.cjs` 則能直接把 executor 裡 `DONE` 的最新 result branch 轉成 commit-intake bundle，讓舊 coordinator 殼更完整地接回中央 executor。
 - 現在連派工前半段也接回來了：`nlsdd-run-cycle.cjs` 與 `nlsdd-launch-active-set.cjs` 在 executor mode 下會直接用 executor-backed promotion / assignment，而不是回頭做 legacy schedule 推導。這讓 cycle -> launch -> coordinator loop -> dispatch -> review -> intake 整條 coordinator 常用鏈都能共用中央狀態。
+- 這輪再把剩下常用只讀 helper 補齊：`nlsdd-suggest-schedule.cjs` 與 `nlsdd-suggest-refill.cjs` 在 executor mode 下也直接查 SQLite，不再依賴 legacy scoreboard/runtime projection。到這裡，常用 coordinator 讀取鏈已經完整回到中央 executor。
 - 驗證：
   - `node --test tests/nlsdd-executor.test.js`
   - `node NLSDD/scripts/nlsdd-executor.cjs audit --json`
