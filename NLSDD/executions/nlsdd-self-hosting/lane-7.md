@@ -13,32 +13,29 @@
 
 ## M - Meta Review and Proposal
 
-- [x] Review NLSDD definitions, runtime artifacts, scripts, and execution flow
-- [x] Observe static and live coordination friction across NLSDD lanes and subagents
-- [x] Propose one highest-leverage improvement and confirm the direction with the main agent
+- [ ] Add a first-class `nlsdd-sync-execution-truth` helper that reconciles stale implementing lanes
+- [ ] Keep the helper grounded in existing reducer / schedule logic instead of inventing a second source of truth
 
 ## V - Verified Improvement
 
-- [x] Implement the selected NLSDD improvement with verification coverage
-- [x] Update NLSDD definitions and runtime artifacts to match the new operating model
-- [x] Audit scheduler/runtime truth after recent self-hosting rounds and cut one concrete framework helper, doc, or test delta from that review
+- [ ] Refresh tracked scoreboard and runtime scoreboard surfaces after reconciliation so execution truth converges in one step
+- [ ] Return a machine-readable summary of reconciled lanes and synced tracked surfaces
 
 ## C - Reducer and Insight Integrity
 
-- [x] Fix reducer root drift so replay uses the current execution `projectRoot`
-- [x] Add explicit state-clearing semantics so parked/noop/resolved transitions can clear stale projected fields
-- [x] Add reducer-backed insight supersession so resolved insight entries retire older adopted/open variants cleanly
+- [ ] Keep stale-implementing detection in one place and reuse it for the new sync helper
+- [ ] Avoid rewriting unrelated plan body content while syncing lane-status sections back to execution truth
 
 ## Current Lane Status
 
-- [x] Projected phase: parked
+- [x] Projected phase: implementing
 - [x] Current item: Wait for a fresh scheduler/runtime truth finding after the accepted warning cleanup
 - [x] Latest commit: `9c391aa`
-- [x] Latest event: parked · Lane 7 is parked because only unrelated main doc drift remains in the worktree.
-- [x] Next expected phase: n/a
+- [x] Latest event: pass · Cycle promoted Lane 7 from queued to implementing for Add a first-class `nlsdd-sync-execution-truth` helper that reconciles stale implementing lanes.
+- [x] Next expected phase: spec-review-pending
 - [x] Next refill target: Re-open only when a new scheduler/runtime truth finding yields a concrete helper, docs delta, or regression
-- [x] Latest note: Lane 7 is parked because only unrelated main doc drift remains in the worktree.
+- [x] Latest note: Cycle promoted Lane 7 from queued to implementing for Add a first-class `nlsdd-sync-execution-truth` helper that reconciles stale implementing lanes.
 
 ## Refill Order
 
-- [ ] First refill target: helper consolidation after reducer and insight fixes land
+- [ ] First refill target: `nlsdd-sync-execution-truth` helper and tracked-surface reconciliation path

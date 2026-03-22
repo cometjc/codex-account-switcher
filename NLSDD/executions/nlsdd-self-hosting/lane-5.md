@@ -18,11 +18,11 @@
 - [x] Projected phase: parked
 - [x] Current item: Plot-mode docs alignment for lane-pool scheduling
 - [x] Latest commit: `n/a`
-- [x] Latest event: parked · nlsdd-go: execute review-findings + execution-insights remediation via existing lanes
+- [x] Latest event: parked · all-plans-together: activate dev-flow improvement plan via existing self-hosting lanes
 - [x] Next expected phase: n/a
 - [x] Next refill target: Plot-mode overview wording
 - [x] Blocked by: wait-slot
-- [x] Latest note: nlsdd-go: execute review-findings + execution-insights remediation via existing lanes
+- [x] Latest note: all-plans-together: activate dev-flow improvement plan via existing self-hosting lanes
 
 ## Refill Order
 

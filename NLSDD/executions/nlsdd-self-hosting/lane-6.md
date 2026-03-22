@@ -18,10 +18,10 @@
 - [x] Projected phase: parked
 - [x] Current item: Post-rollout follow-up capture
 - [x] Latest commit: `3c2a967`
-- [x] Latest event: parked · nlsdd-go: execute review-findings + execution-insights remediation via existing lanes
+- [x] Latest event: parked · all-plans-together: activate dev-flow improvement plan via existing self-hosting lanes
 - [x] Next expected phase: n/a
 - [x] Next refill target: Coordinator workflow follow-up
-- [x] Latest note: nlsdd-go: execute review-findings + execution-insights remediation via existing lanes
+- [x] Latest note: all-plans-together: activate dev-flow improvement plan via existing self-hosting lanes
 
 ## Refill Order
 

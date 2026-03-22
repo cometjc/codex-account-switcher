@@ -12,30 +12,30 @@
 
 ## M - Reducer Regression
 
-- [ ] Add regression coverage for linked-worktree / non-canonical-root reducer replay
-- [ ] Add regression coverage for clearing stale `Current item` / `Next refill target` after parked or noop transitions
+- [ ] Add regression coverage proving coordinator / commit-intake survive a missing or malformed runtime scoreboard
+- [ ] Add regression coverage for stale-implementing reconciliation back to honest parked or noop truth
 
 ## V - Read-Loop Safety
 
-- [ ] Add regression coverage proving `review` / `schedule` / `dispatch-plan` keep tracked files unchanged on read
-- [ ] Add insight-summary coverage separating actionable execution issues from durable adopted learnings
+- [ ] Add regression coverage for syncing `## Current Lane Status` sections without rewriting the rest of the lane plan
+- [ ] Keep read-loop coverage honest about which helpers only observe state and which helpers intentionally sync tracked status sections
 
 ## C - Verification Harness
 
-- [ ] Keep the verification path fast enough to run as a lane-local smoke check
-- [ ] Preserve existing scoreboard/schedule cross-check coverage while extending reducer/read-loop regressions
+- [ ] Keep the verification path fast enough for lane-local smoke checks while adding fail-soft and sync-helper scenarios
+- [ ] Preserve existing scoreboard/schedule cross-check coverage while extending degraded-mode and execution-truth regressions
 
 ## Current Lane Status
 
-- [x] Projected phase: parked
+- [x] Projected phase: implementing
 - [x] Current item: Wait for a fresh regression/CLI surface item after the cross-check coverage landed
 - [x] Latest commit: `655aa39`
-- [x] Latest event: parked · Lane 4 is parked after the stale-field clearing regression landed cleanly.
-- [x] Next expected phase: n/a
+- [x] Latest event: pass · Cycle promoted Lane 4 from queued to implementing for Add regression coverage proving coordinator / commit-intake survive a missing or malformed runtime scoreboard.
+- [x] Next expected phase: spec-review-pending
 - [x] Next refill target: Re-open only if a fresh regression/CLI surface gap appears beyond the accepted cross-check coverage
-- [x] Latest note: Lane 4 is parked after the stale-field clearing regression landed cleanly.
+- [x] Latest note: Cycle promoted Lane 4 from queued to implementing for Add regression coverage proving coordinator / commit-intake survive a missing or malformed runtime scoreboard.
 
 ## Refill Order
 
-- [ ] First refill target: insight summary and supersession regression coverage
+- [ ] First refill target: fail-soft coordinator and execution-truth sync regression coverage
 - [ ] Then deeper message-helper coverage only if the new reducer/read model exposes another coordinator bottleneck

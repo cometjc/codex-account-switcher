@@ -32,3 +32,4 @@
 - execution-insights 裡的 adopted global learnings 一旦已 graduate 到 tracked spec / lessons，就應立即在 runtime journal 補寫 resolved event；不要讓 durable learning 長期停在 runtime actionable surface。
 - 若使用者反覆用同一句話要求啟動既定 NLSDD 流程，應把它收斂成明確的 magic word 並寫進 `AGENTS.md`，讓後續能用固定口令直接啟動同一套 lane reuse workflow。
 - 若使用者已經用 `proceed` 明確授權 main agent 持續收斂本地 integration flow，commit 成功後不要機械式停在「下一步要不要我幫你推」；若下一步只有單一、低風險、可逆的 finishing 動作，就應直接自動接續。
+- 同一種狀態只能有單一權威來源；其餘文件若需要呈現同類資訊，必須明確是 projection/derived view，且所有更新都要走同一個 sync 介面，不能混用手改與 script 回寫。

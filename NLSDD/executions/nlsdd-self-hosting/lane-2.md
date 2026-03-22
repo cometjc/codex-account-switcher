@@ -11,29 +11,29 @@
 
 ## M - Derived Columns
 
-- [ ] Keep scoreboard derived columns stable when runtime reducers replay from worktree-local execution roots
-- [ ] Reflect runtime scoreboard data without overwriting coordinator-owned tracked intent fields
+- [ ] Add a shared fallback path that prefers runtime scoreboard artifacts but degrades to tracked scoreboard rows when parsing fails
+- [ ] Keep scoreboard-derived scheduling fields stable even when the runtime scoreboard is absent, empty, or malformed
 
 ## V - Scoreboard Surface
 
-- [ ] Document which tracked/manual scoreboard fields remain authoritative versus runtime-derived fields
-- [ ] Keep runtime refresh usable for read loops without mutating tracked scoreboard rows
+- [ ] Keep commit-intake and coordinator reads usable without forcing a runtime scoreboard regeneration step
+- [ ] Preserve coordinator-authored tracked intent fields while degraded-mode reads fall back to tracked scoreboard rows
 
 ## C - Coordinator Flow
 
-- [ ] Keep refresh + schedule output usable as a coordinator-side read loop after tracked/runtime separation lands
+- [ ] Make the runtime-scoreboard boundary truthful for coordinator read loops instead of crashing on auxiliary-surface drift
 
 ## Current Lane Status
 
-- [x] Projected phase: parked
+- [x] Projected phase: implementing
 - [x] Current item: Self-hosting scoreboard rows and schedule-facing refresh
 - [x] Latest commit: `1613f3c`
-- [x] Latest event: parked · Lane 2 remains parked until a genuinely new scoreboard integration gap appears.
-- [x] Next expected phase: queued
+- [x] Latest event: state-update · Cycle promoted Lane 2 from queued to implementing for Add a shared fallback path that prefers runtime scoreboard artifacts but degrades to tracked scoreboard rows when parsing fails.
+- [x] Next expected phase: spec-review-pending
 - [x] Next refill target: Schedule-facing scoreboard wording polish
-- [x] Latest note: Lane 2 remains parked until a genuinely new scoreboard integration gap appears.
+- [x] Latest note: Cycle promoted Lane 2 from queued to implementing for Add a shared fallback path that prefers runtime scoreboard artifacts but degrades to tracked scoreboard rows when parsing fails.
 
 ## Refill Order
 
-- [ ] First refill target: projection-only tracked scoreboard wording and refresh behavior
+- [ ] First refill target: fail-soft runtime scoreboard loading for coordinator / commit intake
 - [ ] Then surface extra derived hints only if the read-only refresh flow still needs them

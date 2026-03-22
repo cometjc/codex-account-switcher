@@ -6,7 +6,12 @@
 - `state/<execution-id>/execution-insights.ndjson` 用來 append subagent 建議、main agent/coordinator 觀察到的問題，以及執行期間發現的可改善項目；它和 lane state 一樣屬於 runtime artifacts，不應納入 tracked tree。這些 insights 應分成 actionable execution-local insights、adopted durable global learnings、resolved history 三類來看。
 - `state/<execution-id>/events.ndjson` 是 canonical handoff event log。凡是會改變 lane phase、current item、insight、commit-ready 狀態的回報，都應先收斂成這個 envelope event，再由 reducer 投影到其他 surfaces。
 - `scoreboard.md` 是 repo 內唯一正式的 tracked lane 狀態板；lane phase、latest commit、blocked 狀態與 queued/active set 應優先在此維護，auto-derived 欄位則輸出到 runtime scoreboard。
+- 同一種狀態只能有單一權威來源：
+  - state transition truth: `state/<execution-id>/events.ndjson`
+  - current lane runtime truth: `state/<execution-id>/lane-<n>.json`
+  - tracked human-facing board: `scoreboard.md`
 - lane journal、execution insights、tracked scoreboard row、lane plan `Current Lane Status` 都應視為 reducer/projection 產物，而不是彼此獨立可寫的狀態來源。
+- `executions/<execution-id>/overview.md` 是導覽文件，不應再承擔另一份 lane phase/current-item 權威狀態；若需要顯示 live status，應明確指向 lane plan `Current Lane Status` 或 `scoreboard.md` 的 projection。
 - `scripts/` 放 `NLSDD` 執行輔助腳本；若路徑或輸出格式變更，需同步更新 `package.json` scripts、tests 與相關文件。
 - 若要記錄執行期 insight，優先使用 `NLSDD/scripts/nlsdd-record-insight.cjs`；不要把這類動態觀察只留在 thread history 裡。
 - 若要記錄任何會改變 lane state 的 handoff，優先使用 `NLSDD/scripts/nlsdd-envelope.cjs`；`nlsdd-record-lane-state.cjs` 與 `nlsdd-record-insight.cjs` 只保留為相容 wrapper。
@@ -15,6 +20,7 @@
 - `ps` / `pstree` / `pgrep` 只視為 worker-local 輔助證據，不應取代 event truth；coordinator 不應因為自己看不到另一個 agent 的 process tree，就直接推論該 worker idle。
 - 若工作正處於 `NLSDD` 階段，或剛完成 `NLSDD` 階段，而 prompt 包含 `review`，除了看 lane state / reviewer 結果外，也要一併檢視並規劃處理 `execution-insights` journal；至少要看 open / adopted insights 是否仍是 actionable execution-local insight、是否應升級成 lane item、是否該先 graduate 到 tracked spec / lessons，或是否應在 runtime journal 中標記為 resolved / rejected。
 - 若要重排某個 execution 的 active/parked lane set，優先使用 `NLSDD/scripts/nlsdd-replan-active-set.cjs`，不要只改 tracked scoreboard 而忘記同步 lane journal。
+- 任何會改變 lane phase、current item、blocked、notes、active set 的操作，都必須走單一 sync 介面，由 reducer 一次更新所有相關 projection；不要一半手改 markdown、一半靠 script 回寫。
 - 若只是要跑一輪低判斷成本的 lane 調度，優先使用 `NLSDD/scripts/nlsdd-run-cycle.cjs`；它應一次完成 stale lane 收尾、runtime refresh、下一批 lane promotion，並回傳完成/派送/閒置 slot 狀態。
 - 若要把同一輪 cycle 的 promotion 直接轉成 coordinator-ready implementer assignment，優先使用 `NLSDD/scripts/nlsdd-launch-active-set.cjs`；它應在 cycle 之後回傳每條 promoted lane 的 scope、verification 與可直接轉發的 handoff 文案。
 - 若要把 review loop 的下一步自動整理成 coordinator-ready bundle，優先使用 `NLSDD/scripts/nlsdd-drive-review-loop.cjs`；它應根據 lane 當前 phase 回傳 spec review、quality review、correction 或 coordinator commit intake 的下一步文案。

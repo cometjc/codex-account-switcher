@@ -10,29 +10,29 @@
 
 ## M - Operating Model
 
-- [ ] Clarify that tracked scoreboard and lane-plan status surfaces are projection-only outputs, not independent writable state
-- [ ] Define insight lifecycle and graduation rules for adopted global learnings versus execution-local blockers
+- [ ] Clarify that tracked scoreboard and lane-status sections are sync targets derived from execution truth, not independent writable memory
+- [ ] Define how degraded-mode coordinator reads should behave when auxiliary runtime artifacts are absent or malformed
 
 ## V - Communication Surface
 
-- [ ] Align review-time guidance so `execution-insights` are inspected during or after NLSDD-stage review passes
-- [ ] Clarify which reducer/read helpers are observational and must not rewrite tracked docs on read
+- [ ] Document `nlsdd-sync-execution-truth` as the preferred cleanup path after accepted work lands on `main`
+- [ ] Clarify which read helpers are observational, which helpers may sync tracked status sections, and which surfaces must stay coordinator-authored
 
 ## C - Guardrails
 
-- [ ] Keep autopilot, probe, and execution-insights rules consistent with projection-only tracked surfaces
+- [ ] Keep autopilot, probe, execution-insights, and execution-truth sync rules consistent with projection-only tracked surfaces
 
 ## Current Lane Status
 
-- [x] Projected phase: parked
+- [x] Projected phase: implementing
 - [x] Current item: Lane-pool + active-cap rules alignment
 - [x] Latest commit: `ef5f71e`
-- [x] Latest event: parked · Lane 3 remains parked until a fresh documentation/spec gap appears.
-- [x] Next expected phase: queued
+- [x] Latest event: pass · Cycle promoted Lane 3 from queued to implementing for Clarify that tracked scoreboard and lane-status sections are sync targets derived from execution truth, not independent writable memory.
+- [x] Next expected phase: spec-review-pending
 - [x] Next refill target: Execution-level wording cleanup
-- [x] Latest note: Lane 3 remains parked until a fresh documentation/spec gap appears.
+- [x] Latest note: Cycle promoted Lane 3 from queued to implementing for Clarify that tracked scoreboard and lane-status sections are sync targets derived from execution truth, not independent writable memory.
 
 ## Refill Order
 
-- [ ] First refill target: insight graduation and projection-only wording cleanup
+- [ ] First refill target: projection-only wording for degraded-mode reads and execution-truth sync
 - [ ] Then lane-creation guidance only if the new reducer/read model exposes another documentation gap

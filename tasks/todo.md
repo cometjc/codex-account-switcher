@@ -138,6 +138,24 @@
   - `node NLSDD/scripts/nlsdd-run-coordinator-loop.cjs --execution plot-mode --dry-run --json`
   - `node NLSDD/scripts/nlsdd-summarize-insights.cjs --execution plot-mode --json`
 
+# 2026-03-22 NLSDD execution / dev-flow review
+
+- [x] 盤點 NLSDD execution docs、runtime scoreboard、lane journal、coordinator helper 與 lessons
+- [x] 找出目前最傷 dev flow 的 runtime hard-fail 與 tracking drift 問題
+- [x] 將改善路線寫入 `plan/2026-03-22-nlsdd-dev-flow-improvement-plan.md`
+
+## Review
+
+- 主要 friction 不是單一 helper 壞掉，而是目前 NLSDD 還有三個高槓桿缺口：
+  - coordinator loop 對 runtime scoreboard 過度脆弱，輔助 surface 缺表時會直接崩掉
+  - stale implementing lane 雖然能被 schedule 偵測，卻沒有標準 reconcile path 直接收斂回 honest parked/no-op
+  - tracked lane docs / overview / plan checkbox 仍常需要人工同步，和 reducer/projection-only 的治理方向不完全一致
+- 這次 review 已把改善路線拆成 3 個 chunk：
+  - fail-soft coordinator path
+  - execution-truth sync helper
+  - lane-status tracked surface sync
+- 下一步應直接照 `plan/2026-03-22-nlsdd-dev-flow-improvement-plan.md` 進入 TDD，而不是再手動靠一次次 scoreboard / plan / lane-doc 回寫來維持 execution truth。
+
 # 2026-03-20 limits 欄位 header 修正
 
 # 2026-03-21 plot-mode integration branch 收斂

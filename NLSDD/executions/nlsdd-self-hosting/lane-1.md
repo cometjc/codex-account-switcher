@@ -28,10 +28,10 @@
 - [x] Projected phase: parked
 - [x] Current item: Multi-lane / 4-thread schedule helper
 - [x] Latest commit: `n/a`
-- [x] Latest event: parked · nlsdd-go: execute review-findings + execution-insights remediation via existing lanes
+- [x] Latest event: parked · all-plans-together: activate dev-flow improvement plan via existing self-hosting lanes
 - [x] Next expected phase: n/a
 - [x] Next refill target: Scheduler edge cases
-- [x] Latest note: nlsdd-go: execute review-findings + execution-insights remediation via existing lanes
+- [x] Latest note: all-plans-together: activate dev-flow improvement plan via existing self-hosting lanes
 
 ## Refill Order
 

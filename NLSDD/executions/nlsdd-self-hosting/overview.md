@@ -13,31 +13,31 @@
 
 - [x] Lane 1: Scheduler Core
   - Plan: `NLSDD/executions/nlsdd-self-hosting/lane-1.md`
-  - Status: parked until a fresh scheduler-core gap appears
+  - Live status: see lane plan `Current Lane Status` / `NLSDD/scoreboard.md`
 
 - [x] Lane 2: Scoreboard Integration
   - Plan: `NLSDD/executions/nlsdd-self-hosting/lane-2.md`
-  - Status: parked until a fresh tracked/runtime scoreboard boundary gap appears
+  - Focus: runtime-scoreboard fail-soft work from the 2026-03-22 dev-flow improvement plan
 
 - [x] Lane 3: Rules and Communication
   - Plan: `NLSDD/executions/nlsdd-self-hosting/lane-3.md`
-  - Status: parked after the projection and insight lifecycle wording converged
+  - Focus: projection-only / sync-path wording updates from the 2026-03-22 dev-flow improvement plan
 
 - [x] Lane 4: Regression and CLI Surface
   - Plan: `NLSDD/executions/nlsdd-self-hosting/lane-4.md`
-  - Status: parked until a genuinely new regression or CLI surface gap appears
+  - Focus: fail-soft and execution-truth regression coverage from the 2026-03-22 dev-flow improvement plan
 
 - [x] Lane 5: Plot-Mode Execution Migration
   - Plan: `NLSDD/executions/nlsdd-self-hosting/lane-5.md`
-  - Status: queued follow-up lane
+  - Live status: see lane plan `Current Lane Status` / `NLSDD/scoreboard.md`
 
 - [x] Lane 6: Self-Hosting Follow-up and Coordinator Ergonomics
   - Plan: `NLSDD/executions/nlsdd-self-hosting/lane-6.md`
-  - Status: queued follow-up lane
+  - Live status: see lane plan `Current Lane Status` / `NLSDD/scoreboard.md`
 
 - [x] Lane 7: NLSDD Meta-Optimization
   - Plan: `NLSDD/executions/nlsdd-self-hosting/lane-7.md`
-  - Status: parked until a fresh scheduler/runtime truth finding appears
+  - Focus: execution-truth sync helper work from the 2026-03-22 dev-flow improvement plan
 
 ## Refill Rules
 
