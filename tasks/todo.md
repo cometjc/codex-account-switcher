@@ -1,3 +1,19 @@
+# 2026-03-22 rust-chart-overlap-cleanup execution truth
+
+- [x] 以 central executor 建立 `rust-chart-overlap-cleanup` execution，將 Rust chart/history、Node cleanup、tests migration 與 final docs 收口拆成 5 條 lanes
+- [x] 確認 4-active worker 語意是「4 個真實 active workers」，不是「4 個靜態 lane 名稱」
+- [x] 將 Lane 1 收斂成 Rust history/model boundary，並把 Lane 2/3/4/5 留在 executor truth 中等待接續
+- [ ] Lane 2：重構 chart renderer 與 plot layout，支援全 profile 疊圖與 5h bounded subframe
+- [ ] Lane 3：移除剩餘 Node product CLI/legacy auth，改成 Rust-first npm shim
+- [ ] Lane 4：整合 docs/tests/tracking 的最終收口，等 Lane 2/3 回來後做 cherry-pick
+- [ ] Lane 5：遷移 regression coverage away from Node CLI/root snapshot assumptions
+
+## Review
+
+- 這次不是只有「開了 5 條 lane」，而是 executor truth 真的要維持 4 個 active workers。Lane 1 已經完成，Lane 2/3/4/5 則是目前真正要推進的 active set。
+- 目前可先收口的只有 tracking 層：`tasks/todo.md` 與 `tasks/lessons.md` 可以先把 4-active worker 的定義與 lane 邊界寫清楚；README 與 Node tests 則刻意保留給 Lane 3 / Lane 5 接手，避免現在就跟共享檔案打架。
+- `README.md`、`tests/plot-readme.test.js`、`tests/plot-viewer-scaffold.test.js`、`tests/entrypoints.test.js` 這些面向都已經被盤點，但依賴 Lane 2 / Lane 3 / Lane 5 的實際結果，暫不在 Lane 4 這次先改，以免 cherry-pick 時發生反向覆蓋。
+
 # 2026-03-22 Rust codex-auth 全面接手 auth 並整合 plot
 
 - [x] 用 central executor 建立 `rust-auth-migration` execution，將剩餘 Rust 遷移 scope 一次拆成 Lane 1-4

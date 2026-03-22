@@ -12,6 +12,8 @@
 - 當同一個 UI 有 `Delta` / `Quota` 這類語意不同的 mode 時，連 option label 也要跟著 mode-aware；不能只清 prompt panel，卻讓下方選項殘留另一個 mode 的資訊。
 - 驗證會讀 `dist/` 產物的測試不要和 `npm run build` 並行跑，否則容易撞到 clean/build 中間態，得到假的 `MODULE_NOT_FOUND`。
 - 當使用者要求長時間維持多 sub-agent 並行時，不要持續用臨時 refill task 重切地圖；要先固定成不重疊的 lane plan，之後所有 sub-agent 都沿 lane plan 與 lane-local MVC checklist 前進，直到某條 lane 真正耗盡再新增下一條 lane。
+- 當使用者要求「4 active worker with NLSDD」時，不能只數 lane 數量；要確認 executor 內真實正在前進的 workers 數量已達 4，否則只是靜態排程，不是真正的並行。
+- Lane 4 做 docs/tests/tracking 收口時，若 Lane 2/3/5 還在改共享檔，不要急著把 README 或 Node regression tests 一次寫死；先把可先定義的 tracking truth 寫入 todo/lessons，並保留後續 cherry-pick 空位。
 - 多 lane reviewer 若共享 dirty worktree，極易把其他 lane 或既有 WIP 誤判成當前 task 的 scope violation；NLSDD 下 reviewer 必須只看 lane-item commit diff。
 - implementer 不應順手更新 `tasks/todo.md`、lane checklist 或 roadmap 追蹤檔；這些追蹤更新預設由 coordinator 統一回寫。
 - 若某個 lane 的可見輸出其實依賴另一條 lane 的 boundary，應先把 boundary 擴張切成依賴 lane item，再執行可見輸出 lane，不要在 implementer 執行中臨時擴 scope。
