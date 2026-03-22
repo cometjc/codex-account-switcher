@@ -11,10 +11,10 @@
 - Offload research, exploration, and parallel analysis to subagents
 - For complex problems, throw more compute at it via subagents
 - One task per subagent for focused execution
-- 若使用者輸入 `nlsdd-go`，將其視為固定口令：`proceed plan/*.md via nlsdd, reuse existing lanes`
-- `nlsdd-go` 預設行為是優先挑選 `plan/` 下目前 in-progress 的 plan，並優先沿用既有 `NLSDD` lanes / worktrees / execution；只有 lane 不足或 runtime truth 不一致時才 replan
-- `nlsdd-go` 包含繼續推進：main agent 應先補齊 execution/runtime truth，再直接推進目前 active lanes、review loop、commit intake 或下一批可派工項目；若沒有多路徑決策，不要停在中間只回報狀態等下一句 `proceed`
-- `nlsdd-go` 的執行終點是「所有相關 plan 都跑完」，不是「目前既有 NLSDD execution 沒有誠實可續跑的 lane」。若 execution 暫時 no-op，但 `plan/` 還有未完成項，main agent 應繼續做 drift-vs-real-work 判讀、必要時 replan/reopen execution，直到所有相關 plan 完成或被 truthfully 轉成新的後續 plan。
+- 若使用者輸入 `nlsdd-go`，將其視為固定口令：透過中央 executor 持續推進所有 plans，直到 executor 內的相關 plan 都完成。
+- `nlsdd-go` 的正式入口是 repo-local executor（`.nlsdd/executor.sqlite` + `node NLSDD/scripts/nlsdd-executor.cjs`），不是手動掃描 `plan/`、scoreboard markdown 或 lane journal。
+- `plan/` 不應保留 live plan；主控端在 `nlsdd-go` 前應先確認 `plan/` 已清空，必要時先用 executor import/cleanup。
+- subagent 與主控端之間只允許透過 executor + worktree/result branch 交換狀態；不要再把自由文字、lane markdown、scoreboard row 當成正式交換介面。
 
 ---
 

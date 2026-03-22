@@ -1,6 +1,6 @@
 # NLSDD Operating Rules
 
-> NLSDD = N-Lane Subagent-Driven Development. This repo uses NLSDD as its native multi-agent workflow. `N` is configurable per execution. Lane pool size may exceed the number of simultaneously active subagents, and queued lanes may wait for an open active slot.
+> NLSDD = N-Lane Subagent-Driven Development. This repo now routes NLSDD orchestration through a repo-local central executor (`.nlsdd/executor.sqlite` + `NLSDD/scripts/nlsdd-executor.cjs`). Legacy markdown/json/ndjson surfaces may still exist during migration, but they are not the canonical write path.
 
 ## Core Workflow
 
@@ -21,16 +21,10 @@
   - lane ownership families
   - lane worktree naming convention
   - lane-local verification commands
-- Every execution must keep its runtime lane plans under `NLSDD/executions/<execution-id>/`.
-- Every execution may keep execution-aware lane runtime state under `NLSDD/state/<execution-id>/`.
-- Every execution may keep an append-only execution insights journal under `NLSDD/state/<execution-id>/execution-insights.ndjson`.
-- Every execution should treat `NLSDD/state/<execution-id>/events.ndjson` as the canonical handoff event log when it exists.
-- Every execution must have one canonical tracked row set in `NLSDD/scoreboard.md`.
-- Auto-refreshed runtime scoreboard output should be written under `NLSDD/state/`, not back into the tracked scoreboard.
-- The tracked scoreboard should keep only coordinator-owned manual fields; full auto-derived lane state belongs in the runtime scoreboard.
-- Runtime scoreboard rows may contain both manual coordinator fields and auto-derived fields; automation may suggest state, but the coordinator remains the decision-maker for dispatch.
-- NLSDD should prefer a single strict `lane handoff envelope` as the only state-changing write interface. Lane journal, execution insights, tracked scoreboard rows, and generated lane-status surfaces should be projected from that envelope flow rather than written independently.
-- Lane plan `Current Lane Status` sections are generated status surfaces, not an extra coordinator-authored truth source. When they drift from execution truth, automation should refresh only that section instead of rewriting the rest of the lane plan body.
+- Every execution must live in the executor database, not in free-floating tracked markdown.
+- `plan/` should be empty before dispatch starts; any remaining plan file must be imported into the executor first.
+- Executor SQLite is the only state-changing write interface for plan state, lane state, assignment state, review state, and result state.
+- `NLSDD/scoreboard.md`, `NLSDD/state/*`, and lane `Current Lane Status` sections are legacy migration surfaces only. They may be rendered for humans during transition, but they are not allowed to become a second writable truth.
 - NLSDD may expose a single dispatch-cycle helper that performs the deterministic coordinator work in one pass: reconcile stale implementing lanes, refresh runtime state, promote the next dispatchable lanes according to the tracked plan, and report the resulting scheduling status.
 - When the deterministic output needs to become real subagent work, NLSDD may expose a launch helper that wraps the dispatch cycle and emits coordinator-ready implementer assignment bundles for each newly promoted lane.
 - NLSDD may also expose a review-loop driver that inspects lane state and emits the next coordinator action bundle for `spec-review-pending`, `quality-review-pending`, `correction`, and `coordinator-commit-pending` lanes.
@@ -42,8 +36,8 @@
 - When one execution no longer contains enough honest non-overlapping work to keep multiple slots productive, coordinator should prefer cutting 1-2 new independent lanes or advancing 2-3 plans/executions in parallel over keeping several slots pseudo-active behind one blocker.
 - Scheduler/probe tooling should detect stale `implementing` lanes from worktree truth and stop counting them as active thread consumers once the lane is clean at the same committed `HEAD`.
 - Runtime tooling must resolve the canonical repo root even when invoked from a linked worktree, so lane plans, worktrees, and state files always point back to the same execution root.
-- When the coordinator redefines an execution's active set, it should update the tracked scoreboard and the lane journals as one atomic replan step, preferably through `nlsdd-replan-active-set`, rather than editing only the manual scoreboard first.
-- When accepted work lands and a lane remains stuck in stale `implementing` state, coordinator should prefer a dedicated execution-truth sync path such as `nlsdd-sync-execution-truth` to reconcile lane journal, scoreboard projection, and generated lane-status surfaces in one pass.
+- When the coordinator redefines an execution's active set, it should do so through executor state only; any human-readable scoreboard or lane rendering should be regenerated from that state, never hand-edited first.
+- When accepted work lands and a lane remains stale, reconcile it through executor state and branch/worktree truth, not by patching markdown projections.
 
 ## Lane Worktree Rules
 
@@ -71,16 +65,12 @@
 - The coordinator owns:
   - `tasks/todo.md`
   - roadmap status updates
-  - execution and lane checklist updates
-  - `NLSDD/scoreboard.md`
-  - `NLSDD/state/<execution-id>/lane-<n>.json`
-  - `NLSDD/state/scoreboard.runtime.md`
+  - executor plan / execution / lane / review state
+  - any optional rendered human-readable summaries
   - cross-lane lessons in `tasks/lessons.md`
 - Implementers and reviewers should not "helpfully" update those files as part of feature work.
-- Auto-refresh tooling may rewrite the scoreboard's derived columns, but must not overwrite manual intent fields such as `Current item`, `Phase`, or `Blocked by`.
-- Runtime scoreboard generation may expand the tracked scoreboard into a richer derived table, but the tracked scoreboard itself should stay manual-only.
-- Lane journal files are the execution-aware runtime source of truth for phase transitions, latest commit metadata, and next expected gate when those details need to survive across probes, reviews, and worktree-local invocations.
-- Execution insights journals are the append-only runtime source for sub-agent suggestions, coordinator observations, and improvement opportunities discovered during execution. They complement lane journals and must not replace current lane phase/state.
+- Optional renderers may rewrite human-readable summaries, but they must never bypass executor state.
+- Result branches, assignments, review outcomes, and integration decisions must be recorded in executor state instead of lane journals or tracked scoreboard rows.
 - Treat execution insights as three lifecycle classes:
   - actionable execution-local insights: open blockers, suggestions, no-op findings, and workflow issues that still matter to the current execution
   - adopted durable global learnings: stable, reusable learnings that should graduate into the appropriate spec or rule file, and usually into tracked lessons as well, before the runtime copy is marked resolved

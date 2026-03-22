@@ -1,44 +1,16 @@
 # NLSDD Directory Rules
 
-- 此處集中管理 `NLSDD` 的實際執行用流程文件、scoreboard、execution docs 與 helper scripts。
-- `executions/<execution-id>/` 記錄 execution overview、lane plans、目前狀態與 refill 順序，供實際協作與回放使用。
-- `state/<execution-id>/lane-<n>.json` 記錄 execution-aware 的 lane runtime state；`state/scoreboard.runtime.md` 承接 auto-refreshed scoreboard 輸出。這些都是 runtime artifacts，不應納入 tracked tree。
-- `state/<execution-id>/execution-insights.ndjson` 用來 append subagent 建議、main agent/coordinator 觀察到的問題，以及執行期間發現的可改善項目；它和 lane state 一樣屬於 runtime artifacts，不應納入 tracked tree。這些 insights 應分成 actionable execution-local insights、adopted durable global learnings、resolved history 三類來看。
-- `state/<execution-id>/events.ndjson` 是 canonical handoff event log。凡是會改變 lane phase、current item、insight、commit-ready 狀態的回報，都應先收斂成這個 envelope event，再由 reducer 投影到其他 surfaces。
-- `scoreboard.md` 是 repo 內唯一正式的 tracked lane 狀態板；lane phase、latest commit、blocked 狀態與 queued/active set 應優先在此維護，auto-derived 欄位則輸出到 runtime scoreboard。
-- 同一種狀態只能有單一權威來源：
-  - state transition truth: `state/<execution-id>/events.ndjson`
-  - current lane runtime truth: `state/<execution-id>/lane-<n>.json`
-  - tracked human-facing board: `scoreboard.md`
-- lane journal、execution insights、tracked scoreboard row、lane plan `Current Lane Status` 都應視為 reducer/projection 產物，而不是彼此獨立可寫的狀態來源。
-- `executions/<execution-id>/overview.md` 是導覽文件，不應再承擔另一份 lane phase/current-item 權威狀態；若需要顯示 live status，應明確指向 lane plan `Current Lane Status` 或 `scoreboard.md` 的 projection。
-- lane plan `Current Lane Status` 段落是 sync target，不是 coordinator 自由記憶區；若它和 lane journal / scoreboard truth 漂移，應由 reducer 或 `nlsdd-sync-execution-truth.cjs` 收斂，而不是手改那一段。
-- `scripts/` 放 `NLSDD` 執行輔助腳本；若路徑或輸出格式變更，需同步更新 `package.json` scripts、tests 與相關文件。
-- 若要記錄執行期 insight，優先使用 `NLSDD/scripts/nlsdd-record-insight.cjs`；不要把這類動態觀察只留在 thread history 裡。
-- 若要記錄任何會改變 lane state 的 handoff，優先使用 `NLSDD/scripts/nlsdd-envelope.cjs`；`nlsdd-record-lane-state.cjs` 與 `nlsdd-record-insight.cjs` 只保留為相容 wrapper。
-- 若 worker 要執行有意義的 command，尤其是長時間、可能失敗、或可能沉默的 command，應優先用 `NLSDD/scripts/nlsdd-record-command-event.cjs` 記錄 `command-started`，並在結束後補 `command-finished` / `command-failed`。
-- 若 command 看起來卡住、沉默、或疑似被環境阻擋，worker 應補 `command-blocked`，並盡量附上 `blockKind`；若有 `ps` / `pstree` / `pgrep` 類旁證，應再補一筆 `command-probe`，不要只讓 coordinator 從 thread silence 猜。
-- `ps` / `pstree` / `pgrep` 只視為 worker-local 輔助證據，不應取代 event truth；coordinator 不應因為自己看不到另一個 agent 的 process tree，就直接推論該 worker idle。
-- 若工作正處於 `NLSDD` 階段，或剛完成 `NLSDD` 階段，而 prompt 包含 `review`，除了看 lane state / reviewer 結果外，也要一併檢視並規劃處理 `execution-insights` journal；至少要看 open / adopted insights 是否仍是 actionable execution-local insight、是否應升級成 lane item、是否該先 graduate 到 tracked spec / lessons，或是否應在 runtime journal 中標記為 resolved / rejected。
-- 若要重排某個 execution 的 active/parked lane set，優先使用 `NLSDD/scripts/nlsdd-replan-active-set.cjs`，不要只改 tracked scoreboard 而忘記同步 lane journal。
-- 任何會改變 lane phase、current item、blocked、notes、active set 的操作，都必須走單一 sync 介面，由 reducer 一次更新所有相關 projection；不要一半手改 markdown、一半靠 script 回寫。
-- 若 accepted work 已經 landed on `main`，但 execution surface 還留著 stale implementing 或舊的 lane-status 段落，優先使用 `NLSDD/scripts/nlsdd-sync-execution-truth.cjs` 收斂 execution truth，不要手動逐份回寫 scoreboard / lane plan status。
-- 若只是要跑一輪低判斷成本的 lane 調度，優先使用 `NLSDD/scripts/nlsdd-run-cycle.cjs`；它應一次完成 stale lane 收尾、runtime refresh、下一批 lane promotion，並回傳完成/派送/閒置 slot 狀態。
-- 若要把同一輪 cycle 的 promotion 直接轉成 coordinator-ready implementer assignment，優先使用 `NLSDD/scripts/nlsdd-launch-active-set.cjs`；它應在 cycle 之後回傳每條 promoted lane 的 scope、verification 與可直接轉發的 handoff 文案。
-- 若要把 review loop 的下一步自動整理成 coordinator-ready bundle，優先使用 `NLSDD/scripts/nlsdd-drive-review-loop.cjs`；它應根據 lane 當前 phase 回傳 spec review、quality review、correction 或 coordinator commit intake 的下一步文案。
-- 若 implementer 已回 `READY_TO_COMMIT`，優先使用 `NLSDD/scripts/nlsdd-intake-ready-to-commit.cjs` 收 commit-ready handoff；它應回傳 proposed commit title/body、verification、scope 與 note，讓 main agent 直接 commit。
-- implementer / reviewer 的正式回報應盡量直接回傳 strict envelope JSON，而不是讓 main agent 再從自由文字判讀 phase。
-- 若要把本輪 dispatch/review/intake 一次整理成 coordinator-ready 狀態摘要，優先使用 `NLSDD/scripts/nlsdd-run-coordinator-loop.cjs`；它應回傳 promoted lanes、review actions、commit intake 與 idle slots，但不直接代替 main agent 呼叫 subagent 工具。
-- 若要讓 main agent 幾乎不思考就依序處理本輪工作，優先使用 `NLSDD/scripts/nlsdd-build-dispatch-plan.cjs`；它應把 autopilot 結果整理成有優先順序的 action queue，預設順序是 commit intake、review/correction、launch assignment。
-- 若要先快速檢視某個 execution 當前有哪些 runtime learnings 仍待處理，優先使用 `NLSDD/scripts/nlsdd-summarize-insights.cjs`；它應聚合 open / adopted insights 與 resolved history 的界線，而不是只列 raw journal lines。
-- 若使用者輸入 `nlsdd-go`，將其視為 coordinator 快捷指令：`proceed plan/*.md via nlsdd, reuse existing lanes`。
-- `nlsdd-go` 應優先從 `plan/` 中挑選 in-progress plan，並盡量沿用既有 lane family、worktree 與 execution；只有無法 truthful 派工時才建立新 lane 或 replan active set。
-- `nlsdd-go` 不只是盤點 truth；它包含後續推進。main agent 應先補齊 active set、tracked surfaces 與 runtime truth，接著直接往下推進 active lanes、review/correction、commit intake，或下一批 honest dispatchable lanes；若沒有需要使用者決策的分岔，不要停在中間只回報目前狀態。
-- `nlsdd-go` 的完成條件是所有相關 plan 都完成，而不是單一 execution 暫時回到 `no-dispatchable-lane`。如果目前 execution 沒有可續跑 lane，但 `plan/` 還有未完成項，coordinator 應繼續區分哪些是 checkbox drift、哪些是真未完成工作，必要時把真工作 replan 回 honest lanes / execution，再繼續推進。
-- `NLSDD/` 只放實際執行所需 artefacts；通用定義、規格與不依賴單次 execution 的治理文件應維護在 `spec/NLSDD/`。
-- 只要一個 lane-local MVC step 已完成且驗證通過，就應預設立即收斂成 lane-item commit；不要把多個已完成 MVC step 疊在同一個未提交狀態裡。
-- 若某個 execution 開始收束成單一 critical lane，導致其他 slot 只是在等它完成，就應視為需要 replan 的訊號；優先切出新的獨立 lane，或改成同時推進 2-3 個 plans/executions，而不是維持假的 4-active 表象。
-- commit 責任要依情境區分：
-  - main agent 直接在本地工作時，可在驗證後直接 commit
-  - NLSDD subagent 在 lane worktree 內工作時，預設不要自己跑 `git commit`
-- NLSDD subagent 完成 lane-local MVC step 後，應回報 `READY_TO_COMMIT`、已完成的驗證與 commit-ready 摘要，交由 main agent/coordinator 執行 commit；只有 lane 明確標示 self-commit-safe 時才例外。
+- `NLSDD/scripts/nlsdd-executor.cjs` 與 `.nlsdd/executor.sqlite` 是目前唯一正式的 NLSDD execution 介面與 canonical state。
+- 主控端與 subagent 都只能透過 executor CLI/API + worktree branch / result branch 交換資訊；不要再把 markdown、`events.ndjson`、`lane-*.json` 或 thread prose 當成正式狀態通道。
+- `plan/` 不應保留 live plan。若 repo 內仍有 `plan/*.md`，先透過 executor import/cleanup，再開始 `nlsdd-go` 或派工。
+- 同一種狀態只能有單一權威來源，且目前都在 executor SQLite：
+  - plan / decomposition truth: `.nlsdd/executor.sqlite`
+  - execution / lane / assignment truth: `.nlsdd/executor.sqlite`
+  - result / review / integration truth: `.nlsdd/executor.sqlite`
+- worktree branch 與 result branch 是唯一實體交換物：
+  - lane assignment 由 executor 提供 worktree path、lane branch、base branch
+  - subagent 完成後只回單一 status 與 result branch
+  - review / intake / integration 全由主控端透過 executor 收口
+- 舊的 `NLSDD/scoreboard.md`、`NLSDD/state/*`、`NLSDD/executions/*/*.md` 與 `nlsdd-*` helper 目前視為 legacy migration surfaces；除非正在做 importer / cleanup / backward-compat 維護，否則不要新增新的流程責任到它們上面。
+- `nlsdd-go` 代表 main agent 要透過 executor 持續推進所有相關 plans，直到 executor 內的相關 plan 都完成；不是只做一次 truth scan，也不是只看某個 execution 暫時有沒有 dispatchable lane。
+- subagent 正式回報應走 executor 的狀態介面，例如 `claim-assignment`、`report-result`；不要要求 main agent 再從自由文字手動推論 phase。

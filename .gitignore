@@ -3,3 +3,4 @@ node_modules
 .worktrees
 rust/plot-viewer/target/
 NLSDD/state/
+.nlsdd/

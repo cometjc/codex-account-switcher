@@ -1,3 +1,25 @@
+# 2026-03-22 中央 executor migration
+
+- [x] 補 executor failing tests，鎖住 import/cleanup、go gate、claim/report-result 的最小主幹
+- [x] 新增 repo-local `.nlsdd/executor.sqlite` schema 與 `NLSDD/scripts/nlsdd-executor.cjs`
+- [x] 讓 legacy `plan/*.md`、`NLSDD/scoreboard.md`、`NLSDD/state/*/events.ndjson` 可被 import 到中央 executor
+- [x] 把規則收斂成 executor + worktree/result branch 單一交換介面
+- [x] 用 executor 實際 import 目前 repo 的 legacy plans，並清空 `plan/`
+
+## Review
+
+- 這次先落地的是中央 executor 的最小可用主幹，而不是再擴一層新的 markdown sync：canonical state 現在進 `.nlsdd/executor.sqlite`，subagent 端的最小交換模型是 `claim-assignment` / `report-result`。
+- executor 目前已能做 3 件核心事：
+  - 阻擋 `plan/` 未清空時的 `go`
+  - 將舊 `plan/*.md`、legacy scoreboard、legacy events import 進 DB
+  - 讓 lane assignment 與 result branch 回報只走單一 SQLite authority path
+- 規則與 package scripts 也已經切到 executor-first；現有 `NLSDD/state/*`、lane markdown、scoreboard markdown 都應視為 legacy migration surfaces，而不是未來持續擴寫的 canonical flow。
+- 現在也已對這個 repo 本身跑完 `node NLSDD/scripts/nlsdd-executor.cjs import-plans --cleanup --json`，實際收進 6 份 legacy plans、7 份 plan artifacts、2 個 executions、12 條 lanes、113 筆 legacy events，並讓 `plan/` 清空。
+- 驗證：
+  - `node --test tests/nlsdd-executor.test.js`
+  - `node NLSDD/scripts/nlsdd-executor.cjs audit --json`
+  - `node NLSDD/scripts/nlsdd-executor.cjs go --json`
+
 # 2026-03-22 NLSDD worker telemetry 與並行下降診斷設計
 
 # 2026-03-22 nlsdd-go for all plans together：收斂 plan drift

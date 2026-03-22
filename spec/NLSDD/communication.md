@@ -5,10 +5,11 @@
 - Implementer does not talk directly to reviewer.
 - Reviewer does not talk directly to implementer.
 - Coordinator is the only official bridge between them.
+- The bridge is mediated through the central executor, not ad-hoc markdown or free-form state files.
 - Coordinator may operate in sidecar mode:
   - default: template-based forwarding
   - escalation: interrupt and arbitrate when communication quality degrades
-- The only state-changing payload that should survive that bridge is the strict `lane handoff envelope`; free-form thread text is transport, not state.
+- The only state-changing payload that should survive that bridge is the executor-recorded status/result payload; free-form thread text is transport, not state.
 
 ## Queue Promotion
 
@@ -18,14 +19,12 @@
 
 ## Allowed Status Values
 
-- `IN_PROGRESS`
-- `DONE`
-- `DONE_WITH_CONCERNS`
-- `READY_TO_COMMIT`
+- `RUNNING`
 - `BLOCKED`
-- `NEEDS_CONTEXT`
-- `PASS`
-- `FAIL`
+- `READY_FOR_REVIEW`
+- `DONE`
+- `FAILED`
+- `CANCELLED`
 
 ## Required Phase Hint
 
@@ -37,27 +36,26 @@
   - quality `PASS` => `next expected phase: refill-ready`
   - `BLOCKED` => `next expected phase: blocked`
 
-## Required Envelope
+## Required Executor Payload
 
-- NLSDD implementer and reviewer handoffs should return one strict lane handoff envelope JSON object.
-- The envelope should carry the normalized lane result instead of relying on the coordinator to parse meaning out of prose.
-- Free-form notes may still appear inside `summary` / `detail`, but the lane state transition itself should be explicit in the envelope.
+- NLSDD implementer and reviewer handoffs should be recorded through the executor interface rather than direct markdown/json writes.
+- A result payload should carry, at minimum:
+  - lane identity
+  - normalized status
+  - result branch
+  - verification summary or blocker reason when applicable
+- Free-form notes may still be included as payload fields, but the lane state transition itself must be explicit in executor state.
 
-## Commit-Gate Reporting
+## Result-Branch Reporting
 
-- In this repo's default NLSDD flow, `READY_TO_COMMIT` is the normal end-of-implementation handoff for sub-agents.
+- In this repo's default NLSDD flow, sub-agents finish by reporting a single normalized status plus a `result_branch`.
 - A sub-agent should not run `git commit` itself unless the lane explicitly authorizes self-commit.
-- When the code and verification are finished, the implementer should report `READY_TO_COMMIT` and include:
-  - the intended commit scope
+- When implementation and verification are finished, the implementer should report `READY_FOR_REVIEW` and include:
+  - `result_branch`
   - verification already completed
-  - whether the worktree is otherwise clean
-  - whether any permission/confirmation gate is expected
-  - a proposed commit title
-  - an optional commit body summary when the change is not single-purpose
-- Coordinator should treat `READY_TO_COMMIT` as a live lane state, not as an unresponsive thread.
-- Under this repo's default NLSDD flow, `READY_TO_COMMIT` means the sub-agent passes the commit-ready MVC handoff back to the main agent/coordinator, and the main agent performs the commit to avoid permission-block stalls.
-- Coordinators should preserve the commit-ready package structurally when they record lane state: proposed commit title, optional body summary, verification already completed, and the latest note should all survive into the `coordinator-commit-pending` lane journal.
-- Under the canonical envelope flow, `READY_TO_COMMIT` should be represented as `eventType=ready-to-commit`, with the proposed commit title/body and verification included directly in the envelope.
+  - any blocker/probe note that still matters to review or integration
+- Coordinator should treat `READY_FOR_REVIEW` as the normal end-of-implementation handoff.
+- Review, commit intake, and merge remain coordinator/executor responsibilities after that handoff.
 
 ## Blocker Reporting
 
@@ -68,7 +66,7 @@
   - optional fallback suggestions if there is a clearly safer second choice
 - Reviewers may also attach a workflow suggestion when the blocker is not source-code scope but orchestration noise, for example tracked `target/` artifacts making review harder.
 - Coordinator remains the decision-maker; suggestions are advisory, not implicit approval.
-- If the blocker or suggestion reveals a reusable execution insight, coordinator should append it into `NLSDD/state/<execution>/execution-insights.ndjson` so it survives beyond the transient thread.
+- If the blocker or suggestion reveals a reusable execution insight, coordinator should record it through executor state so it survives beyond the transient thread.
 
 ## Execution Insight Reporting
 
