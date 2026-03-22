@@ -2286,6 +2286,88 @@ test('execution truth sync reconciles stale implementing lane back to parked sta
   assert.match(scoreboardText, /\| plot-mode \| Lane 1 \| Node contract \+ handoff \| Audit shell\/handoff alignment \| parked \|/);
 });
 
+test('execution truth sync refreshes only the Current Lane Status section from lane state', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-sync-status-'));
+  const laneWorktree = path.join(root, '.worktrees', 'lane-1-node');
+  setupTempGitRepo(laneWorktree);
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  const head = run('git', ['rev-parse', '--short', 'HEAD'], laneWorktree);
+
+  fs.mkdirSync(path.join(root, 'NLSDD', 'executions', 'plot-mode'), {recursive: true});
+  const lanePlanPath = path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-1.md');
+  fs.writeFileSync(
+    lanePlanPath,
+    `# Lane 1 Plan - Node Contract and Handoff
+
+> Ownership family:
+> \`src/commands/root.ts\`
+>
+> NLSDD worktree: \`.worktrees/lane-1-node\`
+>
+> Lane-local verification:
+> \`git status --short\`
+
+## C - Controller / Handoff
+
+- [ ] Audit shell/handoff alignment
+
+## Current Lane Status
+
+- [x] Projected phase: implementing
+- [x] Current item: stale item
+- [x] Latest commit: \`old1234\`
+- [x] Latest event: state-update · stale note
+- [x] Next expected phase: spec-review-pending
+- [x] Next refill target: stale refill
+- [x] Latest note: stale note
+
+## Refill Order
+
+- [ ] Keep this exact refill text untouched
+`,
+    'utf8',
+  );
+
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'scoreboard.md'),
+    `# NLSDD Scoreboard
+
+| Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| plot-mode | Lane 1 | Node contract + handoff | Fresh item from lane state | parked | \`${head}\` | \`git status --short\` | none | Fresh refill target | fresh lane state note |
+`,
+    'utf8',
+  );
+
+  writeLaneState(root, 'plot-mode', 1, {
+    execution: 'plot-mode',
+    lane: 'Lane 1',
+    phase: 'parked',
+    expectedNextPhase: null,
+    latestCommit: head,
+    lastReviewerResult: null,
+    lastVerification: ['git status --short'],
+    blockedBy: null,
+    currentItem: 'Fresh item from lane state',
+    nextRefillTarget: 'Fresh refill target',
+    note: 'fresh lane state note',
+    correctionCount: 0,
+    updatedAt: '2026-03-22T00:00:00.000Z',
+  });
+
+  const {syncExecutionTruth} = freshRequire('NLSDD/scripts/nlsdd-sync-execution-truth.cjs');
+  syncExecutionTruth(root, 'plot-mode');
+
+  const lanePlanText = fs.readFileSync(lanePlanPath, 'utf8');
+  assert.match(lanePlanText, /## Current Lane Status/);
+  assert.match(lanePlanText, /- \[x\] Projected phase: parked/);
+  assert.match(lanePlanText, /- \[x\] Current item: Fresh item from lane state/);
+  assert.match(lanePlanText, new RegExp(`- \\[x\\] Latest commit: \\\`${head}\\\``));
+  assert.match(lanePlanText, /- \[x\] Latest note: fresh lane state note/);
+  assert.match(lanePlanText, /- \[ \] Keep this exact refill text untouched/);
+});
+
 test('dispatch cycle promotes the next queued work from reduced execution state', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-cycle-'));
   process.env.NLSDD_PROJECT_ROOT = root;

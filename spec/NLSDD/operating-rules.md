@@ -30,6 +30,7 @@
 - The tracked scoreboard should keep only coordinator-owned manual fields; full auto-derived lane state belongs in the runtime scoreboard.
 - Runtime scoreboard rows may contain both manual coordinator fields and auto-derived fields; automation may suggest state, but the coordinator remains the decision-maker for dispatch.
 - NLSDD should prefer a single strict `lane handoff envelope` as the only state-changing write interface. Lane journal, execution insights, tracked scoreboard rows, and generated lane-status surfaces should be projected from that envelope flow rather than written independently.
+- Lane plan `Current Lane Status` sections are generated status surfaces, not an extra coordinator-authored truth source. When they drift from execution truth, automation should refresh only that section instead of rewriting the rest of the lane plan body.
 - NLSDD may expose a single dispatch-cycle helper that performs the deterministic coordinator work in one pass: reconcile stale implementing lanes, refresh runtime state, promote the next dispatchable lanes according to the tracked plan, and report the resulting scheduling status.
 - When the deterministic output needs to become real subagent work, NLSDD may expose a launch helper that wraps the dispatch cycle and emits coordinator-ready implementer assignment bundles for each newly promoted lane.
 - NLSDD may also expose a review-loop driver that inspects lane state and emits the next coordinator action bundle for `spec-review-pending`, `quality-review-pending`, `correction`, and `coordinator-commit-pending` lanes.
@@ -42,6 +43,7 @@
 - Scheduler/probe tooling should detect stale `implementing` lanes from worktree truth and stop counting them as active thread consumers once the lane is clean at the same committed `HEAD`.
 - Runtime tooling must resolve the canonical repo root even when invoked from a linked worktree, so lane plans, worktrees, and state files always point back to the same execution root.
 - When the coordinator redefines an execution's active set, it should update the tracked scoreboard and the lane journals as one atomic replan step, preferably through `nlsdd-replan-active-set`, rather than editing only the manual scoreboard first.
+- When accepted work lands and a lane remains stuck in stale `implementing` state, coordinator should prefer a dedicated execution-truth sync path such as `nlsdd-sync-execution-truth` to reconcile lane journal, scoreboard projection, and generated lane-status surfaces in one pass.
 
 ## Lane Worktree Rules
 

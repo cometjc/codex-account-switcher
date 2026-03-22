@@ -137,7 +137,7 @@ git commit -m "feat(nlsdd): 新增 execution truth 同步 helper"
 - Modify: `tasks/todo.md`
 - Test: `tests/nlsdd-automation.test.js`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add coverage for tracked lane docs where `## Current Lane Status` still says:
 - old phase
@@ -146,12 +146,12 @@ Add coverage for tracked lane docs where `## Current Lane Status` still says:
 
 Assert the sync helper can refresh only that section from execution truth without rewriting the rest of the lane plan.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `node --test tests/nlsdd-automation.test.js`
 Expected: FAIL because no tracked lane-status sync exists.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Extend the sync helper so it:
 - updates the `Current Lane Status` section in `NLSDD/executions/<execution>/lane-<n>.md`
@@ -162,7 +162,7 @@ Update docs/rules to say:
 - tracked lane-status sections are sync targets, not freehand coordinator memory
 - `nlsdd-sync-execution-truth` is the preferred cleanup path after accepted work lands on `main`
 
-- [ ] **Step 4: Run verification**
+- [x] **Step 4: Run verification**
 
 Run:
 - `node --test tests/nlsdd-automation.test.js`
@@ -170,7 +170,7 @@ Run:
 
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/nlsdd-automation.test.js NLSDD/scripts/nlsdd-sync-execution-truth.cjs NLSDD/AGENTS.md spec/NLSDD/operating-rules.md tasks/todo.md

@@ -197,6 +197,20 @@
   - `node --test tests/nlsdd-automation.test.js`
   - `npm run nlsdd:scoreboard:refresh`
 
+# 2026-03-22 nlsdd-go 推進 dev-flow improvement Chunk 3
+
+- [x] 補上 lane-status drift regression，鎖住 sync helper 只刷新 `Current Lane Status` 段落
+- [x] 將 `nlsdd-sync-execution-truth` 的定位寫回 `NLSDD/AGENTS.md` 與 `spec/NLSDD/operating-rules.md`
+- [x] 重跑 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-sync-execution-truth.cjs --execution plot-mode --dry-run`
+
+## Review
+
+- `Current Lane Status` 本來就應該是 projection surface，不該變成 coordinator 額外手寫的一塊記憶；這次 regression 直接鎖住 sync helper 只刷新那一段，並保留 lane plan 的 checklist / refill order 不動。
+- docs/rules 現在也正式收斂：lane-status section 是 sync target，不是自由編輯區；accepted work landed on `main` 後若 execution surface 還留著 stale implementing 或 stale lane-status，優先走 `nlsdd-sync-execution-truth.cjs`。
+- 驗證：
+  - `node --test tests/nlsdd-automation.test.js`
+  - `node NLSDD/scripts/nlsdd-sync-execution-truth.cjs --execution plot-mode --dry-run`
+
 # 2026-03-20 limits 欄位 header 修正
 
 # 2026-03-21 plot-mode integration branch 收斂
