@@ -13,6 +13,8 @@
 - 這次不是只有「開了 5 條 lane」，而是 executor truth 真的要維持 4 個 active workers。Lane 1 已經完成，Lane 2/3/4/5 則是目前真正要推進的 active set。
 - 目前可先收口的只有 tracking 層：`tasks/todo.md` 與 `tasks/lessons.md` 可以先把 4-active worker 的定義與 lane 邊界寫清楚；README 與 Node tests 則刻意保留給 Lane 3 / Lane 5 接手，避免現在就跟共享檔案打架。
 - `README.md`、`tests/plot-readme.test.js`、`tests/plot-viewer-scaffold.test.js`、`tests/entrypoints.test.js` 這些面向都已經被盤點，但依賴 Lane 2 / Lane 3 / Lane 5 的實際結果，暫不在 Lane 4 這次先改，以免 cherry-pick 時發生反向覆蓋。
+- Lane 3 的 cleanup 本身目前看起來自洽：`package.json` 已切到 `bin/codex-auth.cjs` 薄 shim，README 已改成 Rust-first / thin shim，Node product CLI 與 legacy auth entrypoints 也都已移除。
+- 目前不需要對 Lane 3 做 correction；真正要注意的是後續 cherry-pick Lane 2 / Lane 3 / Lane 5 時，`README.md`、`package.json`、`tests/entrypoints.test.js`、`tests/plot-readme.test.js`、`tests/plot-viewer-scaffold.test.js`、`tests/plot-mode-shell.test.js`、`tests/plot-rust-model-contract.test.js`、`tests/plot-snapshot.test.js` 的真相順序必須一致。
 
 # 2026-03-22 Rust codex-auth 全面接手 auth 並整合 plot
 
