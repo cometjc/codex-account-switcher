@@ -1,11 +1,9 @@
 #!/usr/bin/env node
 
-const fs = require('node:fs');
 const {
   loadLanePlan,
   loadLaneState,
-  loadScoreboardTable,
-  resolvePreferredScoreboardPath,
+  loadPreferredScoreboardTable,
   resolveProjectRoot,
 } = require('./nlsdd-lib.cjs');
 const {prepareExecutionState} = require('./nlsdd-envelope.cjs');
@@ -57,13 +55,43 @@ function buildCommitIntake(projectRoot, execution, row) {
 
 function intakeReadyToCommit(projectRoot, execution, lane = null) {
   prepareExecutionState(projectRoot, execution);
-  const scoreboardPath = resolvePreferredScoreboardPath(projectRoot);
-  const scoreboardText = fs.readFileSync(scoreboardPath, 'utf8');
-  const table = loadScoreboardTable(scoreboardText, scoreboardPath);
+  const table = loadPreferredScoreboardTable(projectRoot);
   const rows = table.objects.filter(
     (row) => row.Execution === execution && (!lane || row.Lane === lane),
   );
   return rows.map((row) => buildCommitIntake(projectRoot, execution, row)).filter(Boolean);
+}
+
+function intakeReadyToCommitWithContext(projectRoot, execution, lane = null) {
+  try {
+    const entries = intakeReadyToCommit(projectRoot, execution, lane);
+    const table = loadPreferredScoreboardTable(projectRoot);
+    return {
+      entries,
+      degradedSurfaces: table.scoreboardLoad?.degraded
+        ? [
+            {
+              surface: 'scoreboard',
+              source: table.scoreboardLoad.source,
+              path: table.scoreboardLoad.path,
+              errors: table.scoreboardLoad.errors || [],
+            },
+          ]
+        : [],
+    };
+  } catch (error) {
+    return {
+      entries: [],
+      degradedSurfaces: [
+        {
+          surface: 'commit-intake',
+          source: 'unreadable-scoreboard',
+          path: null,
+          errors: [{path: null, message: error.message}],
+        },
+      ],
+    };
+  }
 }
 
 function renderIntake(entries) {
@@ -109,5 +137,6 @@ module.exports = {
   phaseForIntake,
   buildCommitIntake,
   intakeReadyToCommit,
+  intakeReadyToCommitWithContext,
   renderIntake,
 };

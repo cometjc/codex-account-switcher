@@ -358,6 +358,53 @@ function loadScoreboardTable(scoreboardText, scoreboardPath = resolveScoreboardP
   return {lines, headerIndex, endIndex, header, separator, columns, objects};
 }
 
+function loadPreferredScoreboardTable(projectRoot = resolveProjectRoot()) {
+  const runtimeScoreboardPath = resolveRuntimeScoreboardPath(projectRoot);
+  const trackedScoreboardPath = resolveScoreboardPath(projectRoot);
+  const preferredScoreboardPath = resolvePreferredScoreboardPath(projectRoot);
+
+  const readTable = (scoreboardPath) => {
+    const scoreboardText = fs.readFileSync(scoreboardPath, 'utf8');
+    return loadScoreboardTable(scoreboardText, scoreboardPath);
+  };
+
+  try {
+    const table = readTable(preferredScoreboardPath);
+    return {
+      ...table,
+      scoreboardLoad: {
+        source: preferredScoreboardPath === runtimeScoreboardPath ? 'runtime' : 'tracked',
+        path: preferredScoreboardPath,
+        fallbackUsed: false,
+        degraded: false,
+        errors: [],
+      },
+    };
+  } catch (error) {
+    const fallbackEligible =
+      preferredScoreboardPath === runtimeScoreboardPath && trackedScoreboardPath !== runtimeScoreboardPath;
+    if (!fallbackEligible) {
+      throw error;
+    }
+
+    const fallbackError = {
+      path: preferredScoreboardPath,
+      message: error.message,
+    };
+    const table = readTable(trackedScoreboardPath);
+    return {
+      ...table,
+      scoreboardLoad: {
+        source: 'tracked',
+        path: trackedScoreboardPath,
+        fallbackUsed: true,
+        degraded: true,
+        errors: [fallbackError],
+      },
+    };
+  }
+}
+
 function lanePlanPath(projectRoot, execution, lane) {
   const laneMatch = /^Lane\s+(\d+)$/.exec(lane);
   if (!laneMatch) {
@@ -921,9 +968,7 @@ function phaseIsDispatchable(phase) {
 }
 
 function computeExecutionSchedule(projectRoot, execution, maxActiveThreads = 4) {
-  const scoreboardPath = resolvePreferredScoreboardPath(projectRoot);
-  const scoreboardText = fs.readFileSync(scoreboardPath, 'utf8');
-  const table = loadScoreboardTable(scoreboardText, scoreboardPath);
+  const table = loadPreferredScoreboardTable(projectRoot);
   const rows = table.objects.filter((row) => row.Execution === execution);
 
   const enrichedRows = rows.map((row) => {
@@ -973,6 +1018,7 @@ function computeExecutionSchedule(projectRoot, execution, maxActiveThreads = 4) 
   return {
     execution,
     maxActiveThreads,
+    scoreboardLoad: table.scoreboardLoad || null,
     activeRows,
     refillReadyRows,
     queuedRows,
@@ -1006,6 +1052,7 @@ module.exports = {
   run,
   tryRun,
   loadScoreboardTable,
+  loadPreferredScoreboardTable,
   joinRow,
   lanePlanPath,
   parseLanePlan,

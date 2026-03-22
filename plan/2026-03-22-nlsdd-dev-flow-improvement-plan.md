@@ -41,31 +41,31 @@
 - Modify: `NLSDD/scripts/nlsdd-run-coordinator-loop.cjs`
 - Test: `tests/nlsdd-automation.test.js`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add coverage for:
 - runtime scoreboard path exists but is empty / malformed
 - `intakeReadyToCommit()` still returns `[]` instead of throwing
 - `runCoordinatorLoop()` still returns launch/review/insight results even when commit-intake has to fall back
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `node --test tests/nlsdd-automation.test.js`
 Expected: FAIL because `loadScoreboardTable()` currently throws through `intakeReadyToCommit()`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Implement:
 - one helper that tries the preferred runtime scoreboard first, then falls back to tracked scoreboard if parsing fails
 - commit-intake degraded mode that treats unreadable scoreboard surfaces as `[]`
 - coordinator loop behavior that records the degraded condition instead of aborting the whole snapshot
 
-- [ ] **Step 4: Run verification**
+- [x] **Step 4: Run verification**
 
 Run: `node --test tests/nlsdd-automation.test.js`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/nlsdd-automation.test.js NLSDD/scripts/nlsdd-lib.cjs NLSDD/scripts/nlsdd-intake-ready-to-commit.cjs NLSDD/scripts/nlsdd-run-coordinator-loop.cjs

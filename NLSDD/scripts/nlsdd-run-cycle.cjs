@@ -122,6 +122,9 @@ function promoteSuggestedRows(projectRoot, execution, schedule, dryRun = false) 
 function runCycle(projectRoot, execution, maxActive = 4, dryRun = false) {
   prepareExecutionState(projectRoot, execution);
   const before = computeExecutionSchedule(projectRoot, execution, maxActive);
+  const observedDegradedScoreboardLoad = before.scoreboardLoad?.degraded
+    ? before.scoreboardLoad
+    : null;
   const reconciled = reconcileStaleRows(projectRoot, execution, before, dryRun);
 
   const afterReconcile = reconciled.length > 0 && !dryRun
@@ -144,6 +147,7 @@ function runCycle(projectRoot, execution, maxActive = 4, dryRun = false) {
     dryRun,
     reconciled,
     promoted,
+    observedDegradedScoreboardLoad,
     idleSlots: finalSchedule.availableSlots,
     completedLanes: reconciled
       .filter((entry) => ['refill-ready', 'parked', 'queued'].includes(entry.to))

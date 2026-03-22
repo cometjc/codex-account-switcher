@@ -6,7 +6,7 @@ const {
 } = require('./nlsdd-lib.cjs');
 const {launchActiveSet} = require('./nlsdd-launch-active-set.cjs');
 const {driveReviewLoop} = require('./nlsdd-drive-review-loop.cjs');
-const {intakeReadyToCommit} = require('./nlsdd-intake-ready-to-commit.cjs');
+const {intakeReadyToCommitWithContext} = require('./nlsdd-intake-ready-to-commit.cjs');
 const {summarizeTelemetry} = require('./nlsdd-summarize-telemetry.cjs');
 const {renderTelemetryReviewFile} = require('./nlsdd-render-telemetry-review.cjs');
 
@@ -33,10 +33,25 @@ function runCoordinatorLoop(projectRoot, execution, maxActive = 4, dryRun = fals
   const launch = launchActiveSet(projectRoot, execution, maxActive, dryRun);
   const reviewResult = driveReviewLoop(projectRoot, execution);
   const reviewActions = reviewResult.actions;
-  const commitIntake = intakeReadyToCommit(projectRoot, execution);
+  const intakeResult = intakeReadyToCommitWithContext(projectRoot, execution);
+  const commitIntake = intakeResult.entries;
   const insightSummary = reviewResult.insightSummary || summarizeExecutionInsights(projectRoot, execution);
   const telemetrySummary = summarizeTelemetry(projectRoot, execution);
   const telemetryReview = renderTelemetryReviewFile(projectRoot, execution);
+  const degradedSurfaces = [];
+  const launchScoreboardLoad =
+    launch.observedDegradedScoreboardLoad || launch.finalSchedule?.scoreboardLoad || null;
+  if (launchScoreboardLoad?.degraded) {
+    degradedSurfaces.push({
+      surface: 'scoreboard',
+      source: launchScoreboardLoad.source,
+      path: launchScoreboardLoad.path,
+      errors: launchScoreboardLoad.errors || [],
+    });
+  }
+  for (const surface of intakeResult.degradedSurfaces || []) {
+    degradedSurfaces.push(surface);
+  }
   return {
     execution,
     maxActiveThreads: maxActive,
@@ -51,6 +66,7 @@ function runCoordinatorLoop(projectRoot, execution, maxActive = 4, dryRun = fals
     reviewLaneCount: reviewActions.length,
     commitLaneCount: commitIntake.length,
     noDispatchReason: launch.noDispatchReason,
+    degradedSurfaces,
     telemetrySummary,
     telemetryReviewPath: telemetryReview.outputPath,
   };
@@ -77,6 +93,9 @@ function renderCoordinatorLoop(result) {
   }
   if (result.telemetryReviewPath) {
     lines.push(`Telemetry review: ${result.telemetryReviewPath}`);
+  }
+  if (result.degradedSurfaces.length > 0) {
+    lines.push(`Degraded surfaces: ${result.degradedSurfaces.length}`);
   }
 
   if (result.noDispatchReason) {

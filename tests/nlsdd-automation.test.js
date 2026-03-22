@@ -2733,6 +2733,124 @@ test('coordinator loop combines launch, review, and commit intake into one summa
   assert.equal(result.commitIntake[0].proposedCommitTitle, 'docs(plot): 補上 recovery baseline 操作說明');
 });
 
+test('coordinator loop degrades cleanly when runtime scoreboard is malformed', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-loop-malformed-runtime-'));
+  process.env.NLSDD_PROJECT_ROOT = root;
+
+  const lane2Worktree = path.join(root, '.worktrees', 'lane-2-runtime');
+  setupTempGitRepo(lane2Worktree);
+  const lane2Head = run('git', ['rev-parse', '--short', 'HEAD'], lane2Worktree);
+
+  fs.mkdirSync(path.join(root, 'NLSDD', 'executions', 'plot-mode'), {recursive: true});
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-2.md'),
+    `# Lane 2
+
+> Ownership family:
+> \`rust/plot-viewer/src/render/mod.rs\`
+>
+> NLSDD worktree: \`.worktrees/lane-2-runtime\`
+>
+> Lane-local verification:
+> \`cargo test --manifest-path rust/plot-viewer/Cargo.toml\`
+
+## V - View
+
+- [ ] Runtime compare seam follow-up
+`,
+    'utf8',
+  );
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'executions', 'plot-mode', 'lane-5.md'),
+    `# Lane 5
+
+> Ownership family:
+> \`README.md\`
+>
+> NLSDD worktree: \`.worktrees/lane-5-docs\`
+>
+> Lane-local verification:
+> \`npm run build\`
+
+## C - Controller
+
+- [ ] Recovery-baseline README and local run instructions
+`,
+    'utf8',
+  );
+
+  fs.writeFileSync(
+    path.join(root, 'NLSDD', 'scoreboard.md'),
+    `# NLSDD Scoreboard
+
+| Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| plot-mode | Lane 2 | Rust runtime + boundary | Runtime compare seam follow-up | queued | \`${lane2Head}\` | \`cargo test --manifest-path rust/plot-viewer/Cargo.toml\` | none | none | queued row |
+| plot-mode | Lane 5 | Plot viewer docs + operator flow | Recovery-baseline README and local run instructions | coordinator-commit-pending | \`n/a\` | \`npm run build\` | none | none | commit row |
+`,
+    'utf8',
+  );
+
+  writeLaneState(root, 'plot-mode', 2, {
+    execution: 'plot-mode',
+    lane: 'Lane 2',
+    phase: 'queued',
+    'expected-next-phase': 'implementing',
+    commit: lane2Head,
+    verification: ['cargo test --manifest-path rust/plot-viewer/Cargo.toml'],
+    note: 'ready to dispatch',
+    'updated-at': '2026-03-21T11:30:00.000Z',
+  });
+  writeLaneState(root, 'plot-mode', 5, {
+    execution: 'plot-mode',
+    lane: 'Lane 5',
+    phase: 'coordinator-commit-pending',
+    'expected-next-phase': 'spec-review-pending',
+    'commit-title': 'docs(plot): 補上 recovery baseline 操作說明',
+    'commit-body': '同步本地驗證與啟動步驟',
+    verification: ['npm run build'],
+    note: 'READY_TO_COMMIT from docs lane',
+    'updated-at': '2026-03-21T11:32:00.000Z',
+  });
+
+  const runtimeScoreboardPath = path.join(root, 'NLSDD', 'state', 'scoreboard.runtime.md');
+  fs.mkdirSync(path.dirname(runtimeScoreboardPath), {recursive: true});
+  fs.writeFileSync(runtimeScoreboardPath, '# malformed runtime scoreboard\n', 'utf8');
+
+  const envelopePath = repoRoot('NLSDD/scripts/nlsdd-envelope.cjs');
+  delete require.cache[require.resolve(envelopePath)];
+  const envelopeModule = require(envelopePath);
+  const originalPrepareExecutionState = envelopeModule.prepareExecutionState;
+  envelopeModule.prepareExecutionState = () => ({execution: 'plot-mode', laneCount: 0, insightCount: 0});
+  try {
+    delete require.cache[require.resolve(repoRoot('NLSDD/scripts/nlsdd-intake-ready-to-commit.cjs'))];
+    delete require.cache[require.resolve(repoRoot('NLSDD/scripts/nlsdd-run-coordinator-loop.cjs'))];
+    const {intakeReadyToCommit} = require(repoRoot('NLSDD/scripts/nlsdd-intake-ready-to-commit.cjs'));
+    const {runCoordinatorLoop} = require(repoRoot('NLSDD/scripts/nlsdd-run-coordinator-loop.cjs'));
+
+    assert.doesNotThrow(() => intakeReadyToCommit(root, 'plot-mode'));
+    const commitIntake = intakeReadyToCommit(root, 'plot-mode');
+    assert.equal(commitIntake.length, 1);
+    assert.equal(commitIntake[0].lane, 'Lane 5');
+    assert.equal(commitIntake[0].proposedCommitTitle, 'docs(plot): 補上 recovery baseline 操作說明');
+
+    const result = runCoordinatorLoop(root, 'plot-mode', 4, false);
+
+    assert.deepEqual(result.promotedLanes, ['Lane 2']);
+    assert.equal(result.commitLaneCount, 1);
+    assert.equal(result.reviewLaneCount, 1);
+    assert.equal(
+      result.reviewActions.some(
+        (entry) => entry.lane === 'Lane 5' && entry.action === 'coordinator-commit-needed',
+      ),
+      true,
+    );
+    assert.equal(result.noDispatchReason, null);
+  } finally {
+    envelopeModule.prepareExecutionState = originalPrepareExecutionState;
+  }
+});
+
 test('coordinator loop surfaces telemetry summary and review path when present', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-nlsdd-loop-telemetry-'));
   process.env.NLSDD_PROJECT_ROOT = root;

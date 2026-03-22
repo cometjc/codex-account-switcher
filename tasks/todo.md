@@ -166,6 +166,21 @@
 - 根因不是單一回覆 wording 不夠清楚，而是我把 `nlsdd-go` 錯切成「先盤點 execution truth、再停下來等待下一句 `proceed`」；這和使用者期待的固定口令語意不一致。
 - 現在規則已補清楚：`nlsdd-go` 代表 main agent 要先同步 execution/runtime truth，然後直接續推 active lanes、review/correction、commit intake，或下一批 honest dispatchable lanes；只有遇到需要使用者決策的分岔時才停。
 
+# 2026-03-22 nlsdd-go 推進 dev-flow improvement Chunk 1
+
+- [x] 先在 automation tests 補上 malformed runtime scoreboard regression，鎖住 commit-intake / coordinator fail-soft 行為
+- [x] 在 NLSDD shared helpers 補上 preferred scoreboard fallback，讓 runtime scoreboard 壞掉時能降級吃 tracked scoreboard
+- [x] 讓 coordinator / cycle 路徑共用同一個 fallback，而不是只在 commit-intake 局部 try/catch
+- [x] 重跑 `node --test tests/nlsdd-automation.test.js`，確認 Chunk 1 維持全綠
+
+## Review
+
+- 這次推進的根因不是單純 `intakeReadyToCommit()` 缺 try/catch，而是 launch/schedule 與 commit-intake 都各自直接吃 preferred scoreboard；只修 intake 會留下 coordinator 前半段和後半段用不同 truth 的風險。
+- 現在 `NLSDD/scripts/nlsdd-lib.cjs` 已新增 shared preferred-scoreboard fallback：優先讀 runtime scoreboard，若 runtime artifact 缺表或 malformed，就降級讀 tracked scoreboard。
+- `NLSDD/scripts/nlsdd-intake-ready-to-commit.cjs` 與 `NLSDD/scripts/nlsdd-run-cycle.cjs` / `NLSDD/scripts/nlsdd-run-coordinator-loop.cjs` 都已吃同一套 fallback，讓 malformed runtime scoreboard 不再直接把 coordinator flow 炸掉。
+- 驗證：
+  - `node --test tests/nlsdd-automation.test.js`
+
 # 2026-03-20 limits 欄位 header 修正
 
 # 2026-03-21 plot-mode integration branch 收斂
