@@ -211,6 +211,25 @@
   - `node --test tests/nlsdd-automation.test.js`
   - `node NLSDD/scripts/nlsdd-sync-execution-truth.cjs --execution plot-mode --dry-run`
 
+# 2026-03-22 nlsdd-go 收斂 self-hosting execution truth
+
+- [x] 在 dev-flow improvement 三個 chunk 全部 landed 後，重新驗證 `nlsdd-self-hosting` 與 `plot-mode` execution truth
+- [x] 將 `nlsdd-self-hosting` 的 active set 全數收回 parked，避免 execution 停在假性 implementing
+- [x] 再跑一次 self-hosting dry-run，確認回到 honest no-op
+
+## Review
+
+- 這輪 `nlsdd-go` 的最後一段不是再派新工，而是把已完成的 self-hosting execution 從 active 4-lane truth 收斂回 parked/no-op；否則 `nlsdd-self-hosting` 會一直停在 `idleSlots=0` 的假忙碌狀態。
+- 現在重新驗證後，`nlsdd-self-hosting` 已回到：
+  - `idleSlots=4`
+  - `Action queue=0`
+  - `noDispatchReason="no-dispatchable-lane"`
+- `plot-mode` 也仍維持 honest no-op，沒有新的 dispatch / review / commit intake。
+- 驗證：
+  - `node NLSDD/scripts/nlsdd-replan-active-set.cjs --execution nlsdd-self-hosting --parked 1,2,3,4,5,6,7 --note "nlsdd-go: park self-hosting after dev-flow improvement plan completed"`
+  - `node NLSDD/scripts/nlsdd-build-dispatch-plan.cjs --execution nlsdd-self-hosting --dry-run`
+  - `node NLSDD/scripts/nlsdd-run-coordinator-loop.cjs --execution nlsdd-self-hosting --dry-run`
+
 # 2026-03-20 limits 欄位 header 修正
 
 # 2026-03-21 plot-mode integration branch 收斂

@@ -27,13 +27,13 @@
 
 ## Current Lane Status
 
-- [x] Projected phase: implementing
+- [x] Projected phase: parked
 - [x] Current item: Wait for a fresh regression/CLI surface item after the cross-check coverage landed
 - [x] Latest commit: `655aa39`
-- [x] Latest event: pass · Cycle promoted Lane 4 from queued to implementing for Add regression coverage proving coordinator / commit-intake survive a missing or malformed runtime scoreboard.
-- [x] Next expected phase: spec-review-pending
+- [x] Latest event: parked · nlsdd-go: park self-hosting after dev-flow improvement plan completed
+- [x] Next expected phase: n/a
 - [x] Next refill target: Re-open only if a fresh regression/CLI surface gap appears beyond the accepted cross-check coverage
-- [x] Latest note: Cycle promoted Lane 4 from queued to implementing for Add regression coverage proving coordinator / commit-intake survive a missing or malformed runtime scoreboard.
+- [x] Latest note: nlsdd-go: park self-hosting after dev-flow improvement plan completed
 
 ## Refill Order
 

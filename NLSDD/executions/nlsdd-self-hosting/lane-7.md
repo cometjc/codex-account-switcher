@@ -28,13 +28,13 @@
 
 ## Current Lane Status
 
-- [x] Projected phase: implementing
+- [x] Projected phase: parked
 - [x] Current item: Wait for a fresh scheduler/runtime truth finding after the accepted warning cleanup
 - [x] Latest commit: `9c391aa`
-- [x] Latest event: pass · Cycle promoted Lane 7 from queued to implementing for Add a first-class `nlsdd-sync-execution-truth` helper that reconciles stale implementing lanes.
-- [x] Next expected phase: spec-review-pending
+- [x] Latest event: parked · nlsdd-go: park self-hosting after dev-flow improvement plan completed
+- [x] Next expected phase: n/a
 - [x] Next refill target: Re-open only when a new scheduler/runtime truth finding yields a concrete helper, docs delta, or regression
-- [x] Latest note: Cycle promoted Lane 7 from queued to implementing for Add a first-class `nlsdd-sync-execution-truth` helper that reconciles stale implementing lanes.
+- [x] Latest note: nlsdd-go: park self-hosting after dev-flow improvement plan completed
 
 ## Refill Order
 

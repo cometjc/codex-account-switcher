@@ -24,13 +24,13 @@
 
 ## Current Lane Status
 
-- [x] Projected phase: implementing
+- [x] Projected phase: parked
 - [x] Current item: Lane-pool + active-cap rules alignment
 - [x] Latest commit: `ef5f71e`
-- [x] Latest event: pass · Cycle promoted Lane 3 from queued to implementing for Clarify that tracked scoreboard and lane-status sections are sync targets derived from execution truth, not independent writable memory.
-- [x] Next expected phase: spec-review-pending
+- [x] Latest event: parked · nlsdd-go: park self-hosting after dev-flow improvement plan completed
+- [x] Next expected phase: n/a
 - [x] Next refill target: Execution-level wording cleanup
-- [x] Latest note: Cycle promoted Lane 3 from queued to implementing for Clarify that tracked scoreboard and lane-status sections are sync targets derived from execution truth, not independent writable memory.
+- [x] Latest note: nlsdd-go: park self-hosting after dev-flow improvement plan completed
 
 ## Refill Order
 

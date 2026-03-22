@@ -25,13 +25,13 @@
 
 ## Current Lane Status
 
-- [x] Projected phase: implementing
+- [x] Projected phase: parked
 - [x] Current item: Self-hosting scoreboard rows and schedule-facing refresh
 - [x] Latest commit: `1613f3c`
-- [x] Latest event: state-update · Cycle promoted Lane 2 from queued to implementing for Add a shared fallback path that prefers runtime scoreboard artifacts but degrades to tracked scoreboard rows when parsing fails.
-- [x] Next expected phase: spec-review-pending
+- [x] Latest event: parked · nlsdd-go: park self-hosting after dev-flow improvement plan completed
+- [x] Next expected phase: n/a
 - [x] Next refill target: Schedule-facing scoreboard wording polish
-- [x] Latest note: Cycle promoted Lane 2 from queued to implementing for Add a shared fallback path that prefers runtime scoreboard artifacts but degrades to tracked scoreboard rows when parsing fails.
+- [x] Latest note: nlsdd-go: park self-hosting after dev-flow improvement plan completed
 
 ## Refill Order
 
