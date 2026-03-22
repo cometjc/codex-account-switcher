@@ -13,6 +13,7 @@
 - One task per subagent for focused execution
 - 若使用者輸入 `nlsdd-go`，將其視為固定口令：`proceed plan/*.md via nlsdd, reuse existing lanes`
 - `nlsdd-go` 預設行為是優先挑選 `plan/` 下目前 in-progress 的 plan，並優先沿用既有 `NLSDD` lanes / worktrees / execution；只有 lane 不足或 runtime truth 不一致時才 replan
+- `nlsdd-go` 包含繼續推進：main agent 應先補齊 execution/runtime truth，再直接推進目前 active lanes、review loop、commit intake 或下一批可派工項目；若沒有多路徑決策，不要停在中間只回報狀態等下一句 `proceed`
 
 ---
 

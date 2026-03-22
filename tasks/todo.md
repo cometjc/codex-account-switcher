@@ -156,6 +156,16 @@
   - lane-status tracked surface sync
 - 下一步應直接照 `plan/2026-03-22-nlsdd-dev-flow-improvement-plan.md` 進入 TDD，而不是再手動靠一次次 scoreboard / plan / lane-doc 回寫來維持 execution truth。
 
+# 2026-03-22 `nlsdd-go` 語意補強
+
+- [x] 將 `nlsdd-go` 語意從「盤點 truth」補強成「補 truth 後繼續推進」
+- [x] 將這次使用者修正寫進 `AGENTS.md`、`NLSDD/AGENTS.md` 與 `tasks/lessons.md`
+
+## Review
+
+- 根因不是單一回覆 wording 不夠清楚，而是我把 `nlsdd-go` 錯切成「先盤點 execution truth、再停下來等待下一句 `proceed`」；這和使用者期待的固定口令語意不一致。
+- 現在規則已補清楚：`nlsdd-go` 代表 main agent 要先同步 execution/runtime truth，然後直接續推 active lanes、review/correction、commit intake，或下一批 honest dispatchable lanes；只有遇到需要使用者決策的分岔時才停。
+
 # 2026-03-20 limits 欄位 header 修正
 
 # 2026-03-21 plot-mode integration branch 收斂
