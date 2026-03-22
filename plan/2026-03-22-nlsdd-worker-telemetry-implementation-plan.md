@@ -44,7 +44,7 @@
 - Modify: `NLSDD/scripts/nlsdd-envelope.cjs`
 - Test: `tests/nlsdd-automation.test.js`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add tests that call the envelope recorder with these event types:
 - `command-started`
@@ -63,12 +63,12 @@ Verify the stored event keeps:
 - `probeSummary`
 - `pid`
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `node --test tests/nlsdd-automation.test.js`
 Expected: FAIL because the new event types or fields are rejected/absent.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Update `NLSDD/scripts/nlsdd-envelope.cjs` to:
 - add the new event types to `ENVELOPE_EVENT_TYPES`
@@ -76,12 +76,12 @@ Update `NLSDD/scripts/nlsdd-envelope.cjs` to:
 - reject invalid `blockKind` values if provided
 - keep existing lane state behavior unchanged
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `node --test tests/nlsdd-automation.test.js`
 Expected: PASS for the new schema coverage and no regressions in prior event handling.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/nlsdd-automation.test.js NLSDD/scripts/nlsdd-envelope.cjs
@@ -95,7 +95,7 @@ git commit -m "feat(nlsdd): 納入 command lifecycle telemetry event"
 - Modify: `package.json`
 - Test: `tests/nlsdd-automation.test.js`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add tests that execute the helper for:
 - started event with command/cwd/pid
@@ -105,12 +105,12 @@ Add tests that execute the helper for:
 
 Assert the helper appends canonical envelope rows into `events.ndjson`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `node --test tests/nlsdd-automation.test.js`
 Expected: FAIL because the helper and npm script do not exist.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create `NLSDD/scripts/nlsdd-record-command-event.cjs` that:
 - parses required execution/lane/event/command args
@@ -120,12 +120,12 @@ Create `NLSDD/scripts/nlsdd-record-command-event.cjs` that:
 Add package script:
 - `nlsdd:command:record`
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `node --test tests/nlsdd-automation.test.js`
 Expected: PASS for helper coverage.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/nlsdd-automation.test.js NLSDD/scripts/nlsdd-record-command-event.cjs package.json
@@ -141,7 +141,7 @@ git commit -m "feat(nlsdd): 新增 command telemetry 記錄 helper"
 - Modify: `NLSDD/scripts/nlsdd-lib.cjs`
 - Test: `tests/nlsdd-automation.test.js`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add fixture-style tests that build a synthetic execution with:
 - multiple lanes entering `implementing`
@@ -156,12 +156,12 @@ Assert the summary JSON contains:
 - minute buckets with `activeWorkers`
 - minute buckets with `productiveWorkers`
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `node --test tests/nlsdd-automation.test.js`
 Expected: FAIL because no telemetry summarizer exists.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 In `NLSDD/scripts/nlsdd-lib.cjs`, add shared helpers for:
 - telemetry summary output paths
@@ -180,12 +180,12 @@ Initial classification rules:
 - fast-fail: immediate `command-failed`
 - blocked/waiting: `command-blocked`
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `node --test tests/nlsdd-automation.test.js`
 Expected: PASS with stable minute-bucket projection.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/nlsdd-automation.test.js NLSDD/scripts/nlsdd-lib.cjs NLSDD/scripts/nlsdd-summarize-telemetry.cjs
@@ -198,7 +198,7 @@ git commit -m "feat(nlsdd): 投影 execution worker telemetry 摘要"
 - Modify: `NLSDD/scripts/nlsdd-summarize-telemetry.cjs`
 - Test: `tests/nlsdd-automation.test.js`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add tests for drop segments covering:
 - handoff wait (`ready-to-commit` / review pending)
@@ -216,12 +216,12 @@ Assert each drop segment includes:
 - `supportingEvents`
 - `missingSignals`
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `node --test tests/nlsdd-automation.test.js`
 Expected: FAIL because diagnostics are absent or incomplete.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Extend the telemetry summarizer to:
 - detect when `activeWorkers` or `productiveWorkers` decline
@@ -229,12 +229,12 @@ Extend the telemetry summarizer to:
 - attach the best available reason based on nearby events
 - emit `unknown-silence` with explicit missing signals when evidence is insufficient
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `node --test tests/nlsdd-automation.test.js`
 Expected: PASS with deterministic diagnostics.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/nlsdd-automation.test.js NLSDD/scripts/nlsdd-summarize-telemetry.cjs
@@ -250,7 +250,7 @@ git commit -m "feat(nlsdd): 補上並行下降診斷與 unknown silence fallback
 - Modify: `package.json`
 - Test: `tests/nlsdd-automation.test.js`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add tests that feed a summarized telemetry fixture into the renderer and assert output includes:
 - wall-clock duration
@@ -259,12 +259,12 @@ Add tests that feed a summarized telemetry fixture into the renderer and assert 
 - reasons + confidence
 - missing information guidance
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `node --test tests/nlsdd-automation.test.js`
 Expected: FAIL because review renderer does not exist.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Create renderer that writes:
 - `NLSDD/state/<execution>/telemetry-review.md`
@@ -274,12 +274,12 @@ Add npm script:
 
 Keep output concise and coordinator-focused.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `node --test tests/nlsdd-automation.test.js`
 Expected: PASS with stable markdown rendering.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/nlsdd-automation.test.js NLSDD/scripts/nlsdd-render-telemetry-review.cjs package.json
@@ -294,16 +294,16 @@ git commit -m "feat(nlsdd): 新增 telemetry review 輸出"
 - Modify: `tasks/todo.md`
 - Test: `tests/nlsdd-automation.test.js`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add integration coverage showing coordinator output now references telemetry summary/review availability for an execution with events.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `node --test tests/nlsdd-automation.test.js`
 Expected: FAIL because coordinator output has no telemetry awareness.
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 Update coordinator loop to:
 - load telemetry summary when present
@@ -316,12 +316,12 @@ Update `NLSDD/AGENTS.md` to require workers to:
 
 Update `tasks/todo.md` review notes after implementation.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `node --test tests/nlsdd-automation.test.js`
 Expected: PASS with workflow-level integration.
 
-- [ ] **Step 5: Run full verification**
+- [x] **Step 5: Run full verification**
 
 Run:
 - `node --test tests/nlsdd-automation.test.js`
@@ -333,7 +333,7 @@ Expected:
 - runtime scoreboard refresh succeeds
 - TypeScript build remains green
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tests/nlsdd-automation.test.js NLSDD/scripts/nlsdd-run-coordinator-loop.cjs NLSDD/AGENTS.md tasks/todo.md

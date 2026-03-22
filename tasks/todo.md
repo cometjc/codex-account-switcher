@@ -17,6 +17,22 @@
   - `npm run nlsdd:scoreboard:refresh`
   - `npm run build`
 
+# 2026-03-22 `nlsdd-go` runtime truth sync
+
+- [x] 依既有 `nlsdd-self-hosting` execution 重新跑 dispatch-plan / coordinator / insight summary dry-run
+- [x] 確認目前沒有誠實可派工 lane、review action 或 commit intake
+- [x] 將已完成的 telemetry / meta plans checkbox 同步回 runtime truth，避免下次 `nlsdd-go` 被過期 checklist 誤導
+
+## Review
+
+- `nlsdd-self-hosting` 目前的 coordinator truth 是 `idleSlots=4`、`promotedLanes=[]`、`reviewActions=[]`、`commitIntake=[]`、`actionableCount=0`，所以這次 `nlsdd-go` 的正確結果是 no-op，而不是硬開新 lane。
+- 剩餘不一致主要來自計畫文件的 checkbox drift，而不是 runtime 還有未收斂的 worker 工作；這次已把 `plan/2026-03-22-nlsdd-worker-telemetry-implementation-plan.md` 與 `plan/2026-03-21-nlsdd-meta-optimization-plan.md` 勾回真相。
+- 重新檢查後，`NLSDD/state/nlsdd-self-hosting/telemetry-summary.json` 與 `telemetry-review.md` 已可由 coordinator dry-run 正常投影與引用。
+- 驗證：
+  - `node NLSDD/scripts/nlsdd-build-dispatch-plan.cjs --execution nlsdd-self-hosting --dry-run --json`
+  - `node NLSDD/scripts/nlsdd-run-coordinator-loop.cjs --execution nlsdd-self-hosting --dry-run --json`
+  - `node NLSDD/scripts/nlsdd-summarize-insights.cjs --execution nlsdd-self-hosting --json`
+
 # 2026-03-20 limits 欄位 header 修正
 
 # 2026-03-21 plot-mode integration branch 收斂

@@ -9,4 +9,4 @@
 - [x] Propose the highest-leverage single improvement to the main agent and record the decision
 - [x] Implement the selected NLSDD improvement
 - [x] Verify NLSDD tooling and any affected workflow behavior
-- [ ] Commit the branch work and merge `nlsdd-meta-optimization` back into `main`
+- [x] Commit the branch work and merge `nlsdd-meta-optimization` back into `main`
