@@ -28,6 +28,8 @@ test('plot mode stays visible in the root shell help text', () => {
 });
 
 test('plot viewer package scripts remain wired in package.json', () => {
-  assert.equal(packageJson.scripts['plot:viewer:build'], 'cargo build --manifest-path rust/plot-viewer/Cargo.toml');
-  assert.equal(packageJson.scripts['plot:viewer:run'], 'cargo run --manifest-path rust/plot-viewer/Cargo.toml --');
+  assert.equal(packageJson.scripts['plot:viewer:build'], 'cargo build --manifest-path rust/plot-viewer/Cargo.toml --bin codex-auth');
+  assert.equal(packageJson.scripts['plot:viewer:run'], 'cargo run --manifest-path rust/plot-viewer/Cargo.toml --bin codex-auth --');
+  assert.equal(packageJson.scripts['rust:auth:build'], 'cargo build --manifest-path rust/plot-viewer/Cargo.toml --bin codex-auth');
+  assert.equal(packageJson.scripts['rust:auth:run'], 'cargo run --manifest-path rust/plot-viewer/Cargo.toml --bin codex-auth --');
 });

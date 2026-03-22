@@ -1,6 +1,6 @@
 # codex-auth
 
-A command-line tool that lets you manage and switch between multiple Codex accounts instantly, no more constant logins and logouts.
+A command-line tool that lets you manage, switch, and inspect multiple Codex accounts from a unified Rust TUI.
 
 > [!WARNING]
 > Not affiliated with OpenAI or Codex. Not an official tool.
@@ -11,16 +11,22 @@ Codex stores your authentication session in a single `auth.json` file. This tool
 
 ## Requirements
 
-- Node.js 18 or newer
+- Rust toolchain with Cargo
+- Node.js 18 or newer for repo automation, NLSDD scripts, and legacy development helpers
 
-## Plot Mode
+## Rust TUI
 
-Plot mode is an experimental, in-progress phase-1 migration toward a Rust TUI viewer.
+`codex-auth` now has a Rust-first runtime for auth/profile management and plot rendering.
 
-- Node remains the source of truth for auth, cache, and API access in this phase.
-- Rust is intended to own rendering for the plot viewer only.
-- Any `plot:viewer:*` scripts in `package.json` should be treated as developer scaffolding, not stable end-user commands.
-- Those scripts now point at cargo-backed Rust viewer commands, but the viewer itself is still being fleshed out.
+- Auth snapshot storage, saved profile switching, usage cache reads, and the plot view all live in the same Rust app.
+- Plot is no longer treated as a separate external viewer truth; it is a built-in view of the main TUI.
+- `plot:viewer:*` and `rust:auth:*` scripts in `package.json` both target the same Rust `codex-auth` binary during local development.
+
+## Build
+
+```sh
+cargo build --manifest-path rust/plot-viewer/Cargo.toml --bin codex-auth
+```
 
 ## Install (npm)
 
@@ -28,29 +34,35 @@ Plot mode is an experimental, in-progress phase-1 migration toward a Rust TUI vi
 npm i -g codex-auth
 ```
 
+The npm package still exists for repository/distribution continuity, but the product runtime is now the Rust binary.
+
 ## Usage
 
 ```sh
-# start interactive profile manager
-codex-auth
+# start the Rust interactive profile manager
+cargo run --manifest-path rust/plot-viewer/Cargo.toml --bin codex-auth --
 ```
 
 ### Interactive controls
 
-- `Enter` on `[CURRENT][UNSAVED]` – Save current `~/.codex/auth.json` with editable default name (`email-plan`).
-- `Enter` on `[SAVED]` – If current profile is unsaved, prompts to save first, then switches to selected saved profile.
-- `D` or `Del` on `[SAVED]` – Confirm and delete saved snapshot.
-- `R` on `[SAVED]` – Rename saved snapshot.
-- `U` – Refresh 5h/weekly limits immediately.
+- `Up` / `Down` – Move between saved or current-unsaved profiles.
+- `Enter` – Save current unsaved profile, or switch to the selected saved profile.
+- `N` – Rename the selected saved profile.
+- `D` or `Del` – Delete the selected saved profile after confirmation.
+- `U` – Refresh usage for the selected profile.
+- `A` – Refresh usage for all visible profiles.
+- `P` or `B` – Toggle between the account list and the built-in plot view.
+- `Left` / `Right` in plot view – Cycle profiles without leaving the plot.
+- `Tab` – Switch chart/panel focus inside plot view.
+- `Q` – Quit.
 
-### Limits shown per profile
+### Limits and plot
 
-- Weekly and (if available) 5-hour limits are fetched from ChatGPT usage endpoint and cached locally.
-- If no separate 5-hour window exists for an account, only Weekly is shown.
-- Line format is aligned and includes rate hint:
-  - `Weekly limit:         [███████████████████░] 94% left (resets 10:38 on 26 Mar) · Can use 1.2%/hour for next 78.0 hours`
+- Weekly and, when available, 5-hour limits are fetched from the ChatGPT usage endpoint and cached locally.
+- The built-in plot view renders a 7-day usage line and a 5-hour band from the same Rust-side state used by the account list.
+- If no separate 5-hour window exists for an account, the plot stays truthful and marks the band as unavailable.
 
 Notes:
 
-- Works on macOS/Linux (symlink) and Windows (copy).
-- Requires Node 18+.
+- Works on macOS/Linux with symlink switching and on Windows with file copy switching.
+- Node remains in the repo for executor automation and legacy tooling, not as the primary auth runtime.

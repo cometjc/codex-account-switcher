@@ -10,7 +10,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
-    "build": "npm run clean && tsc -p tsconfig.json",
+    "build": "npm run clean && tsc -p tsconfig.json && cargo build --manifest-path rust/plot-viewer/Cargo.toml --bin codex-auth",
     "nlsdd:scoreboard:refresh": "node NLSDD/scripts/nlsdd-refresh-scoreboard.cjs",
     "nlsdd:probe": "node NLSDD/scripts/nlsdd-probe-lane.cjs",
     "nlsdd:envelope:record": "node NLSDD/scripts/nlsdd-envelope.cjs",
@@ -35,8 +35,10 @@
     "nlsdd:executor:import": "node NLSDD/scripts/nlsdd-executor.cjs import-plans",
     "nlsdd:executor:audit": "node NLSDD/scripts/nlsdd-executor.cjs audit",
     "nlsdd:executor:go": "node NLSDD/scripts/nlsdd-executor.cjs go",
-    "plot:viewer:build": "cargo build --manifest-path rust/plot-viewer/Cargo.toml",
-    "plot:viewer:run": "cargo run --manifest-path rust/plot-viewer/Cargo.toml --",
+    "plot:viewer:build": "cargo build --manifest-path rust/plot-viewer/Cargo.toml --bin codex-auth",
+    "plot:viewer:run": "cargo run --manifest-path rust/plot-viewer/Cargo.toml --bin codex-auth --",
+    "rust:auth:build": "cargo build --manifest-path rust/plot-viewer/Cargo.toml --bin codex-auth",
+    "rust:auth:run": "cargo run --manifest-path rust/plot-viewer/Cargo.toml --bin codex-auth --",
     "link:dev": "node scripts/link-dev-bin.cjs",
     "unlink:dev": "node scripts/unlink-dev-bin.cjs",
     "prepublishOnly": "npm run build"

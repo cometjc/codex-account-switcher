@@ -104,6 +104,10 @@ impl PlotSnapshot {
         Ok(snapshot)
     }
 
+    pub fn active_profile(&self) -> Option<&PlotProfile> {
+        self.profiles.get(self.active_profile_index)
+    }
+
     pub fn current_profile(&self) -> Option<&PlotProfile> {
         self.current_profile_id
             .as_ref()

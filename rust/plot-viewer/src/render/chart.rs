@@ -9,7 +9,7 @@ use super::{ChartState, FocusTarget, RenderContext, RenderState};
 const X_AXIS_BOUNDS: [f64; 2] = [0.0, 7.0];
 const Y_AXIS_BOUNDS: [f64; 2] = [0.0, 100.0];
 
-/// Visible chart renderer for the plot viewer.
+/// Visible chart renderer for the unified Rust codex-auth app.
 ///
 /// Lane 3 upgrades the shell from placeholder copy to a real chart backed by
 /// the selected profile's seven-day points, with a readable five-hour band
@@ -30,7 +30,7 @@ pub fn render_chart<State: RenderState>(frame: &mut Frame, context: &RenderConte
         FocusTarget::Summary => "Summary",
     };
     let block = Block::default()
-        .title("plot chart")
+        .title("usage plot")
         .borders(Borders::ALL);
     let inner = block.inner(context.area);
     frame.render_widget(block, context.area);

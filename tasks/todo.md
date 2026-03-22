@@ -1,3 +1,25 @@
+# 2026-03-22 Rust codex-auth 全面接手 auth 並整合 plot
+
+- [x] 用 central executor 建立 `rust-auth-migration` execution，將剩餘 Rust 遷移 scope 一次拆成 Lane 1-4
+- [x] Lane 1：將 Rust crate 提升為正式 `codex-auth` library+binary，補 paths、account store、usage service、binary entrypoint
+- [x] Lane 2：在同一個 Rust app 內補 unified auth manager state 與 TUI action flow
+- [x] Lane 3：把 plot 整合成同 app view，不再依賴外部 snapshot handoff 當正式 runtime truth
+- [x] Lane 4：將 README、package scripts、Node regression tests 收斂到 Rust-first truth
+- [x] 跑 Rust 與 Node 驗證，確認新 Rust-first surface 可編譯、測試可通過
+
+## Review
+
+- 這輪不是只在本地把 Rust 程式碼補一補，而是先照使用者要求，把剩餘 scope 全部寫進 central executor：新增 `rust-auth-migration` execution、單一 pending plan、4 條 lanes，並讓 Lane 1 綁目前主工作樹、Lane 2-4 各自有 queue worktree path。
+- Lane 1 已實際落地新的 Rust domain/runtime：`rust/plot-viewer` 現在是 `codex-auth` crate，新增 `lib.rs`、`paths.rs`、`store.rs`、`usage.rs`，`main.rs` 直接啟動 Rust app，不再吃 snapshot path 才能跑。
+- Lane 2 / Lane 3 的 visible runtime 也一起落地：`app.rs` 現在承接同一個 Rust TUI 內的 account list、save/rename/delete/refresh dialog、以及 built-in plot view；plot 不再是外部 viewer 的正式 truth，而是同 app 內的 view state。
+- Lane 4 同步把 repo truth 切到 Rust-first：README 改成 Rust runtime + built-in plot 說法，`package.json` 的 build / plot scripts 指向 Rust `codex-auth` binary，對應 Node regression tests 也改成守護新的 Cargo metadata 與 README/entrypoint truth。
+- 驗證：
+  - `cargo test --manifest-path rust/plot-viewer/Cargo.toml`
+  - `cargo check --manifest-path rust/plot-viewer/Cargo.toml`
+  - `node --test tests/plot-mode-shell.test.js tests/plot-readme.test.js tests/plot-viewer-scaffold.test.js tests/plot-rust-model-contract.test.js`
+  - `npm run build`
+  - `git diff --check`
+
 # 2026-03-22 中央 executor migration
 
 - [x] 補 executor failing tests，鎖住 import/cleanup、go gate、claim/report-result 的最小主幹

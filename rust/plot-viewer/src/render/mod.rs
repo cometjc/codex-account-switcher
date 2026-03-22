@@ -6,10 +6,7 @@ use ratatui::prelude::Frame;
 use ratatui::text::{Line, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-/// Minimal shared render inputs for the plot viewer.
-///
-/// The future shell can extend this with richer layout hints without forcing
-/// the render module to depend on app-specific state shapes.
+/// Shared render inputs for the Rust codex-auth plot view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RenderContext<'a, State> {
     pub state: &'a State,
@@ -104,10 +101,10 @@ pub trait RenderState {
     }
 }
 
-/// Entry point for the plot-viewer layout boundary.
+/// Entry point for the codex-auth plot layout boundary.
 pub fn render<State: RenderState>(frame: &mut Frame, area: Rect, state: &State) {
     let context = RenderContext::new(state, area);
-    let outer = Block::default().title("plot-viewer").borders(Borders::ALL);
+    let outer = Block::default().title("codex-auth plot").borders(Borders::ALL);
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
     if inner.width == 0 || inner.height == 0 {
@@ -122,7 +119,7 @@ pub fn render<State: RenderState>(frame: &mut Frame, area: Rect, state: &State) 
     .split(inner);
 
     let header = Paragraph::new(Text::from(vec![
-        Line::from("Plot viewer shell"),
+        Line::from("Rust codex-auth plot view"),
         Line::from(format!(
             "Selected profile: {}",
             state.selected_profile_label()
@@ -134,7 +131,7 @@ pub fn render<State: RenderState>(frame: &mut Frame, area: Rect, state: &State) 
     chart::render_chart(frame, &context.with_area(chunks[1]));
 
     let footer = Paragraph::new(Text::from(vec![Line::from(format!(
-        "Viewport: {}x{}",
+        "Viewport: {}x{} · Tab switches focus · Left/Right cycles profiles",
         context.viewport.width, context.viewport.height
     ))]))
     .wrap(Wrap { trim: true });
