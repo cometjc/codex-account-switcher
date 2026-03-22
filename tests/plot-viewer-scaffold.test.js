@@ -32,6 +32,7 @@ test('plot-viewer scaffold files are present', () => {
     'rust/plot-viewer/src/render/panels.rs',
     'rust/plot-viewer/src/store.rs',
     'rust/plot-viewer/src/usage.rs',
+    'bin/codex-auth.cjs',
   ].forEach(assertFilePresent);
 });
 
@@ -75,4 +76,21 @@ test('Rust source modules keep the codex-auth entrypoints stable', () => {
   assert.match(renderMod, /^pub mod panels;$/m);
   assert.match(renderMod, /^pub fn render<State: RenderState>\(frame: &mut Frame, area: Rect, state: &State\) \{$/m);
   assert.match(renderMod, /title\("codex-auth plot"\)/);
+});
+
+test('legacy Node product runtime files are removed', () => {
+  for (const relativePath of [
+    'src/index.ts',
+    'src/commands',
+    'src/lib/accounts',
+    'src/lib/limits',
+    'src/lib/plot',
+    'src/lib/route-cli-argv.ts',
+    'src/lib/base-command.ts',
+    'bin/codex-auth-dev.cjs',
+    'scripts/link-dev-bin.cjs',
+    'scripts/unlink-dev-bin.cjs',
+  ]) {
+    assert.equal(fs.existsSync(repoPath(relativePath)), false, `expected ${relativePath} to be removed`);
+  }
 });

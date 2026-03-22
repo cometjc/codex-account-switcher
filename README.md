@@ -12,7 +12,7 @@ Codex stores your authentication session in a single `auth.json` file. This tool
 ## Requirements
 
 - Rust toolchain with Cargo
-- Node.js 18 or newer for repo automation, NLSDD scripts, and legacy development helpers
+- Node.js 18 or newer for repo automation and NLSDD scripts
 
 ## Rust TUI
 
@@ -20,7 +20,7 @@ Codex stores your authentication session in a single `auth.json` file. This tool
 
 - Auth snapshot storage, saved profile switching, usage cache reads, and the plot view all live in the same Rust app.
 - Plot is no longer treated as a separate external viewer truth; it is a built-in view of the main TUI.
-- `plot:viewer:*` and `rust:auth:*` scripts in `package.json` both target the same Rust `codex-auth` binary during local development.
+- The npm package is now a thin shim that forwards `codex-auth` into the single Rust `codex-auth` binary entrypoint.
 
 ## Build
 
@@ -34,13 +34,13 @@ cargo build --manifest-path rust/plot-viewer/Cargo.toml --bin codex-auth
 npm i -g codex-auth
 ```
 
-The npm package still exists for repository/distribution continuity, but the product runtime is now the Rust binary.
+The npm package is only a thin shim; the product runtime lives in the Rust binary.
 
 ## Usage
 
 ```sh
 # start the Rust interactive profile manager
-cargo run --manifest-path rust/plot-viewer/Cargo.toml --bin codex-auth --
+codex-auth
 ```
 
 ### Interactive controls
@@ -65,4 +65,4 @@ cargo run --manifest-path rust/plot-viewer/Cargo.toml --bin codex-auth --
 Notes:
 
 - Works on macOS/Linux with symlink switching and on Windows with file copy switching.
-- Node remains in the repo for executor automation and legacy tooling, not as the primary auth runtime.
+- Node remains in the repo for executor automation and NLSDD tooling, not as the primary auth runtime.

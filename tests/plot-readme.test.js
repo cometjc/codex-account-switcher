@@ -9,7 +9,7 @@ function readReadme() {
   return fs.readFileSync(README_PATH, 'utf8');
 }
 
-test('README reflects the Rust-first codex-auth runtime and integrated plot view', () => {
+test('README reflects the Rust-first codex-auth runtime and thin npm shim', () => {
   const readme = readReadme();
 
   const plotSectionIndex = readme.indexOf('## Rust TUI');
@@ -21,18 +21,9 @@ test('README reflects the Rust-first codex-auth runtime and integrated plot view
   assert.ok(requirementsIndex >= 0, 'README should include a Requirements section');
   assert.ok(buildIndex >= 0, 'README should include a Build section');
   assert.ok(installIndex >= 0, 'README should include an Install section');
-  assert.ok(
-    requirementsIndex < plotSectionIndex,
-    'Rust TUI should stay after Requirements',
-  );
-  assert.ok(
-    plotSectionIndex < buildIndex,
-    'Rust TUI should stay before Build',
-  );
-  assert.ok(
-    buildIndex < installIndex,
-    'Build should stay before Install',
-  );
+  assert.ok(requirementsIndex < plotSectionIndex, 'Rust TUI should stay after Requirements');
+  assert.ok(plotSectionIndex < buildIndex, 'Rust TUI should stay before Build');
+  assert.ok(buildIndex < installIndex, 'Build should stay before Install');
 
   const plotSection = readme.slice(plotSectionIndex, installIndex);
 
@@ -48,4 +39,10 @@ test('README reflects the Rust-first codex-auth runtime and integrated plot view
     plotSection,
     /Plot is no longer treated as a separate external viewer truth; it is a built-in view of the main TUI\./,
   );
+  assert.match(
+    plotSection,
+    /thin shim.*single Rust `codex-auth` binary entrypoint/i,
+  );
+  assert.match(readme, /Node\.js 18 or newer for repo automation and NLSDD scripts/);
+  assert.doesNotMatch(plotSection, /@oclif\/core|dist\/index\.js|legacy development helpers|plot:viewer:\*/);
 });

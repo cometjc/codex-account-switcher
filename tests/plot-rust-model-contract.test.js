@@ -7,7 +7,7 @@ function readText(relativePath) {
   return fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
 }
 
-test('Rust plot model stays aligned with the plot snapshot contract', () => {
+test('Rust plot snapshot model keeps the embedded loader contract stable', () => {
   const rustModel = readText('rust/plot-viewer/src/model.rs');
 
   assert.match(rustModel, /#[\[]serde\(rename = "schemaVersion"\)\]/);

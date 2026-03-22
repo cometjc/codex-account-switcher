@@ -19,10 +19,12 @@ test('plot mode is rendered from Rust app state, not Node shell wiring', () => {
   assert.match(renderMod, /pub mod chart;/);
   assert.match(renderMod, /pub mod panels;/);
   assert.match(renderMod, /title\("codex-auth plot"\)/);
-  assert.match(renderMod, /Selected profile: /);
-  assert.match(renderMod, /Tab switches focus/);
+  assert.match(renderMod, /Selected: .*Current: .*Visible profiles:/);
+  assert.match(renderMod, /Tab switches panel focus/);
 
-  assert.match(chartRs, /usage plot/);
-  assert.match(chartRs, /7d usage: /);
+  assert.match(chartRs, /usage plot overlays/);
+  assert.match(chartRs, /Profiles: /);
+  assert.match(chartRs, /Legend: /);
+  assert.match(chartRs, /5h frame: /);
   assert.match(chartRs, /5h band: /);
 });
