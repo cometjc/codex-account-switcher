@@ -45,6 +45,19 @@ test('package bin points at the Rust thin shim', () => {
   assert.match(shimSource, /CODEX_AUTH_BIN/);
 });
 
+test('dev link scripts point at the Rust thin shim workflow', () => {
+  const packageJson = require(repoPath('package.json'));
+  const linkScript = readText('scripts/link-dev-bin.cjs');
+  const unlinkScript = readText('scripts/unlink-dev-bin.cjs');
+
+  assert.equal(packageJson.scripts['link:dev'], 'node scripts/link-dev-bin.cjs');
+  assert.equal(packageJson.scripts['unlink:dev'], 'node scripts/unlink-dev-bin.cjs');
+  assert.match(linkScript, /codex-auth\.cjs/);
+  assert.match(linkScript, /const targetPath = path\.join\(targetDir, 'codex-auth'\);/);
+  assert.match(unlinkScript, /codex-auth\.cjs/);
+  assert.match(unlinkScript, /Refusing to remove symlink not owned by this repo/);
+});
+
 test('legacy Node product entrypoints are gone', () => {
   const packageJson = require(repoPath('package.json'));
 

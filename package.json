@@ -8,6 +8,8 @@
   },
   "scripts": {
     "build": "cargo build --manifest-path rust/plot-viewer/Cargo.toml --bin codex-auth",
+    "link:dev": "node scripts/link-dev-bin.cjs",
+    "unlink:dev": "node scripts/unlink-dev-bin.cjs",
     "nlsdd:scoreboard:refresh": "node NLSDD/scripts/nlsdd-refresh-scoreboard.cjs",
     "nlsdd:probe": "node NLSDD/scripts/nlsdd-probe-lane.cjs",
     "nlsdd:envelope:record": "node NLSDD/scripts/nlsdd-envelope.cjs",
