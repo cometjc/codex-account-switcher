@@ -37,10 +37,10 @@
 - [x] Projected phase: parked
 - [x] Current item: n/a
 - [x] Latest commit: `baa7b8e`
-- [x] Latest event: parked · reactivate plot-mode for runtime/chart/panel work
+- [x] Latest event: parked · all-plans-together: park plot-mode after reactivation work landed on main
 - [x] Next expected phase: n/a
 - [x] Next refill target: n/a
-- [x] Latest note: reactivate plot-mode for runtime/chart/panel work
+- [x] Latest note: all-plans-together: park plot-mode after reactivation work landed on main
 
 ## Refill Order
 

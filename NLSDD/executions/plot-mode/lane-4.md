@@ -30,13 +30,13 @@
 
 ## Current Lane Status
 
-- [x] Projected phase: implementing
-- [x] Current item: Refresh Summary / Compare content from real selected/current/focus state once the runtime/chart reactivation lands
+- [x] Projected phase: parked
+- [x] Current item: n/a
 - [x] Latest commit: `6bb1fba`
-- [x] Latest event: state-update · Panels now read shared selection/chart state directly and carry stable Summary / Compare regression coverage.
-- [x] Next expected phase: spec-review-pending
+- [x] Latest event: parked · all-plans-together: park plot-mode after reactivation work landed on main
+- [x] Next expected phase: n/a
 - [x] Next refill target: n/a
-- [x] Latest note: Summary / Compare lines now distinguish adopted target vs current route, include live 7d sample and 5h band status, and stop relying on placeholder routing copy.
+- [x] Latest note: all-plans-together: park plot-mode after reactivation work landed on main
 
 ## Refill Order
 

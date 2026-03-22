@@ -36,13 +36,13 @@
 
 ## Current Lane Status
 
-- [x] Projected phase: implementing
-- [x] Current item: Land a unified selection/current/focus render-state contract that chart and panels can consume directly
+- [x] Projected phase: parked
+- [x] Current item: Wait for a fresh runtime-owned item after accepted compare payload seam
 - [x] Latest commit: `d361653`
-- [x] Latest event: state-update · Landed `selection_state()` as the single runtime-owned contract and moved chart/panels consumers onto it.
-- [x] Next expected phase: spec-review-pending
+- [x] Latest event: parked · all-plans-together: park plot-mode after reactivation work landed on main
+- [x] Next expected phase: n/a
 - [x] Next refill target: Re-open only when a concrete post-seam runtime or navigation item exists
-- [x] Latest note: `AppRenderState` now exposes selected/current/focus through one shared contract, with Rust tests covering profile cycling + focus cycling and downstream renderers consuming that state directly.
+- [x] Latest note: all-plans-together: park plot-mode after reactivation work landed on main
 
 ## Refill Order
 

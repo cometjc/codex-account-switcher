@@ -118,6 +118,26 @@
 - 現在 `AGENTS.md` 已補上邊界：只有當 main agent 已在使用者明確授權的 `proceed` 流程中，且 commit 後只剩單一、低風險、可逆的 finishing 動作時，才自動往下走；若還有 merge / PR / push / release 等多路徑決策，仍必須停下來對齊。
 - 這次也把同一個 pattern 寫進 `tasks/lessons.md`，避免之後又回到「commit 完就先停住等下一句 `proceed`」的機械式行為。
 
+# 2026-03-22 nlsdd-go for all plans together
+
+- [x] 盤點 `plan/` 下所有 plans，區分真正未完成工作與 checkbox drift
+- [x] 對 `nlsdd-self-hosting` 與 `plot-mode` 一起重跑 dispatch / coordinator / insights truth
+- [x] 收斂 `plot-mode` 的 stale implementing lane journal，避免 execution 看起來還在跑其實已 landed on main
+- [x] 將 reactivation plan 與 plot-mode tracked docs 補回 honest no-op 狀態
+
+## Review
+
+- `nlsdd-self-hosting` 的 truth 仍然是完全收斂：`idleSlots=4`、`promotedLanes=[]`、`reviewActions=[]`、`commitIntake=[]`、`actionableCount=0`，所以這條 execution 依舊是 honest no-op。
+- `plot-mode` 的產品面其實也已經透過 `5c2d643` 落地完 Lane 2/3/4，但 execution tracking 還留著一組 stale implementing state，導致 `dispatch-plan` 看起來像還有 1 條 active lane、2 條 stale implementing lane。這不是新工作，而是 runtime journal / tracked docs 漂移。
+- 這次已用 `nlsdd-replan-active-set` 把 `plot-mode` 全部 lanes 收回 parked，並同步更新 scoreboard、lane docs、overview 與 reactivation plan，讓「所有 plans together」回到一致真相：目前沒有 honest dispatchable lane。
+- 驗證：
+  - `node NLSDD/scripts/nlsdd-build-dispatch-plan.cjs --execution nlsdd-self-hosting --dry-run --json`
+  - `node NLSDD/scripts/nlsdd-run-coordinator-loop.cjs --execution nlsdd-self-hosting --dry-run --json`
+  - `node NLSDD/scripts/nlsdd-summarize-insights.cjs --execution nlsdd-self-hosting --json`
+  - `node NLSDD/scripts/nlsdd-build-dispatch-plan.cjs --execution plot-mode --dry-run --json`
+  - `node NLSDD/scripts/nlsdd-run-coordinator-loop.cjs --execution plot-mode --dry-run --json`
+  - `node NLSDD/scripts/nlsdd-summarize-insights.cjs --execution plot-mode --json`
+
 # 2026-03-20 limits 欄位 header 修正
 
 # 2026-03-21 plot-mode integration branch 收斂

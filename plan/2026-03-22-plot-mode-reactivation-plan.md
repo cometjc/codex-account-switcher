@@ -53,14 +53,14 @@
 - Modify: `NLSDD/executions/plot-mode/lane-5.md`
 - Modify: `tasks/todo.md`
 
-- [ ] **Step 1: Write the tracking delta before editing**
+- [x] **Step 1: Write the tracking delta before editing**
 
 Capture the runtime truth that triggered the replan:
 - `plot-mode` product gap remains open because Rust viewer still renders scaffold text rather than the real chart
 - current coordinator truth is `no-dispatchable-lane`
 - the remaining work belongs to Lane 2 / 3 / 4, not Lane 1
 
-- [ ] **Step 2: Update tracked execution surfaces**
+- [x] **Step 2: Update tracked execution surfaces**
 
 Rewrite the plot-mode tracking docs so they say:
 - Lane 1 stays parked unless Node handoff or launch UX regresses
@@ -69,7 +69,7 @@ Rewrite the plot-mode tracking docs so they say:
 - Lane 4 is queued behind Lane 2/3 for panel refresh/richer compare output
 - Lane 5 stays parked until visible behavior changes enough to require docs updates
 
-- [ ] **Step 3: Run scoreboard/tracking verification**
+- [x] **Step 3: Run scoreboard/tracking verification**
 
 Run:
 - `npm run nlsdd:scoreboard:refresh`
@@ -79,7 +79,7 @@ Expected:
 - tracked/runtime scoreboards stay coherent
 - `plot-mode` now reports honest queued work instead of `no-dispatchable-lane`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add NLSDD/scoreboard.md NLSDD/executions/plot-mode/overview.md NLSDD/executions/plot-mode/lane-2.md NLSDD/executions/plot-mode/lane-3.md NLSDD/executions/plot-mode/lane-4.md NLSDD/executions/plot-mode/lane-5.md tasks/todo.md
@@ -122,7 +122,7 @@ Run:
 
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add rust/plot-viewer/src/app.rs rust/plot-viewer/src/render/mod.rs tests/plot-viewer-scaffold.test.js
@@ -168,7 +168,7 @@ Run:
 
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add rust/plot-viewer/src/render/chart.rs
@@ -214,7 +214,7 @@ Run:
 
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add rust/plot-viewer/src/render/panels.rs
@@ -230,24 +230,24 @@ git commit -m "feat(plot): 讓 summary 與 compare 面板跟隨 viewer 狀態"
 - Modify: `tests/plot-readme.test.js`
 - Modify: `tests/plot-mode-shell.test.js`
 
-- [ ] **Step 1: Check whether user-visible behavior changed enough to require docs edits**
+- [x] **Step 1: Check whether user-visible behavior changed enough to require docs edits**
 
 Only proceed if:
 - the viewer now renders a real chart
 - operator run/build instructions need updated expectations
 
-- [ ] **Step 2: If needed, write the failing doc regression**
+- [x] **Step 2: If needed, write the failing doc regression**
 
 Add/update README or shell regression coverage for the new plot-mode behavior.
 
-- [ ] **Step 3: If needed, update docs minimally**
+- [x] **Step 3: If needed, update docs minimally**
 
 Keep docs honest:
 - plot-mode is still phase 1
 - Rust owns rendering
 - the local recovery/build/run path matches real behavior
 
-- [ ] **Step 4: Run doc verification**
+- [x] **Step 4: Run doc verification**
 
 Run:
 - `npm run build`
@@ -256,7 +256,7 @@ Run:
 
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add README.md tests/plot-readme.test.js tests/plot-mode-shell.test.js

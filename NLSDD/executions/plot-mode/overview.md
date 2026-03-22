@@ -49,6 +49,8 @@
 - [x] Lane 5 first two docs/operator-flow commits `888e2d9` and `25ea3c1` landed with README regression coverage.
 - [x] Lane 4 correction surfaced a real dependency: the render boundary still needs to expose compare recommendation/bottleneck payload, so the lane is blocked until Lane 2 lands that seam.
 - [x] Lane 4 adopted-target emphasis is now also proven complete in `6bb1fba`; the lane should stay parked until a fresh panel-local follow-up exists rather than lingering as stale implementing.
+- [x] Plot-mode reactivation landed on `main` in `5c2d643`: runtime shared state, visible 7d/5h chart rendering, and Summary / Compare refresh are now integrated on the mainline.
+- [x] After the reactivation work landed, the execution no longer has an honest queued lane; Lane 2 / Lane 3 / Lane 4 should be parked until a fresh plot-mode follow-up appears.
 
 ## Current 4-Active-Lane Plan
 
@@ -63,6 +65,8 @@
   - refresh Summary / Compare content from the real viewer state once runtime/chart slices stop being placeholders
 - [x] Lane 5 stays parked by default:
   - wake it only if the reactivated viewer changes the trusted local run/recovery workflow enough to require docs/test wording updates
+- [x] This reactivation round is now complete:
+  - all five lanes are parked until a genuinely new plot-mode gap appears
 - [x] Runtime execution evidence tightened the next refill order:
   - Lane 2 owns the next seam because the product gap is now runtime-state coherence, not another docs-only pass
   - Lane 3 should not pretend the chart is done while `chart.rs` still renders scaffold text

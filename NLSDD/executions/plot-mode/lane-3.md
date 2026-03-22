@@ -29,13 +29,13 @@
 
 ## Current Lane Status
 
-- [x] Projected phase: implementing
-- [x] Current item: Render the first real 7d curve and 5h band directly from runtime-owned chart state
+- [x] Projected phase: parked
+- [x] Current item: n/a
 - [x] Latest commit: `c5f6c26`
-- [x] Latest event: state-update · Replaced chart placeholder copy with a real ratatui chart, axis labels, band overlays, and buffer-based regressions.
-- [x] Next expected phase: spec-review-pending
+- [x] Latest event: parked · all-plans-together: park plot-mode after reactivation work landed on main
+- [x] Next expected phase: n/a
 - [x] Next refill target: n/a
-- [x] Latest note: Chart now consumes shared runtime/chart state, renders a visible 7d line plus 5h band summary, and covers both available-band and unavailable-band cases with Rust tests.
+- [x] Latest note: all-plans-together: park plot-mode after reactivation work landed on main
 
 ## Refill Order
 
