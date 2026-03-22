@@ -26,16 +26,17 @@
 - [x] Keep visible panel copy aligned with the current plot-mode semantics
 - [x] Surface routing recommendation details inside the Compare panel without stealing layout ownership from the runtime lane
 - [x] Highlight the adopted routing target more clearly once compare-panel data becomes meaningful
+- [x] Refresh Summary / Compare content from real selected/current/focus state once the runtime/chart reactivation lands
 
 ## Current Lane Status
 
-- [x] Projected phase: parked
-- [x] Current item: n/a
+- [x] Projected phase: implementing
+- [x] Current item: Refresh Summary / Compare content from real selected/current/focus state once the runtime/chart reactivation lands
 - [x] Latest commit: `6bb1fba`
-- [x] Latest event: insight-recorded · Lane 4 compare panel needs render-boundary payload, not just model seam
-- [x] Next expected phase: n/a
+- [x] Latest event: state-update · Panels now read shared selection/chart state directly and carry stable Summary / Compare regression coverage.
+- [x] Next expected phase: spec-review-pending
 - [x] Next refill target: n/a
-- [x] Latest note: That render-boundary payload landed through Lane 2 and Lane 4 consumed it in 6bb1fba, so the older adopted insight is now resolved.
+- [x] Latest note: Summary / Compare lines now distinguish adopted target vs current route, include live 7d sample and 5h band status, and stop relying on placeholder routing copy.
 
 ## Refill Order
 
@@ -43,4 +44,4 @@
 - [x] Then keep the panel structure extensible through a lane-local field-mapping refactor
 - [x] Next active refill: add recommendation/bottleneck-rich Compare content with stable visible output after Lane 2 exposes the render-boundary payload
 - [x] Current refill: highlight the adopted routing target more clearly once compare data is present
-- [ ] Then extend panel structure only if a later execution item truly needs richer side-panel content
+- [x] Then extend panel structure only if a later execution item truly needs richer side-panel content

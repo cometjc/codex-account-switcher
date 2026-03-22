@@ -25,17 +25,17 @@
 ## C - Controller / Focus Consumption
 
 - [x] Consume current selection and focus state from the shared render boundary without reintroducing app-owned layout
-- [ ] Keep chart behavior compatible with later left/right profile cycling and focus changes
+- [x] Keep chart behavior compatible with later left/right profile cycling and focus changes
 
 ## Current Lane Status
 
-- [x] Projected phase: parked
-- [x] Current item: n/a
+- [x] Projected phase: implementing
+- [x] Current item: Render the first real 7d curve and 5h band directly from runtime-owned chart state
 - [x] Latest commit: `c5f6c26`
-- [x] Latest event: bootstrap-insight · Lane 3 compatibility item already satisfied
-- [x] Next expected phase: n/a
+- [x] Latest event: state-update · Replaced chart placeholder copy with a real ratatui chart, axis labels, band overlays, and buffer-based regressions.
+- [x] Next expected phase: spec-review-pending
 - [x] Next refill target: n/a
-- [x] Latest note: Chart-local behavior and regressions already cover non-Chart focus with divergent selected/current labels; no additional lane-local diff was needed.
+- [x] Latest note: Chart now consumes shared runtime/chart state, renders a visible 7d line plus 5h band summary, and covers both available-band and unavailable-band cases with Rust tests.
 
 ## Refill Order
 

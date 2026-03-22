@@ -55,29 +55,30 @@
 - [x] The earlier handoff/chart/panel foundation rounds are integrated enough that the next 4a set can move beyond Lane 1-first refill.
 - [x] Lane 1 is effectively exhausted for now:
   - keep it parked unless Rust viewer launch UX changes enough to justify fresh shell work
-- [x] Lane 2 is promoted back into the next active set for runtime navigation and focus-flow work:
-  - use it for left/right profile cycling plus panel-detail refresh behavior
-- [x] Lane 3 stays active for chart-side focus compatibility:
-  - keep chart rendering aligned with the richer focus/navigation behavior landing through Lane 2
-- [x] Lane 4 stays active for richer compare/recommendation panel content:
-  - use it to surface real routing recommendation details rather than only the first visible skeleton
-- [x] Lane 5 enters the lane pool as the fourth active slot:
-  - use it for README/operator-flow/run-instruction cleanup once the recovery baseline becomes the trusted local workflow
+- [x] Lane 2 is the first lane to re-open:
+  - use it for left/right profile cycling plus focus-state propagation so every render surface reads the same selected/current/focus truth
+- [x] Lane 3 re-opens immediately after Lane 2:
+  - replace scaffold copy with a real 7d curve plus 5h band renderer
+- [x] Lane 4 re-opens behind Lane 2/3:
+  - refresh Summary / Compare content from the real viewer state once runtime/chart slices stop being placeholders
+- [x] Lane 5 stays parked by default:
+  - wake it only if the reactivated viewer changes the trusted local run/recovery workflow enough to require docs/test wording updates
 - [x] Runtime execution evidence tightened the next refill order:
-  - Lane 2 owns the next seam because Lane 4 cannot finish compare-panel richness until `render/mod.rs` exposes compare payload
-  - Lane 4 should remain blocked rather than pretending to implement against missing boundary data
-  - Lane 5 can continue taking docs/test-only cleanup as long as it stays inside README and README regression ownership
+  - Lane 2 owns the next seam because the product gap is now runtime-state coherence, not another docs-only pass
+  - Lane 3 should not pretend the chart is done while `chart.rs` still renders scaffold text
+  - Lane 4 should consume the real state/chart output rather than invent new panel richness against placeholder data
+  - Lane 5 should stay parked until visible operator behavior truly changes
 - [x] Prefer the next queued work in this order:
-  - Lane 2 -> render-boundary compare payload seam for Lane 4, then return to focus/navigation flow if another runtime item still exists
-  - Lane 3 -> chart compatibility with richer focus and profile cycling
-  - Lane 4 -> recommendation / compare-panel richness with stable visible copy after the Lane 2 seam lands
-  - Lane 5 -> README and local run instructions for the recovery-baseline workflow, then shell/readme alignment if still docs-owned
+  - Lane 2 -> runtime interaction / render-state coherence for selected profile and focus propagation
+  - Lane 3 -> real 7d curve plus 5h band rendering once Lane 2's state contract is stable
+  - Lane 4 -> summary/compare refresh against the richer runtime/chart state
+  - Lane 5 -> docs/run-instruction updates only if the visible viewer behavior changed enough to make current wording stale
 
 ## Runtime-State Note
 
-- [x] Manual lane planning now diverges from the currently recorded lane journals for lanes 2-4.
-- [x] Before dispatching the next 4a execution round, refresh or rewrite the lane journals so runtime tooling reflects the new manual active set instead of the stale recovery-branch dispatch state.
-- [x] During the current 4a round, repeated probe evidence showed that clean worktrees plus stale `implementing` journals should trigger re-assignment rather than be treated as real active progress.
+- [x] The older tracked execution converged to all parked lanes even though the product gap remained open.
+- [x] Before dispatching the reactivated round, rewrite the tracked lane phases so runtime tooling sees real queued work instead of replaying the no-dispatch plateau.
+- [x] The current replan exists specifically because a scaffold-only Rust viewer is not a truthful completion state for plot-mode.
 
 ## Refill Rules
 

@@ -32,21 +32,22 @@
 - [x] Add scaffold regression tests for crate/runtime surface
 - [x] Add a runtime smoke path that proves snapshot load plus clean quit against a real fixture
 - [x] Tighten live profile/focus navigation so chart/panels detail refresh stays coherent when left/right or tab/shift-tab move focus
+- [x] Make left/right profile cycling and tab/shift-tab focus changes expose one coherent selected/current/focus render-state contract for downstream renderers
 
 ## Current Lane Status
 
-- [x] Projected phase: parked
-- [x] Current item: Wait for a fresh runtime-owned item after accepted compare payload seam
+- [x] Projected phase: implementing
+- [x] Current item: Land a unified selection/current/focus render-state contract that chart and panels can consume directly
 - [x] Latest commit: `d361653`
-- [x] Latest event: state-update · Lane 2 compare seam is complete and parked pending a fresh runtime-owned item
-- [x] Next expected phase: n/a
+- [x] Latest event: state-update · Landed `selection_state()` as the single runtime-owned contract and moved chart/panels consumers onto it.
+- [x] Next expected phase: spec-review-pending
 - [x] Next refill target: Re-open only when a concrete post-seam runtime or navigation item exists
-- [x] Latest note: The compare-payload seam is already accepted in d361653; keep Lane 2 parked until a fresh runtime-owned item exists.
+- [x] Latest note: `AppRenderState` now exposes selected/current/focus through one shared contract, with Rust tests covering profile cycling + focus cycling and downstream renderers consuming that state directly.
 
 ## Refill Order
 
 - [x] First refill target after the current item: remaining Controller/runtime reliability work if any appear
 - [x] Then consume remaining View/runtime-boundary hardening
 - [x] Current dependency refill already landed: expose render-boundary compare recommendation and bottleneck payload for Lane 4
-- [ ] Next active refill: make left/right profile cycling and focus changes update chart/panel details coherently on the recovery baseline
+- [x] Next active refill: make left/right profile cycling and focus changes update chart/panel details coherently on the recovery baseline
 - [ ] Only after that revisit stronger nested `usage` decoding if another lane proves it became a real runtime blocker

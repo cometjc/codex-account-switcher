@@ -37,10 +37,10 @@
 - [x] Projected phase: parked
 - [x] Current item: n/a
 - [x] Latest commit: `baa7b8e`
-- [x] Latest event: bootstrap-insight · Lane 1 shell/handoff audit is already satisfied
+- [x] Latest event: parked · reactivate plot-mode for runtime/chart/panel work
 - [x] Next expected phase: n/a
 - [x] Next refill target: n/a
-- [x] Latest note: Current plot-mode shell and handoff tests already align with the recovery baseline, so the truthful next phase is parked rather than pseudo-active.
+- [x] Latest note: reactivate plot-mode for runtime/chart/panel work
 
 ## Refill Order
 

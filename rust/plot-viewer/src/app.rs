@@ -7,6 +7,9 @@ use ratatui::prelude::*;
 use crate::input::{self, InputAction};
 use crate::model::{PlotProfile, PlotSnapshot};
 use crate::render;
+use crate::render::{
+    ChartPoint, ChartState, FiveHourBandState, FocusTarget, RenderProfile, SelectionState,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FocusPanel {
@@ -70,21 +73,47 @@ pub(crate) struct AppRenderState<'a> {
 }
 
 impl render::RenderState for AppRenderState<'_> {
-    fn selected_profile_label(&self) -> &str {
-        self.selected_profile()
-            .map(|profile| profile.name.as_str())
-            .unwrap_or("no profiles loaded")
+    fn selection_state(&self) -> SelectionState<'_> {
+        SelectionState {
+            selected: self.selected_profile().map(RenderProfile::from),
+            current: self.snapshot.current_profile().map(RenderProfile::from),
+            focus: self.focus.as_target(),
+        }
     }
 
-    fn snapshot_active_label(&self) -> &str {
-        self.snapshot
-            .active_profile()
-            .map(|profile| profile.name.as_str())
-            .unwrap_or("none")
-    }
+    fn chart_state(&self) -> ChartState<'_> {
+        let Some(profile) = self.selected_profile() else {
+            return ChartState {
+                seven_day_points: Vec::new(),
+                five_hour_band: FiveHourBandState {
+                    available: false,
+                    lower_y: None,
+                    upper_y: None,
+                    delta_seven_day_percent: None,
+                    delta_five_hour_percent: None,
+                    reason: Some("no selected profile"),
+                },
+            };
+        };
 
-    fn focus_label(&self) -> &str {
-        self.focus.as_label()
+        ChartState {
+            seven_day_points: profile
+                .seven_day_points
+                .iter()
+                .map(|point| ChartPoint {
+                    x: point.offset_seconds as f64 / 86_400.0,
+                    y: point.used_percent,
+                })
+                .collect(),
+            five_hour_band: FiveHourBandState {
+                available: profile.five_hour_band.available,
+                lower_y: profile.five_hour_band.lower_y,
+                upper_y: profile.five_hour_band.upper_y,
+                delta_seven_day_percent: profile.five_hour_band.delta_seven_day_percent,
+                delta_five_hour_percent: profile.five_hour_band.delta_five_hour_percent,
+                reason: profile.five_hour_band.reason.as_deref(),
+            },
+        }
     }
 }
 
@@ -94,11 +123,21 @@ impl<'a> AppRenderState<'a> {
     }
 }
 
+impl<'a> From<&'a PlotProfile> for RenderProfile<'a> {
+    fn from(profile: &'a PlotProfile) -> Self {
+        Self {
+            id: profile.id.as_str(),
+            label: profile.name.as_str(),
+            is_current: profile.is_current,
+        }
+    }
+}
+
 impl FocusPanel {
-    fn as_label(self) -> &'static str {
+    fn as_target(self) -> FocusTarget {
         match self {
-            Self::Chart => "Chart",
-            Self::Summary => "Summary",
+            Self::Chart => FocusTarget::Chart,
+            Self::Summary => FocusTarget::Summary,
         }
     }
 }
@@ -166,5 +205,131 @@ impl App {
         };
 
         render::render(frame, frame.area(), &render_state);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::render::RenderState;
+
+    fn sample_snapshot() -> PlotSnapshot {
+        let mut snapshot = PlotSnapshot {
+            schema_version: 1,
+            generated_at: 1_742_611_200,
+            current_profile_id: Some("beta".to_string()),
+            profiles: vec![
+                PlotProfile {
+                    id: "alpha".to_string(),
+                    name: "Alpha".to_string(),
+                    is_current: false,
+                    usage: None,
+                    seven_day_window: crate::model::PlotWindowBounds {
+                        start_at: None,
+                        end_at: None,
+                    },
+                    seven_day_points: Vec::new(),
+                    five_hour_window: crate::model::PlotWindowBounds {
+                        start_at: None,
+                        end_at: None,
+                    },
+                    five_hour_band: crate::model::PlotFiveHourBand {
+                        available: false,
+                        lower_y: None,
+                        upper_y: None,
+                        band_height: None,
+                        delta_seven_day_percent: None,
+                        delta_five_hour_percent: None,
+                        reason: None,
+                    },
+                    summary_labels: crate::model::PlotSummaryLabels::default(),
+                },
+                PlotProfile {
+                    id: "beta".to_string(),
+                    name: "Beta".to_string(),
+                    is_current: true,
+                    usage: None,
+                    seven_day_window: crate::model::PlotWindowBounds {
+                        start_at: None,
+                        end_at: None,
+                    },
+                    seven_day_points: Vec::new(),
+                    five_hour_window: crate::model::PlotWindowBounds {
+                        start_at: None,
+                        end_at: None,
+                    },
+                    five_hour_band: crate::model::PlotFiveHourBand {
+                        available: true,
+                        lower_y: Some(10.0),
+                        upper_y: Some(20.0),
+                        band_height: Some(10.0),
+                        delta_seven_day_percent: Some(1.0),
+                        delta_five_hour_percent: Some(2.0),
+                        reason: None,
+                    },
+                    summary_labels: crate::model::PlotSummaryLabels::default(),
+                },
+            ],
+            active_profile_index: 0,
+        };
+        snapshot.active_profile_index = snapshot.current_profile_index().unwrap_or(0);
+        snapshot
+    }
+
+    #[test]
+    fn render_state_exposes_current_selected_and_focus_as_one_contract() {
+        let app = App::new(sample_snapshot());
+        let render_state = AppRenderState {
+            snapshot: &app.snapshot,
+            selected_profile_index: app.selected_profile_index,
+            focus: app.focus,
+        };
+
+        let selection = render_state.selection_state();
+
+        assert_eq!(
+            selection.selected,
+            Some(RenderProfile {
+                id: "beta",
+                label: "Beta",
+                is_current: true,
+            })
+        );
+        assert_eq!(selection.current, selection.selected);
+        assert_eq!(selection.focus, FocusTarget::Chart);
+    }
+
+    #[test]
+    fn render_state_tracks_profile_and_focus_changes_together() {
+        let mut app = App::new(sample_snapshot());
+
+        app.handle_action(InputAction::PreviousProfile);
+        app.handle_action(InputAction::NextFocus);
+
+        let render_state = AppRenderState {
+            snapshot: &app.snapshot,
+            selected_profile_index: app.selected_profile_index,
+            focus: app.focus,
+        };
+
+        let selection = render_state.selection_state();
+
+        assert_eq!(
+            selection.selected,
+            Some(RenderProfile {
+                id: "alpha",
+                label: "Alpha",
+                is_current: false,
+            })
+        );
+        assert_eq!(
+            selection.current,
+            Some(RenderProfile {
+                id: "beta",
+                label: "Beta",
+                is_current: true,
+            })
+        );
+        assert_eq!(selection.focus, FocusTarget::Summary);
     }
 }

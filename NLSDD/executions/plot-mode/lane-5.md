@@ -29,10 +29,10 @@
 - [x] Projected phase: parked
 - [x] Current item: n/a
 - [x] Latest commit: `25ea3c1`
-- [x] Latest event: bootstrap-insight · Lane 5 regression alignment already satisfied
+- [x] Latest event: parked · reactivate plot-mode for runtime/chart/panel work
 - [x] Next expected phase: n/a
 - [x] Next refill target: n/a
-- [x] Latest note: README and shell/readme regression coverage already match the tracked recovery-baseline workflow within docs/test ownership.
+- [x] Latest note: reactivate plot-mode for runtime/chart/panel work
 
 ## Refill Order
 

@@ -33,6 +33,79 @@
   - `node NLSDD/scripts/nlsdd-run-coordinator-loop.cjs --execution nlsdd-self-hosting --dry-run --json`
   - `node NLSDD/scripts/nlsdd-summarize-insights.cjs --execution nlsdd-self-hosting --json`
 
+# 2026-03-22 plot-mode replan
+
+- [x] 盤點所有 `plan/`，區分 checkbox drift 與真正未完成的產品工作
+- [x] 重新跑 `plot-mode` execution 的 dispatch-plan / coordinator / insight summary dry-run
+- [x] 確認 `plot-mode` 產品仍未完成，但 execution 目前被收斂成 `no-dispatchable-lane`
+- [x] 針對 `plot` 沒真正顯示的缺口，設計新的 replan 與 lane 邊界
+- [x] 將 replan 寫入 `plan/2026-03-22-plot-mode-reactivation-plan.md`
+
+## Review
+
+- `plot-mode` 現況不是功能完成，而是 tracked lanes 把剩餘缺口都停在 parked：Node handoff 已存在、Rust binary 也能 build，但 Rust viewer 目前仍以 scaffold/placeholder 文字為主，沒有真正的 7d/5h plot。
+- 直接重跑既有 `nlsdd-go` 不會產生 honest work，因為 coordinator dry-run 的 truth 是 `idleSlots=4`、`promotedLanes=[]`、`reviewActions=[]`、`commitIntake=[]`、`noDispatchReason="no-dispatchable-lane"`。
+- 這次 replan 的核心是把剩餘真工作重新切成可 dispatch 的 lane：
+  - Lane 2：runtime interaction / shared render state
+  - Lane 3：real chart rendering
+  - Lane 4：summary/compare panel refresh
+  - Lane 5：只在 visible behavior 真的改變後再補 docs
+- 下一個 honest NLSDD 動作不是再按一次舊 execution，而是先把 `plot-mode` tracking surfaces 改成這個新 active set，之後再 `nlsdd-go`。
+- 驗證：
+  - `node NLSDD/scripts/nlsdd-build-dispatch-plan.cjs --execution plot-mode --dry-run --json`
+  - `node NLSDD/scripts/nlsdd-run-coordinator-loop.cjs --execution plot-mode --dry-run --json`
+  - `node NLSDD/scripts/nlsdd-summarize-insights.cjs --execution plot-mode --json`
+
+# 2026-03-22 plot-mode Lane 2 runtime contract
+
+- [x] 為 Rust viewer runtime 新增 selected/current/focus 的結構化 render-state contract
+- [x] 以 Rust 單元測試鎖住 profile cycling 與 focus cycling 後的共享 state truth
+- [x] 讓 chart / panels 改吃同一份 shared `selection_state()`，不再各自重組 runtime state
+- [x] 清掉舊的 label helper / fallback API 漂移，讓 Lane 2 只剩單一 render-state truth
+
+## Review
+
+- 根因不是 left/right 或 tab/shift-tab 本身失效，而是 runtime 雖然有 `selected_profile_index` 與 `focus`，render boundary 卻只暴露零散 label，導致 chart / panels 沒有正式的 shared state contract 可依賴。
+- 這次在 Rust viewer 內新增 `SelectionState`、`RenderProfile`、`FocusTarget`，讓 `AppRenderState` 直接提供 `selection_state()`；chart 與 panels 也改成從這個 contract 讀 `selected/current/focus`，不再各自偷讀不同來源。
+- 兩個 Rust 測試現在直接鎖住這個行為：初始 selected/current/focus 必須一致，且在 profile cycling + focus cycling 後，selected/current/focus 仍要一起正確更新。
+- 驗證：
+  - `cargo test --manifest-path rust/plot-viewer/Cargo.toml`
+  - `cargo check --manifest-path rust/plot-viewer/Cargo.toml`
+  - `node --test tests/plot-viewer-scaffold.test.js`
+
+# 2026-03-22 plot-mode Lane 3 real chart rendering
+
+- [x] 將 shared render-state boundary 擴成 chart 可直接消費的 7d points / 5h band payload
+- [x] 把 chart scaffold placeholder 換成真正的 ratatui 7d line chart 與 axis labels
+- [x] 在 5h band 可用時畫出 overlay，無資料時顯示 truthful fallback reason
+- [x] 以 buffer-based Rust regression tests 鎖住可見 chart 與 band 文案
+
+## Review
+
+- 根因不是 Rust viewer 沒有 chart area，而是它一直停在 placeholder paragraph，render boundary 也沒有正式提供 chart payload，所以不可能靠 later polishing 自然長出真正的圖。
+- 這次在 `render/mod.rs` 補上 `ChartState` / `ChartPoint` / `FiveHourBandState`，由 runtime 把 selected profile 的 7d points 與 5h band 正式交給 chart renderer。
+- `chart.rs` 現在會真的畫出 ratatui line chart、x/y axis labels、band overlay 與 band summary；同時用兩個 Rust tests 鎖住「有 band」與「band unavailable」兩條 visible path，避免再退回 placeholder copy。
+- 驗證：
+  - `cargo test --manifest-path rust/plot-viewer/Cargo.toml render::chart -- --nocapture`
+  - `cargo check --manifest-path rust/plot-viewer/Cargo.toml`
+
+# 2026-03-22 plot-mode Lane 4 panel refresh
+
+- [x] 讓 Summary / Compare 改吃 shared selection/chart state，而不是 panel-local placeholder heuristic
+- [x] 補上 focused profile、snapshot current、7d sample count、5h band status 的可見 summary
+- [x] 讓 Compare 清楚區分 adopted target、current route，以及 selected==current 時的 no-op 狀態
+- [x] 以 Rust regression tests 鎖住 panel copy 與結構，並補 README smoke
+
+## Review
+
+- 根因不是 panel 完全沒有資料，而是它一直停在 skeleton wording，沒有把 Lane 2 / Lane 3 已經存在的 runtime 與 chart truth 消化進來，所以 compare 內容始終像 placeholder。
+- `render/panels.rs` 現在直接吃 shared `selection_state()` + `chart_state()`：Summary 會顯示 focused/current/focus、7d sample 數與 5h band 狀態；Compare 會清楚標出 adopted target、current route，以及當 target 已經是 current 時的 `Routing delta: none`。
+- 這讓 Lane 4 不再重組 label heuristic，也讓先前 reviewer 指出的「compare panel still re-derives label heuristics」有正式修正路徑。
+- 驗證：
+  - `cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path rust/plot-viewer/Cargo.toml`
+  - `cargo test render_panels_locks_visible_summary_compare_copy_and_shape --manifest-path rust/plot-viewer/Cargo.toml`
+  - `node --test tests/plot-readme.test.js`
+
 # 2026-03-20 limits 欄位 header 修正
 
 # 2026-03-21 plot-mode integration branch 收斂

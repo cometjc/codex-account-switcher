@@ -50,10 +50,58 @@ impl From<Rect> for RenderViewport {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusTarget {
+    Chart,
+    Summary,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RenderProfile<'a> {
+    pub id: &'a str,
+    pub label: &'a str,
+    pub is_current: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SelectionState<'a> {
+    pub selected: Option<RenderProfile<'a>>,
+    pub current: Option<RenderProfile<'a>>,
+    pub focus: FocusTarget,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChartPoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FiveHourBandState<'a> {
+    pub available: bool,
+    pub lower_y: Option<f64>,
+    pub upper_y: Option<f64>,
+    pub delta_seven_day_percent: Option<f64>,
+    pub delta_five_hour_percent: Option<f64>,
+    pub reason: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChartState<'a> {
+    pub seven_day_points: Vec<ChartPoint>,
+    pub five_hour_band: FiveHourBandState<'a>,
+}
+
 pub trait RenderState {
-    fn selected_profile_label(&self) -> &str;
-    fn snapshot_active_label(&self) -> &str;
-    fn focus_label(&self) -> &str;
+    fn selection_state(&self) -> SelectionState<'_>;
+    fn chart_state(&self) -> ChartState<'_>;
+
+    fn selected_profile_label(&self) -> &str {
+        self.selection_state()
+            .selected
+            .map(|profile| profile.label)
+            .unwrap_or("no profiles loaded")
+    }
 }
 
 /// Entry point for the plot-viewer layout boundary.
