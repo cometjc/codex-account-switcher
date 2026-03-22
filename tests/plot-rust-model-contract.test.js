@@ -7,20 +7,8 @@ function readText(relativePath) {
   return fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
 }
 
-test('plot Rust model stays aligned with the TypeScript snapshot contract', () => {
+test('Rust plot model stays aligned with the plot snapshot contract', () => {
   const rustModel = readText('rust/plot-viewer/src/model.rs');
-  const tsSnapshot = readText('src/lib/plot/plot-snapshot.ts');
-
-  assert.match(tsSnapshot, /export interface PlotSnapshot \{/);
-  assert.match(tsSnapshot, /schemaVersion: 1;/);
-  assert.match(tsSnapshot, /generatedAt: number;/);
-  assert.match(tsSnapshot, /currentProfileId: string \| null;/);
-  assert.match(tsSnapshot, /profiles: PlotProfile\[];/);
-  assert.match(tsSnapshot, /sevenDayWindow: PlotWindowBounds;/);
-  assert.match(tsSnapshot, /sevenDayPoints: PlotWindowPoint\[];/);
-  assert.match(tsSnapshot, /fiveHourWindow: PlotWindowBounds;/);
-  assert.match(tsSnapshot, /fiveHourBand: PlotFiveHourBand;/);
-  assert.match(tsSnapshot, /summaryLabels: PlotSummaryLabels;/);
 
   assert.match(rustModel, /#[\[]serde\(rename = "schemaVersion"\)\]/);
   assert.match(rustModel, /#[\[]serde\(rename = "generatedAt"\)\]/);
@@ -32,6 +20,7 @@ test('plot Rust model stays aligned with the TypeScript snapshot contract', () =
   assert.match(rustModel, /#[\[]serde\(rename = "fiveHourBand"\)\]/);
   assert.match(rustModel, /#[\[]serde\(rename = "summaryLabels", default\)\]/);
 
+  assert.match(rustModel, /pub fn load_from_path\(path: impl AsRef<Path>\) -> Result<Self> \{/);
   assert.match(rustModel, /pub fn active_profile\(&self\) -> Option<&PlotProfile> \{/);
   assert.match(rustModel, /pub fn current_profile\(&self\) -> Option<&PlotProfile> \{/);
   assert.match(rustModel, /pub fn current_profile_index\(&self\) -> Option<usize> \{/);

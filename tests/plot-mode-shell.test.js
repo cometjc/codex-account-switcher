@@ -1,35 +1,28 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const path = require('node:path');
 
-const RootCommand = require(path.join(process.cwd(), 'dist/commands/root.js')).default;
-const packageJson = require(path.join(process.cwd(), 'package.json'));
-
-function createRootCommand() {
-  const command = Object.create(RootCommand.prototype);
-  command.ansiEnabled = false;
-  return command;
+function readText(relativePath) {
+  return fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
 }
 
-test('plot mode stays visible in the root shell help text', () => {
-  const command = createRootCommand();
+test('plot mode is rendered from Rust app state, not Node shell wiring', () => {
+  const appRs = readText('rust/plot-viewer/src/app.rs');
+  const renderMod = readText('rust/plot-viewer/src/render/mod.rs');
+  const chartRs = readText('rust/plot-viewer/src/render/chart.rs');
 
-  assert.equal(command.nextBarStyle('quota'), 'delta');
-  assert.equal(command.nextBarStyle('delta'), 'plot');
-  assert.equal(command.nextBarStyle('plot'), 'quota');
-  assert.equal(command.formatBarStyle('plot'), 'Plot');
+  assert.match(appRs, /pub enum ViewMode \{/);
+  assert.match(appRs, /ViewMode::Plot/);
+  assert.match(appRs, /render::render\(frame, frame\.area\(\), &render_state\);/);
 
-  const helpText = command.buildActionsHelpText('plot', 'auto');
+  assert.match(renderMod, /pub mod chart;/);
+  assert.match(renderMod, /pub mod panels;/);
+  assert.match(renderMod, /title\("codex-auth plot"\)/);
+  assert.match(renderMod, /Selected profile: /);
+  assert.match(renderMod, /Tab switches focus/);
 
-  assert.match(helpText, /\[B\]ar Style: Plot/);
-  assert.match(helpText, /\[W\]orkload: Auto/);
-  assert.match(helpText, /\[Q\]uit/);
-  assert.doesNotMatch(helpText, /Bar Style: Delta/);
-});
-
-test('plot viewer package scripts remain wired in package.json', () => {
-  assert.equal(packageJson.scripts['plot:viewer:build'], 'cargo build --manifest-path rust/plot-viewer/Cargo.toml --bin codex-auth');
-  assert.equal(packageJson.scripts['plot:viewer:run'], 'cargo run --manifest-path rust/plot-viewer/Cargo.toml --bin codex-auth --');
-  assert.equal(packageJson.scripts['rust:auth:build'], 'cargo build --manifest-path rust/plot-viewer/Cargo.toml --bin codex-auth');
-  assert.equal(packageJson.scripts['rust:auth:run'], 'cargo run --manifest-path rust/plot-viewer/Cargo.toml --bin codex-auth --');
+  assert.match(chartRs, /usage plot/);
+  assert.match(chartRs, /7d usage: /);
+  assert.match(chartRs, /5h band: /);
 });

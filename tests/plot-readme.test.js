@@ -48,8 +48,4 @@ test('README reflects the Rust-first codex-auth runtime and integrated plot view
     plotSection,
     /Plot is no longer treated as a separate external viewer truth; it is a built-in view of the main TUI\./,
   );
-  assert.match(
-    plotSection,
-    /`plot:viewer:\*` and `rust:auth:\*` scripts in `package\.json` both target the same Rust `codex-auth` binary during local development\./,
-  );
 });

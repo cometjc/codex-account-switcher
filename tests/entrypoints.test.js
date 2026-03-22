@@ -2,55 +2,24 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-async function captureDevEntrypointArgs(argv) {
-  const Module = require('node:module');
-  const devEntrypointPath = path.join(process.cwd(), 'bin/codex-auth-dev.cjs');
-  const originalLoad = Module._load;
-  const originalArgv = process.argv;
-  let capturedArgs = null;
 
-  Module._load = function(request, parent, isMain) {
-    if (request === '@oclif/core') {
-      return {
-        execute: (options) => {
-          capturedArgs = options.args ?? null;
-          return Promise.resolve(undefined);
-        },
-      };
-    }
-
-    return originalLoad(request, parent, isMain);
-  };
-
-  try {
-    process.argv = [process.execPath, devEntrypointPath, ...argv];
-    delete require.cache[devEntrypointPath];
-    require(devEntrypointPath);
-    await new Promise((resolve) => setImmediate(resolve));
-  } finally {
-    Module._load = originalLoad;
-    process.argv = originalArgv;
-    delete require.cache[devEntrypointPath];
-  }
-
-  return capturedArgs;
+function readText(relativePath) {
+  return fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
 }
 
-test('shared argv router sends empty argv to root', async () => {
-  const {routeCliArgv} = await import(path.join(process.cwd(), 'dist/lib/route-cli-argv.js'));
+test('Rust main entrypoint stays wired to the unified codex-auth app', () => {
+  const mainRs = readText('rust/plot-viewer/src/main.rs');
+  const libRs = readText('rust/plot-viewer/src/lib.rs');
 
-  assert.deepEqual(routeCliArgv([]), ['root']);
-  assert.deepEqual(routeCliArgv(['current']), ['current']);
-});
+  assert.match(mainRs, /^use codex_auth::app::App;$/m);
+  assert.match(mainRs, /^use codex_auth::paths::AppPaths;$/m);
+  assert.match(mainRs, /^use codex_auth::store::\{AccountStore, StorePlatform\};$/m);
+  assert.match(mainRs, /^use codex_auth::usage::UsageService;$/m);
+  assert.match(mainRs, /let mut app = App::load\(store, usage\)\?;/);
+  assert.match(mainRs, /app\.run\(\)/);
 
-test('dev entrypoint uses shared argv routing before execute', async () => {
-  assert.deepEqual(await captureDevEntrypointArgs([]), ['root']);
-  assert.deepEqual(await captureDevEntrypointArgs(['current']), ['current']);
-});
-
-test('dev entrypoint imports the shared argv router', () => {
-  const source = fs.readFileSync(path.join(process.cwd(), 'bin/codex-auth-dev.cjs'), 'utf8');
-
-  assert.match(source, /routeCliArgv/);
-  assert.match(source, /args:\s*routeCliArgv\(process\.argv\.slice\(2\)\)/);
+  assert.match(libRs, /^pub mod app;$/m);
+  assert.match(libRs, /^pub mod paths;$/m);
+  assert.match(libRs, /^pub mod store;$/m);
+  assert.match(libRs, /^pub mod usage;$/m);
 });

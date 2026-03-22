@@ -68,7 +68,7 @@ test('Rust source modules keep the codex-auth entrypoints stable', () => {
   assert.match(appRs, /^use crate::render;$/m);
   assert.match(appRs, /^pub struct App \{$/m);
   assert.match(appRs, /^pub enum ViewMode \{$/m);
-  assert.match(appRs, /let render_state = AppRenderState \{/m);
+  assert.match(appRs, /let render_state = AppRenderState \{/);
   assert.match(appRs, /render::render\(frame, frame\.area\(\), &render_state\);/);
 
   assert.match(renderMod, /^pub mod chart;$/m);
