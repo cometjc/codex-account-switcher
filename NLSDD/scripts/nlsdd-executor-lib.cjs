@@ -16,6 +16,10 @@ function resolveExecutorDbPath(projectRoot = resolveProjectRoot()) {
   return path.join(resolveExecutorDir(projectRoot), 'executor.sqlite');
 }
 
+function hasExecutorDb(projectRoot = resolveProjectRoot()) {
+  return fs.existsSync(resolveExecutorDbPath(projectRoot));
+}
+
 function sqliteEscape(value) {
   if (value == null) {
     return 'NULL';
@@ -31,6 +35,22 @@ function runSql(projectRoot, sql) {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   }).trimEnd();
+}
+
+function runSqlRows(projectRoot, sql) {
+  const dbPath = resolveExecutorDbPath(projectRoot);
+  if (!fs.existsSync(dbPath)) {
+    return [];
+  }
+  const output = execFileSync('sqlite3', ['-separator', '\t', dbPath, sql], {
+    cwd: projectRoot,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trimEnd();
+  if (!output) {
+    return [];
+  }
+  return output.split('\n').map((line) => line.split('\t'));
 }
 
 function ensureExecutorDb(projectRoot = resolveProjectRoot()) {
@@ -371,6 +391,123 @@ function goExecutor(projectRoot = resolveProjectRoot()) {
   };
 }
 
+function emptyInsightSummary() {
+  return {
+    total: 0,
+    actionableCount: 0,
+    durableLearningCount: 0,
+    resolvedHistoryCount: 0,
+    countsByStatus: {},
+    countsByKind: {},
+    actionable: [],
+    durableLearnings: [],
+    resolvedHistory: [],
+    latest: [],
+  };
+}
+
+function listLanes(projectRoot = resolveProjectRoot(), execution) {
+  return runSqlRows(
+    projectRoot,
+    `
+select
+  lane_name,
+  coalesce(current_item, ''),
+  phase,
+  coalesce(worktree_path, ''),
+  coalesce(lane_branch, ''),
+  coalesce(base_branch, ''),
+  coalesce(last_verification, '[]'),
+  coalesce(result_status, '')
+from lanes
+where execution_name = ${sqliteEscape(execution)}
+order by lane_name;
+    `,
+  ).map(([laneName, currentItem, phase, worktreePath, laneBranch, baseBranch, lastVerification, resultStatus]) => ({
+    laneName,
+    currentItem,
+    phase,
+    worktreePath: worktreePath || null,
+    laneBranch: laneBranch || null,
+    baseBranch: baseBranch || 'main',
+    verification: JSON.parse(lastVerification || '[]'),
+    resultStatus: resultStatus || null,
+  }));
+}
+
+function buildCoordinatorLoopFromExecutor(
+  projectRoot = resolveProjectRoot(),
+  execution,
+  maxActive = 4,
+  dryRun = false,
+) {
+  ensureExecutorDb(projectRoot);
+  const lanes = listLanes(projectRoot, execution);
+  const activeCount = lanes.filter((entry) => entry.phase === 'implementing').length;
+  const availableSlots = Math.max(0, maxActive - activeCount);
+  const dispatchable = lanes.filter((entry) => entry.phase === 'queued').slice(0, availableSlots);
+  const idleSlots = Math.max(0, maxActive - activeCount - dispatchable.length);
+  const reviewActions = lanes
+    .filter((entry) => entry.resultStatus === 'READY_FOR_REVIEW')
+    .map((entry) => ({
+      lane: entry.laneName,
+      action: 'spec-review',
+      phase: 'review-pending',
+      message: [
+        `Execution: ${execution}`,
+        `Lane: ${entry.laneName}`,
+        `Result branch ready for review.`,
+        `Worktree: ${entry.worktreePath || 'n/a'}`,
+      ].join('\n'),
+    }));
+  const assignments = dispatchable.map((entry) => ({
+    execution,
+    lane: entry.laneName,
+    nextItem: entry.currentItem,
+    promotedPhase: 'implementing',
+    worktreePath: entry.worktreePath,
+    verification: entry.verification,
+    scope: entry.worktreePath ? [entry.worktreePath] : [],
+    laneBranch: entry.laneBranch,
+    baseBranch: entry.baseBranch,
+    message: [
+      `Execution: ${execution}`,
+      `Lane: ${entry.laneName}`,
+      `Lane item intent: ${entry.currentItem || 'n/a'}`,
+      `Worktree: ${entry.worktreePath || 'n/a'}`,
+      `Lane branch: ${entry.laneBranch || 'n/a'}`,
+      `Base branch: ${entry.baseBranch || 'main'}`,
+      `Verification: ${entry.verification.join('; ') || 'n/a'}`,
+    ].join('\n'),
+  }));
+
+  return {
+    source: 'executor',
+    execution,
+    maxActiveThreads: maxActive,
+    dryRun,
+    launch: {
+      assignments,
+      promoted: dispatchable.map((entry) => ({lane: entry.laneName})),
+      completedLanes: [],
+      idleSlots,
+      noDispatchReason: dispatchable.length === 0 ? 'no-dispatchable-lane' : null,
+    },
+    reviewActions,
+    commitIntake: [],
+    insightSummary: emptyInsightSummary(),
+    idleSlots,
+    completedLanes: [],
+    promotedLanes: dispatchable.map((entry) => entry.laneName),
+    reviewLaneCount: reviewActions.length,
+    commitLaneCount: 0,
+    noDispatchReason: dispatchable.length === 0 ? 'no-dispatchable-lane' : null,
+    degradedSurfaces: [],
+    telemetrySummary: null,
+    telemetryReviewPath: null,
+  };
+}
+
 function claimAssignment(projectRoot = resolveProjectRoot(), execution, lane) {
   ensureExecutorDb(projectRoot);
   const laneJson = runSql(
@@ -495,10 +632,12 @@ where execution_name = ${sqliteEscape(execution)} and lane_name = ${sqliteEscape
 }
 
 module.exports = {
+  buildCoordinatorLoopFromExecutor,
   auditExecutor,
   claimAssignment,
   ensureExecutorDb,
   goExecutor,
+  hasExecutorDb,
   importLegacyExecutionState,
   importPlanFiles,
   reportResult,

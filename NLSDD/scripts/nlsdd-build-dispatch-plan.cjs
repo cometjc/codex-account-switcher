@@ -95,6 +95,7 @@ function buildDispatchPlan(projectRoot, execution, maxActive = 4, dryRun = false
   queue.sort((left, right) => left.priority - right.priority || left.lane.localeCompare(right.lane));
 
   return {
+    source: autopilot.source || 'legacy',
     execution,
     maxActiveThreads: maxActive,
     dryRun,

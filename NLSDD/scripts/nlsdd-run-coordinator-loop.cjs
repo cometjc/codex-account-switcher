@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 
 const {
+  hasExecutorDb,
+  buildCoordinatorLoopFromExecutor,
+} = require('./nlsdd-executor-lib.cjs');
+const {
   resolveProjectRoot,
-  summarizeExecutionInsights,
+  summarizeExecutionInsights: summarizeLegacyExecutionInsights,
 } = require('./nlsdd-lib.cjs');
 const {launchActiveSet} = require('./nlsdd-launch-active-set.cjs');
 const {driveReviewLoop} = require('./nlsdd-drive-review-loop.cjs');
@@ -30,12 +34,16 @@ function parseArgs(argv) {
 }
 
 function runCoordinatorLoop(projectRoot, execution, maxActive = 4, dryRun = false) {
+  if (hasExecutorDb(projectRoot)) {
+    return buildCoordinatorLoopFromExecutor(projectRoot, execution, maxActive, dryRun);
+  }
   const launch = launchActiveSet(projectRoot, execution, maxActive, dryRun);
   const reviewResult = driveReviewLoop(projectRoot, execution);
   const reviewActions = reviewResult.actions;
   const intakeResult = intakeReadyToCommitWithContext(projectRoot, execution);
   const commitIntake = intakeResult.entries;
-  const insightSummary = reviewResult.insightSummary || summarizeExecutionInsights(projectRoot, execution);
+  const insightSummary =
+    reviewResult.insightSummary || summarizeLegacyExecutionInsights(projectRoot, execution);
   const telemetrySummary = summarizeTelemetry(projectRoot, execution);
   const telemetryReview = renderTelemetryReviewFile(projectRoot, execution);
   const degradedSurfaces = [];

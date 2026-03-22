@@ -204,3 +204,45 @@ test('executor claim-assignment and report-result use the sqlite authority path'
     'READY_FOR_REVIEW',
   );
 });
+
+test('legacy coordinator and dispatch helpers degrade to executor-backed summaries after migration', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-executor-compat-'));
+  writeFixture(root);
+  runExecutor(root, 'import-plans', '--cleanup', '--json');
+
+  const coordinator = JSON.parse(
+    run(
+      'node',
+      [
+        repoRoot('NLSDD', 'scripts', 'nlsdd-run-coordinator-loop.cjs'),
+        '--execution',
+        'demo-flow',
+        '--dry-run',
+        '--json',
+      ],
+      root,
+    ),
+  );
+  assert.equal(coordinator.source, 'executor');
+  assert.deepEqual(coordinator.promotedLanes, ['Lane 1']);
+  assert.equal(coordinator.launch.assignments.length, 1);
+  assert.equal(coordinator.launch.assignments[0].lane, 'Lane 1');
+
+  const dispatchPlan = JSON.parse(
+    run(
+      'node',
+      [
+        repoRoot('NLSDD', 'scripts', 'nlsdd-build-dispatch-plan.cjs'),
+        '--execution',
+        'demo-flow',
+        '--dry-run',
+        '--json',
+      ],
+      root,
+    ),
+  );
+  assert.equal(dispatchPlan.source, 'executor');
+  assert.equal(dispatchPlan.queue.length, 1);
+  assert.equal(dispatchPlan.queue[0].kind, 'launch-assignment');
+  assert.equal(dispatchPlan.queue[0].lane, 'Lane 1');
+});

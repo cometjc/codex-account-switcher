@@ -5,6 +5,7 @@
 - [x] 讓 legacy `plan/*.md`、`NLSDD/scoreboard.md`、`NLSDD/state/*/events.ndjson` 可被 import 到中央 executor
 - [x] 把規則收斂成 executor + worktree/result branch 單一交換介面
 - [x] 用 executor 實際 import 目前 repo 的 legacy plans，並清空 `plan/`
+- [x] 讓 `nlsdd:autopilot` / `nlsdd:dispatch-plan` 在 executor mode 下回傳 executor-backed summary，而不是硬依賴舊 markdown flow
 
 ## Review
 
@@ -15,6 +16,7 @@
   - 讓 lane assignment 與 result branch 回報只走單一 SQLite authority path
 - 規則與 package scripts 也已經切到 executor-first；現有 `NLSDD/state/*`、lane markdown、scoreboard markdown 都應視為 legacy migration surfaces，而不是未來持續擴寫的 canonical flow。
 - 現在也已對這個 repo 本身跑完 `node NLSDD/scripts/nlsdd-executor.cjs import-plans --cleanup --json`，實際收進 6 份 legacy plans、7 份 plan artifacts、2 個 executions、12 條 lanes、113 筆 legacy events，並讓 `plan/` 清空。
+- 這輪後續又補了一步 compatibility 收口：當 repo 已完成 migration 且 `.nlsdd/executor.sqlite` 存在時，`nlsdd-run-coordinator-loop.cjs` 與 `nlsdd-build-dispatch-plan.cjs` 會優先回傳 executor-backed summary；沒有 executor DB 的舊 fixture / legacy root 仍維持原有流程，方便逐步退場。
 - 驗證：
   - `node --test tests/nlsdd-executor.test.js`
   - `node NLSDD/scripts/nlsdd-executor.cjs audit --json`
