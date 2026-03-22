@@ -1,5 +1,6 @@
 use ratatui::layout::{Constraint, Layout};
-use ratatui::prelude::{Color, Frame};
+use ratatui::prelude::{Color, Frame, Style};
+use ratatui::style::Modifier;
 use ratatui::symbols::Marker;
 use ratatui::text::{Line, Text};
 use ratatui::widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Paragraph, Wrap};
@@ -9,11 +10,17 @@ use super::{ChartState, FocusTarget, RenderContext, RenderState};
 const X_AXIS_BOUNDS: [f64; 2] = [0.0, 7.0];
 const Y_AXIS_BOUNDS: [f64; 2] = [0.0, 100.0];
 
-/// Visible chart renderer for the unified Rust codex-auth app.
-///
-/// Lane 3 upgrades the shell from placeholder copy to a real chart backed by
-/// the selected profile's seven-day points, with a readable five-hour band
-/// summary and overlays when the data is available.
+const SERIES_COLORS: [Color; 8] = [
+    Color::Cyan,
+    Color::Yellow,
+    Color::Magenta,
+    Color::Green,
+    Color::LightBlue,
+    Color::LightRed,
+    Color::LightGreen,
+    Color::White,
+];
+
 pub fn render_chart<State: RenderState>(frame: &mut Frame, context: &RenderContext<'_, State>) {
     let selection = context.state.selection_state();
     let chart_state = context.state.chart_state();
@@ -30,7 +37,7 @@ pub fn render_chart<State: RenderState>(frame: &mut Frame, context: &RenderConte
         FocusTarget::Summary => "Summary",
     };
     let block = Block::default()
-        .title("usage plot")
+        .title("usage plot overlays")
         .borders(Borders::ALL);
     let inner = block.inner(context.area);
     frame.render_widget(block, context.area);
@@ -40,7 +47,7 @@ pub fn render_chart<State: RenderState>(frame: &mut Frame, context: &RenderConte
     }
 
     let chunks = Layout::vertical([
-        Constraint::Length(4),
+        Constraint::Length(6),
         Constraint::Min(6),
         Constraint::Length(3),
     ])
@@ -50,7 +57,13 @@ pub fn render_chart<State: RenderState>(frame: &mut Frame, context: &RenderConte
         Line::from(format!("Selected: {}", selected_label)),
         Line::from(format!("Current: {}", current_label)),
         Line::from(format!("Focus: {}", focus_label)),
-        Line::from(format!("7d usage: {} points", chart_state.seven_day_points.len())),
+        Line::from(format!(
+            "Profiles: {} · 7d samples: {}",
+            chart_state.series.len(),
+            chart_state.total_points
+        )),
+        Line::from(format_legend_line(&chart_state)),
+        Line::from(format_subframe_line(&chart_state)),
     ]))
     .wrap(Wrap { trim: true });
     frame.render_widget(overview, chunks[0]);
@@ -71,51 +84,79 @@ fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_stat
         return;
     }
 
-    let seven_day_points: Vec<(f64, f64)> = chart_state
-        .seven_day_points
+    let series_points = chart_state
+        .series
         .iter()
-        .map(|point| (point.x, point.y.clamp(Y_AXIS_BOUNDS[0], Y_AXIS_BOUNDS[1])))
-        .collect();
-    let mut overlays: Vec<Vec<(f64, f64)>> = Vec::new();
-    if chart_state.five_hour_band.available {
-        if let Some(lower_y) = chart_state.five_hour_band.lower_y {
-            overlays.push(vec![
-                (X_AXIS_BOUNDS[0], lower_y.clamp(Y_AXIS_BOUNDS[0], Y_AXIS_BOUNDS[1])),
-                (X_AXIS_BOUNDS[1], lower_y.clamp(Y_AXIS_BOUNDS[0], Y_AXIS_BOUNDS[1])),
+        .map(|series| {
+            series
+                .points
+                .iter()
+                .map(|point| (point.x, point.y.clamp(Y_AXIS_BOUNDS[0], Y_AXIS_BOUNDS[1])))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let mut subframe_overlays: Vec<Vec<(f64, f64)>> = Vec::new();
+    if chart_state.five_hour_subframe.available {
+        if let (Some(start_x), Some(end_x), Some(lower_y)) = (
+            chart_state.five_hour_subframe.start_x,
+            chart_state.five_hour_subframe.end_x,
+            chart_state.five_hour_subframe.lower_y,
+        ) {
+            subframe_overlays.push(vec![
+                (start_x.clamp(X_AXIS_BOUNDS[0], X_AXIS_BOUNDS[1]), lower_y.clamp(Y_AXIS_BOUNDS[0], Y_AXIS_BOUNDS[1])),
+                (end_x.clamp(X_AXIS_BOUNDS[0], X_AXIS_BOUNDS[1]), lower_y.clamp(Y_AXIS_BOUNDS[0], Y_AXIS_BOUNDS[1])),
             ]);
         }
-        if let Some(upper_y) = chart_state.five_hour_band.upper_y {
-            overlays.push(vec![
-                (X_AXIS_BOUNDS[0], upper_y.clamp(Y_AXIS_BOUNDS[0], Y_AXIS_BOUNDS[1])),
-                (X_AXIS_BOUNDS[1], upper_y.clamp(Y_AXIS_BOUNDS[0], Y_AXIS_BOUNDS[1])),
+        if let (Some(start_x), Some(end_x), Some(upper_y)) = (
+            chart_state.five_hour_subframe.start_x,
+            chart_state.five_hour_subframe.end_x,
+            chart_state.five_hour_subframe.upper_y,
+        ) {
+            subframe_overlays.push(vec![
+                (start_x.clamp(X_AXIS_BOUNDS[0], X_AXIS_BOUNDS[1]), upper_y.clamp(Y_AXIS_BOUNDS[0], Y_AXIS_BOUNDS[1])),
+                (end_x.clamp(X_AXIS_BOUNDS[0], X_AXIS_BOUNDS[1]), upper_y.clamp(Y_AXIS_BOUNDS[0], Y_AXIS_BOUNDS[1])),
             ]);
         }
     }
 
-    let mut datasets = vec![Dataset::default()
-        .name("7d usage")
-        .marker(Marker::Braille)
-        .graph_type(GraphType::Line)
-        .style(Color::Cyan)
-        .data(&seven_day_points)];
+    let mut datasets = chart_state
+        .series
+        .iter()
+        .zip(series_points.iter())
+        .map(|(series, points)| {
+            let color = SERIES_COLORS[series.style.color_slot % SERIES_COLORS.len()];
+            let mut style = Style::default().fg(color);
+            if series.style.is_selected {
+                style = style.add_modifier(Modifier::BOLD);
+            } else if !series.style.is_current {
+                style = style.add_modifier(Modifier::DIM);
+            }
+            Dataset::default()
+                .name(series.profile.label)
+                .marker(Marker::Dot)
+                .graph_type(GraphType::Line)
+                .style(style)
+                .data(points)
+        })
+        .collect::<Vec<_>>();
 
-    if let Some(lower_points) = overlays.first() {
+    if let Some(lower_points) = subframe_overlays.first() {
         datasets.push(
             Dataset::default()
                 .name("5h lower")
                 .marker(Marker::Braille)
                 .graph_type(GraphType::Line)
-                .style(Color::Yellow)
+                .style(Style::default().fg(Color::White))
                 .data(lower_points),
         );
     }
-    if let Some(upper_points) = overlays.get(1) {
+    if let Some(upper_points) = subframe_overlays.get(1) {
         datasets.push(
             Dataset::default()
                 .name("5h upper")
                 .marker(Marker::Braille)
                 .graph_type(GraphType::Line)
-                .style(Color::Magenta)
+                .style(Style::default().fg(Color::White))
                 .data(upper_points),
         );
     }
@@ -149,10 +190,10 @@ fn format_five_hour_band_line(chart_state: &ChartState<'_>) -> String {
         }
     } else {
         let reason = chart_state
-            .five_hour_band
+            .five_hour_subframe
             .reason
-            .unwrap_or("no 5h band data");
-        format!("5h band: unavailable ({})", reason)
+            .unwrap_or("no 5h subframe data");
+        format!("5h frame: unavailable ({})", reason)
     }
 }
 
@@ -168,6 +209,59 @@ fn format_five_hour_delta_line(chart_state: &ChartState<'_>) -> String {
         .map(|value| format!("{:+.1}%", value))
         .unwrap_or("?".to_string());
     format!("Band drift: 7d {} | 5h {}", delta_7d, delta_5h)
+}
+
+fn format_legend_line(chart_state: &ChartState<'_>) -> String {
+    if chart_state.series.is_empty() {
+        return "Legend: no profile data".to_string();
+    }
+
+    let labels = chart_state
+        .series
+        .iter()
+        .take(5)
+        .map(|series| {
+            let mut label = series.profile.label.to_string();
+            if series.style.is_selected {
+                label.push('*');
+            }
+            if series.style.is_current {
+                label.push('•');
+            }
+            label
+        })
+        .collect::<Vec<_>>()
+        .join(" | ");
+    if chart_state.series.len() > 5 {
+        format!("Legend: {} | +{} more", labels, chart_state.series.len() - 5)
+    } else {
+        format!("Legend: {}", labels)
+    }
+}
+
+fn format_subframe_line(chart_state: &ChartState<'_>) -> String {
+    if chart_state.five_hour_subframe.available {
+        match (
+            chart_state.five_hour_subframe.start_x,
+            chart_state.five_hour_subframe.end_x,
+            chart_state.five_hour_subframe.lower_y,
+            chart_state.five_hour_subframe.upper_y,
+        ) {
+            (Some(start_x), Some(end_x), Some(lower_y), Some(upper_y)) => format!(
+                "5h frame: {:.1}d..{:.1}d @ {:.1}%..{:.1}%",
+                start_x, end_x, lower_y, upper_y
+            ),
+            _ => "5h frame: bounds incomplete".to_string(),
+        }
+    } else {
+        format!(
+            "5h frame: unavailable ({})",
+            chart_state
+                .five_hour_subframe
+                .reason
+                .unwrap_or("no 5h subframe data")
+        )
+    }
 }
 
 #[cfg(test)]
@@ -288,7 +382,10 @@ mod tests {
 
         assert!(joined.contains("Selected: Alpha"));
         assert!(joined.contains("Current: Beta"));
-        assert!(joined.contains("7d usage: 5 points"));
+        assert!(joined.contains("Profiles: 1"));
+        assert!(joined.contains("7d samples: 5"));
+        assert!(joined.contains("Legend: Alpha*"));
+        assert!(joined.contains("5h frame: 5.0d..6.0d @ 20.0%..35.0%"));
         assert!(joined.contains("5h band: 20.0%..35.0%"));
         assert!(joined.contains("Band drift: 7d +4.0% | 5h +1.5%"));
         assert!(joined.contains("0d"));
@@ -367,7 +464,7 @@ mod tests {
         let joined = lines.join("\n");
 
         assert!(joined.contains("Focus: Summary"));
-        assert!(joined.contains("5h band: unavailable (insufficient 5h overlap)"));
+        assert!(joined.contains("5h frame: unavailable (insufficient 5h overlap)"));
         assert!(joined.contains("Band drift: 7d ? | 5h ?"));
         assert!(!joined.contains("pending Canvas plot"));
     }

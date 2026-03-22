@@ -1,3 +1,8 @@
+use ratatui::layout::{Constraint, Layout};
+use ratatui::prelude::Frame;
+use ratatui::text::{Line, Text};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+
 use super::{FocusTarget, RenderContext, RenderState};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,7 +50,8 @@ pub fn render_panels<State: RenderState>(context: &RenderContext<'_, State>) -> 
         format!("Focused profile: {}", selected_label),
         format!("Snapshot current: {}", current_label),
         format!("Focus panel: {}", focus_label),
-        format!("7d samples: {}", chart.seven_day_points.len()),
+        format!("Visible profiles: {}", chart.series.len()),
+        format!("7d samples: {}", chart.total_points),
         band_line.clone(),
     ];
 
@@ -54,7 +60,7 @@ pub fn render_panels<State: RenderState>(context: &RenderContext<'_, State>) -> 
             vec![
                 "Target vs current".to_string(),
                 format!("Adopted target: {} (already current)", selected.label),
-                "Routing delta: none".to_string(),
+                format!("Selected samples: {}", chart.seven_day_points.len()),
                 format!("Compare focus: {}", focus_label),
                 band_line,
             ]
@@ -63,7 +69,7 @@ pub fn render_panels<State: RenderState>(context: &RenderContext<'_, State>) -> 
                 "Target vs current".to_string(),
                 format!("Adopted target: {}", selected.label),
                 format!("Current route: {}", current.label),
-                "Routing delta: switched target".to_string(),
+                format!("Selected samples: {}", chart.seven_day_points.len()),
                 band_line,
             ]
         }
@@ -72,7 +78,7 @@ pub fn render_panels<State: RenderState>(context: &RenderContext<'_, State>) -> 
             "Target vs current".to_string(),
             format!("Target: {}", selected_label),
             format!("Current: {}", current_label),
-            "Routing delta: insufficient selection state".to_string(),
+            format!("Selected samples: {}", chart.seven_day_points.len()),
             band_line,
         ]
     };
@@ -82,6 +88,33 @@ pub fn render_panels<State: RenderState>(context: &RenderContext<'_, State>) -> 
         summary_lines,
         compare_lines,
     }
+}
+
+pub fn draw_panels<State: RenderState>(frame: &mut Frame, context: &RenderContext<'_, State>) {
+    let skeleton = render_panels(context);
+    let sections = Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(context.area);
+    let summary = Paragraph::new(Text::from(
+        skeleton
+            .summary_lines
+            .iter()
+            .map(|line| Line::from(line.as_str()))
+            .collect::<Vec<_>>(),
+    ))
+    .block(Block::default().title("Summary").borders(Borders::ALL))
+    .wrap(Wrap { trim: true });
+    let compare = Paragraph::new(Text::from(
+        skeleton
+            .compare_lines
+            .iter()
+            .map(|line| Line::from(line.as_str()))
+            .collect::<Vec<_>>(),
+    ))
+    .block(Block::default().title("Compare").borders(Borders::ALL))
+    .wrap(Wrap { trim: true });
+
+    frame.render_widget(summary, sections[0]);
+    frame.render_widget(compare, sections[1]);
 }
 
 #[cfg(test)]
@@ -173,16 +206,18 @@ mod tests {
         ));
 
         assert_eq!(skeleton.title, "Routing panels 48x12");
-        assert_eq!(skeleton.summary_lines.len(), 5);
+        assert_eq!(skeleton.summary_lines.len(), 6);
         assert_eq!(skeleton.compare_lines.len(), 5);
         assert_eq!(skeleton.summary_lines[0], "Focused profile: Alpha");
         assert_eq!(skeleton.summary_lines[1], "Snapshot current: Beta");
         assert_eq!(skeleton.summary_lines[2], "Focus panel: Summary");
-        assert_eq!(skeleton.summary_lines[3], "7d samples: 3");
-        assert_eq!(skeleton.summary_lines[4], "5h band: 18.0%..31.0%");
+        assert_eq!(skeleton.summary_lines[3], "Visible profiles: 1");
+        assert_eq!(skeleton.summary_lines[4], "7d samples: 3");
+        assert_eq!(skeleton.summary_lines[5], "5h band: 18.0%..31.0%");
         assert_eq!(skeleton.compare_lines[1], "Adopted target: Alpha");
         assert_eq!(skeleton.compare_lines[2], "Current route: Beta");
-        assert_eq!(skeleton.compare_lines[3], "Routing delta: switched target");
+        assert_eq!(skeleton.compare_lines[3], "Selected samples: 3");
+        assert_eq!(skeleton.compare_lines[4], "5h band: 18.0%..31.0%");
     }
 
     #[test]
@@ -253,6 +288,7 @@ mod tests {
                 "Focused profile: Alpha".to_string(),
                 "Snapshot current: Alpha".to_string(),
                 "Focus panel: Chart".to_string(),
+                "Visible profiles: 1".to_string(),
                 "7d samples: 2".to_string(),
                 "5h band: unavailable (insufficient 5h overlap)".to_string(),
             ]
@@ -262,7 +298,7 @@ mod tests {
             vec![
                 "Target vs current".to_string(),
                 "Adopted target: Alpha (already current)".to_string(),
-                "Routing delta: none".to_string(),
+                "Selected samples: 2".to_string(),
                 "Compare focus: Chart".to_string(),
                 "5h band: unavailable (insufficient 5h overlap)".to_string(),
             ]

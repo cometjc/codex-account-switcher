@@ -140,29 +140,41 @@ pub fn render<State: RenderState>(frame: &mut Frame, area: Rect, state: &State) 
 
     let chunks = Layout::vertical([
         Constraint::Length(3),
-        Constraint::Min(3),
+        Constraint::Min(12),
         Constraint::Length(2),
     ])
     .split(inner);
 
+    let body = Layout::horizontal([Constraint::Percentage(68), Constraint::Percentage(32)])
+        .split(chunks[1]);
+    let selection = state.selection_state();
+    let chart = state.chart_state();
+    let current_label = selection
+        .current
+        .map(|profile| profile.label)
+        .unwrap_or("none");
+
     let header = Paragraph::new(Text::from(vec![
         Line::from("Rust codex-auth plot view"),
         Line::from(format!(
-            "Selected profile: {}",
-            state.selected_profile_label()
+            "Selected: {} · Current: {} · Visible profiles: {} · Samples: {}",
+            state.selected_profile_label(),
+            current_label,
+            chart.series.len(),
+            chart.total_points
         )),
     ]))
     .wrap(Wrap { trim: true });
     frame.render_widget(header, chunks[0]);
 
-    chart::render_chart(frame, &context.with_area(chunks[1]));
+    chart::render_chart(frame, &context.with_area(body[0]));
 
     let footer = Paragraph::new(Text::from(vec![Line::from(format!(
-        "Viewport: {}x{} · Tab switches focus · Left/Right cycles profiles",
+        "Viewport: {}x{} · Left/Right cycles selected profile · Tab switches panel focus",
         context.viewport.width, context.viewport.height
     ))]))
     .wrap(Wrap { trim: true });
     frame.render_widget(footer, chunks[2]);
 
-    panels::render_panels(&context.with_area(chunks[2]));
+    panels::draw_panels(frame, &context.with_area(body[1]));
 }
