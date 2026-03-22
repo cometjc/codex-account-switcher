@@ -31,3 +31,4 @@
 - execution-insights journal 若只有 append 沒有 read/use path，很快就會變成埋在 runtime state 裡的黑洞；只要工作處於或剛結束 NLSDD 階段且進入 `review`，就應同步檢視 open / adopted insights 並規劃是否升級成 lane item、lesson 或 resolved/rejected 狀態。
 - execution-insights 裡的 adopted global learnings 一旦已 graduate 到 tracked spec / lessons，就應立即在 runtime journal 補寫 resolved event；不要讓 durable learning 長期停在 runtime actionable surface。
 - 若使用者反覆用同一句話要求啟動既定 NLSDD 流程，應把它收斂成明確的 magic word 並寫進 `AGENTS.md`，讓後續能用固定口令直接啟動同一套 lane reuse workflow。
+- 若使用者已經用 `proceed` 明確授權 main agent 持續收斂本地 integration flow，commit 成功後不要機械式停在「下一步要不要我幫你推」；若下一步只有單一、低風險、可逆的 finishing 動作，就應直接自動接續。

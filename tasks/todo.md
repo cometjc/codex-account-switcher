@@ -106,6 +106,18 @@
   - `cargo test render_panels_locks_visible_summary_compare_copy_and_shape --manifest-path rust/plot-viewer/Cargo.toml`
   - `node --test tests/plot-readme.test.js`
 
+# 2026-03-22 proceed 後自動 finishing step 規則
+
+- [x] 找出為什麼 main agent 在成功 commit 後還停下來等下一次 `proceed`
+- [x] 將 post-commit auto-advance 邊界寫進本地治理規則
+- [x] 將這次修正收斂進 `tasks/lessons.md`
+
+## Review
+
+- 根因不是缺少 `proceed` 口令，而是本地規則只明寫到「治理變更驗證後直接 commit」，沒有把「若使用者已經授權進入持續收斂流程，commit 後的單一路徑 finishing step 也應直接接續」寫清楚。
+- 現在 `AGENTS.md` 已補上邊界：只有當 main agent 已在使用者明確授權的 `proceed` 流程中，且 commit 後只剩單一、低風險、可逆的 finishing 動作時，才自動往下走；若還有 merge / PR / push / release 等多路徑決策，仍必須停下來對齊。
+- 這次也把同一個 pattern 寫進 `tasks/lessons.md`，避免之後又回到「commit 完就先停住等下一句 `proceed`」的機械式行為。
+
 # 2026-03-20 limits 欄位 header 修正
 
 # 2026-03-21 plot-mode integration branch 收斂

@@ -23,6 +23,8 @@
 - Review lessons at session start for relevant project
 - 若此次請求本身是規則新增或規則修正，且正式規則文件已更新並完成驗證，main agent 應預設直接 commit；不要停在「這批還沒 commit」等待額外提醒
 - 這條自動 commit 規則適用於 main agent 的本地治理變更，不自動授權 NLSDD subagent 在 lane worktree 內自行 `git commit`
+- 若 main agent 已處於使用者明確授權的 `proceed` 收斂流程中，且本地 commit 成功後下一步只有單一、低風險、可逆的 finishing 動作，應預設自動接續，不要再多停一次等待額外 `proceed`
+- 上一條只適用於沒有分支策略歧義的情況；例如已在 `main` 且唯一自然下一步是 `git push origin main`，可以直接做。若仍存在 merge / PR / push / release 等多條路徑，就必須先停下來對齊
 
 ---
 
