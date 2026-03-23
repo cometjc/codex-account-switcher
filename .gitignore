@@ -4,3 +4,5 @@ node_modules
 rust/plot-viewer/target/
 NLSDD/state/
 .nlsdd/
+.claude/
+.github/hooks/
