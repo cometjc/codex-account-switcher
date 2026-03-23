@@ -36,9 +36,15 @@ impl PaneFocus {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProfileKind {
+    Codex,
+    Claude,
+}
 
 #[derive(Debug, Clone)]
 struct ProfileEntry {
+    kind: ProfileKind,
     saved_name: Option<String>,
     profile_name: String,
     snapshot: Value,
@@ -98,6 +104,8 @@ pub struct App {
     status_message: Option<String>,
     store: Option<AccountStore>,
     usage_service: Option<UsageService>,
+    claude_store: Option<crate::claude::ClaudeStore>,
+    claude_usage_service: Option<UsageService>,
     cron_status: CronStatus,
     solo_mode: bool,
     x_window_days: u8,
@@ -142,8 +150,14 @@ impl ProfileChartData {
 }
 
 impl App {
-    pub fn load(store: AccountStore, usage_service: UsageService, cron_status: CronStatus) -> Result<Self> {
-        let profiles = load_profiles(&store, &usage_service, false, None)?;
+    pub fn load(
+        store: AccountStore,
+        usage_service: UsageService,
+        cron_status: CronStatus,
+        claude_store: Option<crate::claude::ClaudeStore>,
+        claude_usage_service: Option<UsageService>,
+    ) -> Result<Self> {
+        let profiles = load_profiles(&store, &usage_service, false, None, claude_store.as_ref(), claude_usage_service.as_ref())?;
         Ok(Self {
             selected_profile_index: initial_selected_index(&profiles),
             y_zoom_lower: auto_y_lower(&profiles),
@@ -154,6 +168,8 @@ impl App {
             status_message: None,
             store: Some(store),
             usage_service: Some(usage_service),
+            claude_store,
+            claude_usage_service,
             cron_status,
             solo_mode: false,
             x_window_days: 7,
@@ -169,6 +185,7 @@ impl App {
             .into_iter()
             .enumerate()
             .map(|(index, name)| ProfileEntry {
+                kind: ProfileKind::Codex,
                 saved_name: Some(name.to_lowercase()),
                 profile_name: name,
                 snapshot: serde_json::json!({}),
@@ -194,6 +211,8 @@ impl App {
             status_message: None,
             store: None,
             usage_service: None,
+            claude_store: None,
+            claude_usage_service: None,
             cron_status: CronStatus::uninstalled(),
             solo_mode: false,
             x_window_days: 7,
@@ -519,13 +538,17 @@ impl App {
     }
 
     fn reload_profiles(&mut self, force_refresh: bool, refresh_account_id: Option<String>) -> Result<()> {
-        let Some(store) = self.store.as_ref() else {
+        let (Some(store), Some(usage_service)) = (self.store.as_ref(), self.usage_service.as_ref()) else {
             return Ok(());
         };
-        let Some(usage_service) = self.usage_service.as_ref() else {
-            return Ok(());
-        };
-        self.profiles = load_profiles(store, usage_service, force_refresh, refresh_account_id.as_deref())?;
+        self.profiles = load_profiles(
+            store,
+            usage_service,
+            force_refresh,
+            refresh_account_id.as_deref(),
+            self.claude_store.as_ref(),
+            self.claude_usage_service.as_ref(),
+        )?;
         self.selected_profile_index = self
             .selected_profile_index
             .min(self.profiles.len().saturating_sub(1));
@@ -787,6 +810,8 @@ fn load_profiles(
     usage_service: &UsageService,
     force_refresh: bool,
     refresh_account_id: Option<&str>,
+    claude_store: Option<&crate::claude::ClaudeStore>,
+    claude_usage_service: Option<&UsageService>,
 ) -> Result<Vec<ProfileEntry>> {
     let saved_profiles = store.list_saved_profiles()?;
     let current_snapshot = store.get_current_snapshot().ok();
@@ -821,6 +846,7 @@ fn load_profiles(
                 usage_service,
             )?;
             profiles.push(ProfileEntry {
+                kind: ProfileKind::Codex,
                 saved_name: None,
                 profile_name: format!(
                     "{} [UNSAVED]",
@@ -835,7 +861,108 @@ fn load_profiles(
         }
     }
 
+    // --- Claude entries ---
+    if let (Some(cs), Some(cu)) = (claude_store, claude_usage_service) {
+        let claude_entries = load_claude_profiles(cs, cu, force_refresh, refresh_account_id)?;
+        profiles.extend(claude_entries);
+    }
+
     profiles.sort_by(|left, right| left.profile_name.cmp(&right.profile_name));
+    Ok(profiles)
+}
+
+fn load_claude_profiles(
+    store: &crate::claude::ClaudeStore,
+    usage_service: &UsageService,
+    force_refresh: bool,
+    refresh_account_id: Option<&str>,
+) -> Result<Vec<ProfileEntry>> {
+    let saved = store.list_saved_profiles()?;
+    let current_creds = store.get_current_credentials().ok();
+    let current_account_id = current_creds.as_ref().map(|c| c.account_id());
+
+    // Helper: composite key for UsageService cache
+    let composite_id = |creds: &crate::claude::ClaudeCredentials| {
+        format!("{}|{}", creds.account_id(), creds.subscription_type())
+    };
+
+    let mut profiles: Vec<ProfileEntry> = saved
+        .into_iter()
+        .map(|saved_profile| {
+            let snapshot = &saved_profile.snapshot;
+            let creds: Option<crate::claude::ClaudeCredentials> =
+                serde_json::from_value(snapshot.clone()).ok();
+            let (acct_id, access_tok, comp_id) = match &creds {
+                Some(c) => (
+                    Some(c.account_id()),
+                    Some(c.access_token().to_string()),
+                    Some(composite_id(c)),
+                ),
+                None => (None, None, None),
+            };
+            let force_this = force_refresh
+                || refresh_account_id.is_some_and(|t| acct_id.as_deref() == Some(t));
+            let usage_view = usage_service.read_usage(
+                comp_id.as_deref(),
+                access_tok.as_deref(),
+                force_this,
+                false,
+            )?;
+            usage_service.record_usage_snapshot(comp_id.as_deref(), usage_view.usage.as_ref())?;
+            let chart_data = build_profile_chart_data(
+                comp_id.as_deref(),
+                usage_view.usage.as_ref(),
+                usage_service,
+            )?;
+            Ok(ProfileEntry {
+                kind: ProfileKind::Claude,
+                saved_name: Some(saved_profile.name.clone()),
+                profile_name: saved_profile.name,
+                snapshot: saved_profile.snapshot,
+                usage_view,
+                account_id: acct_id.clone(),
+                is_current: current_account_id.as_deref() == acct_id.as_deref(),
+                chart_data,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    // Add unsaved current Claude profile if not already in saved list
+    if let Some(creds) = &current_creds {
+        let acct_id = creds.account_id();
+        let access_tok = creds.access_token().to_string();
+        let comp_id = composite_id(creds);
+        let sub_type = creds.subscription_type().to_string();
+        let already_saved = profiles.iter().any(|p| p.account_id.as_deref() == Some(acct_id.as_str()));
+        if !already_saved {
+            let force_current = force_refresh
+                || refresh_account_id.is_some_and(|t| t == acct_id.as_str());
+            let snapshot = store.get_current_snapshot().unwrap_or(serde_json::json!({}));
+            let usage_view = usage_service.read_usage(
+                Some(&comp_id),
+                Some(access_tok.as_str()),
+                force_current,
+                false,
+            )?;
+            usage_service.record_usage_snapshot(Some(&comp_id), usage_view.usage.as_ref())?;
+            let chart_data = build_profile_chart_data(
+                Some(&comp_id),
+                usage_view.usage.as_ref(),
+                usage_service,
+            )?;
+            profiles.push(ProfileEntry {
+                kind: ProfileKind::Claude,
+                saved_name: None,
+                profile_name: format!("{} [cl-unsaved]", sub_type),
+                snapshot,
+                usage_view,
+                account_id: Some(acct_id),
+                is_current: true,
+                chart_data,
+            });
+        }
+    }
+
     Ok(profiles)
 }
 
@@ -860,6 +987,7 @@ fn build_saved_entry(
     let chart_data = build_profile_chart_data(account_id.as_deref(), usage_view.usage.as_ref(), usage_service)?;
 
     Ok(ProfileEntry {
+        kind: ProfileKind::Codex,
         saved_name: Some(profile.name.clone()),
         profile_name: profile.name,
         snapshot: profile.snapshot,
