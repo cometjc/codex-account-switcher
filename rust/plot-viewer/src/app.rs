@@ -83,7 +83,7 @@ struct OwnedFiveHourSubframeState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DialogMode {
-    SaveCurrent,
+    SaveCurrent(ProfileKind),
     RenameSaved(String),
     ConfirmDelete(String),
 }
@@ -440,27 +440,47 @@ impl App {
         };
 
         match dialog.mode {
-            DialogMode::SaveCurrent => {
-                let Some(store) = self.store.as_ref() else {
-                    return Ok(());
-                };
+            DialogMode::SaveCurrent(kind) => {
                 let Some(profile) = self.selected_profile().cloned() else {
                     return Ok(());
                 };
-                let name = store
-                    .save_snapshot(&dialog.input, &profile.snapshot)
-                    .with_context(|| format!("save snapshot {}", dialog.input))?;
+                let name = match kind {
+                    ProfileKind::Claude => {
+                        let Some(cs) = self.claude_store.as_ref() else {
+                            return Ok(());
+                        };
+                        cs.save_snapshot(&dialog.input, &profile.snapshot)
+                            .with_context(|| format!("save Claude snapshot {}", dialog.input))?
+                    }
+                    ProfileKind::Codex => {
+                        let Some(store) = self.store.as_ref() else {
+                            return Ok(());
+                        };
+                        store.save_snapshot(&dialog.input, &profile.snapshot)
+                            .with_context(|| format!("save snapshot {}", dialog.input))?
+                    }
+                };
                 self.status_message = Some(format!("Saved current profile as \"{name}\"."));
                 self.dialog = None;
                 self.reload_profiles(false, profile.account_id.clone())?;
             }
             DialogMode::RenameSaved(current_name) => {
-                let Some(store) = self.store.as_ref() else {
-                    return Ok(());
+                let name = match self.selected_profile().map(|p| p.kind) {
+                    Some(ProfileKind::Claude) => {
+                        let Some(cs) = self.claude_store.as_ref() else {
+                            return Ok(());
+                        };
+                        cs.rename_account(&current_name, &dialog.input)
+                            .with_context(|| format!("rename Claude profile {current_name}"))?
+                    }
+                    _ => {
+                        let Some(store) = self.store.as_ref() else {
+                            return Ok(());
+                        };
+                        store.rename_account(&current_name, &dialog.input)
+                            .with_context(|| format!("rename profile {current_name}"))?
+                    }
                 };
-                let name = store
-                    .rename_account(&current_name, &dialog.input)
-                    .with_context(|| format!("rename profile {current_name}"))?;
                 self.status_message = Some(format!("Renamed to \"{name}\"."));
                 self.dialog = None;
                 self.reload_profiles(false, None)?;
@@ -469,12 +489,23 @@ impl App {
                 if dialog.input.trim().eq_ignore_ascii_case("y")
                     || dialog.input.trim().eq_ignore_ascii_case("yes")
                 {
-                    let Some(store) = self.store.as_ref() else {
-                        return Ok(());
-                    };
-                    store
-                        .delete_account(&target_name)
-                        .with_context(|| format!("delete profile {target_name}"))?;
+                    match self.selected_profile().map(|p| p.kind) {
+                        Some(ProfileKind::Claude) => {
+                            let Some(cs) = self.claude_store.as_ref() else {
+                                return Ok(());
+                            };
+                            cs.delete_account(&target_name)
+                                .with_context(|| format!("delete Claude profile {target_name}"))?;
+                        }
+                        _ => {
+                            let Some(store) = self.store.as_ref() else {
+                                return Ok(());
+                            };
+                            store
+                                .delete_account(&target_name)
+                                .with_context(|| format!("delete profile {target_name}"))?;
+                        }
+                    }
                     self.status_message = Some(format!("Deleted \"{target_name}\"."));
                     self.reload_profiles(false, None)?;
                 }
@@ -490,19 +521,36 @@ impl App {
             return Ok(());
         };
 
-        if let Some(saved_name) = profile.saved_name.as_deref() {
-            if let Some(store) = self.store.as_ref() {
-                let activated = store.use_account(saved_name)?;
-                self.status_message = Some(format!("Switched Codex auth to \"{activated}\"."));
-                self.reload_profiles(false, profile.account_id.clone())?;
+        match profile.kind {
+            ProfileKind::Claude => {
+                if let Some(saved_name) = profile.saved_name.as_deref() {
+                    if let Some(cs) = self.claude_store.as_ref() {
+                        let activated = cs.use_account(saved_name)?;
+                        self.status_message = Some(format!("Switched Claude auth to \"{activated}\"."));
+                        self.reload_profiles(false, profile.account_id.clone())?;
+                    }
+                } else {
+                    self.dialog = Some(DialogState {
+                        mode: DialogMode::SaveCurrent(ProfileKind::Claude),
+                        input: build_default_name(profile.usage_view.usage.as_ref(), &profile.snapshot),
+                    });
+                }
             }
-            return Ok(());
+            ProfileKind::Codex => {
+                if let Some(saved_name) = profile.saved_name.as_deref() {
+                    if let Some(store) = self.store.as_ref() {
+                        let activated = store.use_account(saved_name)?;
+                        self.status_message = Some(format!("Switched Codex auth to \"{activated}\"."));
+                        self.reload_profiles(false, profile.account_id.clone())?;
+                    }
+                } else {
+                    self.dialog = Some(DialogState {
+                        mode: DialogMode::SaveCurrent(ProfileKind::Codex),
+                        input: build_default_name(profile.usage_view.usage.as_ref(), &profile.snapshot),
+                    });
+                }
+            }
         }
-
-        self.dialog = Some(DialogState {
-            mode: DialogMode::SaveCurrent,
-            input: build_default_name(profile.usage_view.usage.as_ref(), &profile.snapshot),
-        });
         Ok(())
     }
 
@@ -705,12 +753,12 @@ impl App {
             return;
         };
         let title = match &dialog.mode {
-            DialogMode::SaveCurrent => "Save current profile",
+            DialogMode::SaveCurrent(_) => "Save current profile",
             DialogMode::RenameSaved(_) => "Rename saved profile",
             DialogMode::ConfirmDelete(_) => "Delete saved profile",
         };
         let prompt = match &dialog.mode {
-            DialogMode::SaveCurrent => "Enter a name for the current auth snapshot.",
+            DialogMode::SaveCurrent(_) => "Enter a name for the current auth snapshot.",
             DialogMode::RenameSaved(_) => "Enter the new saved profile name.",
             DialogMode::ConfirmDelete(target) => {
                 if dialog.input.is_empty() {
