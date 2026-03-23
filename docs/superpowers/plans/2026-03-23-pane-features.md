@@ -1,5 +1,9 @@
 # Plot Viewer Pane Features Implementation Plan
 
+> **Status:** Archived as mostly shipped. The key pane interactions in this document — zoom reset, solo mode, X-window switching, cursor movement, filter mode, and dynamic chart messaging — are already present in the current TUI.
+>
+> **Roadmap note:** Keep this file only as a historical checklist. Any future pane work should start from current behavior in `rust/plot-viewer/src/app.rs`, `src/input.rs`, and `src/render/chart.rs`, not from unchecked boxes below.
+
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add pane-specific interactive features so Tab-switching between Accounts and Plot panes is purposeful.
@@ -7,6 +11,15 @@
 **Architecture:** Features split into render-side state (ChartState fields in render/mod.rs, visual logic in chart.rs) and app-side state (App struct, handle_action routing in app.rs). Chunk 1 defines interfaces; Chunk 2 wires them together; Chunk 3 polishes UX.
 
 **Tech Stack:** Rust, Ratatui, Crossterm
+
+---
+
+## Shipped outcome summary
+
+- `InputAction` already includes `ResetZoom`, `ToggleSolo`, `XWindow(u8)`, and `FilterEnter`.
+- `ChartState` already carries `x_lower`, `solo`, and `cursor_x`.
+- The chart already uses dynamic X bounds, solo filtering, cursor overlay, and dynamic footer/help text.
+- Remaining work, if any, should come from real-account usage observations rather than from replaying this plan verbatim.
 
 ---
 

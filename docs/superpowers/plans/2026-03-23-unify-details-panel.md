@@ -1,5 +1,9 @@
 # Unify Details Panel Implementation Plan
 
+> **Status:** Partially archived. The large structural refactor described here has mostly shipped: side panels are gone, chart rendering is full-width, and the left pane already combines profile list + details. However, this document still contains potentially useful polish ideas for final wording/layout cleanup after real-account verification.
+>
+> **Roadmap note:** Use this as a follow-up reference, not as a literal task list. Anything below that assumes `render/panels.rs` still exists is superseded by the current architecture.
+
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 將 Details/Summary/Compare 整合到左下單一 Details 區塊，移除右側 panels，chart 佔滿右側全寬，profiles 清單動態顯示 3-10 行。
@@ -7,6 +11,15 @@
 **Architecture:** 移除 `render/mod.rs` 的 68/32 水平分割，chart 直接填滿右側 70% 區域；左側 `render_left_pane()` 改為動態 profiles 行數 + 統一 details；`panels.rs` 的 `draw_panels`/`render_panels` 及其測試全部移除。
 
 **Tech Stack:** Rust, Ratatui, Crossterm
+
+---
+
+## Current reality snapshot
+
+- `rust/plot-viewer/src/render/panels.rs` has already been removed.
+- The chart now fills the full right pane via `render::render(..., area)`.
+- The left pane already renders dynamic profile list height plus a unified details block.
+- Remaining polish should focus on details wording, field ordering, and any UX issues surfaced by live Codex/Claude verification.
 
 ---
 

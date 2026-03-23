@@ -1,5 +1,9 @@
 # Claude Code Integration Implementation Plan
 
+> **Status:** Archived as shipped. Claude profile loading, save/use/rename/delete, refresh-all support, service tags, and chart data support are now implemented in `rust/plot-viewer`.
+>
+> **Roadmap note:** This document is kept as historical implementation context. Treat unchecked boxes below as superseded planning artifacts unless they describe a still-observable gap in the current product.
+
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add Claude Code account management and usage display alongside Codex in the existing plot-viewer TUI, mirroring the `~/.codex/auth.json` save/switch pattern for `~/.claude/.credentials.json`.
@@ -7,6 +11,15 @@
 **Architecture:** Add a new `claude.rs` module that mirrors `store.rs` and provides Claude-specific credential parsing + usage fetching. Extend `app.rs` with `ProfileKind` on `ProfileEntry` so Codex and Claude profiles coexist in one list; branch `activate/save/rename/delete` on kind. No changes to `render/chart.rs`.
 
 **Tech Stack:** Rust, Ratatui, reqwest blocking, serde_json — no new dependencies (RFC3339 parsed manually).
+
+---
+
+## Shipped outcome summary
+
+- Claude credentials are sourced from `~/.claude/.credentials.json`.
+- Claude profiles participate in the same list UI as Codex profiles, with `[cl]` / `[cx]` tags.
+- `--refresh-all` records Claude usage snapshots and chart history.
+- Chart generation for Claude now lives behind the extracted loader flow (`src/loader.rs` / `src/app_data.rs`), not the original monolithic `app.rs` design assumed by this plan.
 
 ---
 
