@@ -1,10 +1,18 @@
 pub mod chart;
-pub mod panels;
 
-use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::prelude::Frame;
-use ratatui::text::{Line, Text};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::layout::Rect;
+use ratatui::prelude::{Color, Frame};
+
+pub const SERIES_COLORS: [Color; 8] = [
+    Color::Cyan,
+    Color::Yellow,
+    Color::Magenta,
+    Color::Green,
+    Color::LightBlue,
+    Color::LightRed,
+    Color::LightGreen,
+    Color::White,
+];
 
 /// Shared render inputs for the Rust codex-auth plot view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,12 +56,6 @@ impl From<Rect> for RenderViewport {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FocusTarget {
-    Chart,
-    Summary,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RenderProfile<'a> {
     pub id: &'a str,
     pub label: &'a str,
@@ -64,7 +66,6 @@ pub struct RenderProfile<'a> {
 pub struct SelectionState<'a> {
     pub selected: Option<RenderProfile<'a>>,
     pub current: Option<RenderProfile<'a>>,
-    pub focus: FocusTarget,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -85,6 +86,7 @@ pub struct ChartSeries<'a> {
     pub profile: RenderProfile<'a>,
     pub style: ChartSeriesStyle,
     pub points: Vec<ChartPoint>,
+    pub five_hour_subframe: FiveHourSubframeState<'a>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -114,6 +116,11 @@ pub struct ChartState<'a> {
     pub five_hour_band: FiveHourBandState<'a>,
     pub five_hour_subframe: FiveHourSubframeState<'a>,
     pub total_points: usize,
+    pub y_lower: f64,
+    pub y_upper: f64,
+    pub x_lower: f64,          // X-axis left bound: 0.0=7d, 4.0=3d, 6.0=1d
+    pub solo: bool,             // if true, only render selected series
+    pub cursor_x: Option<f64>, // cursor X position (0..7), None = no cursor
 }
 
 pub trait RenderState {
@@ -131,50 +138,8 @@ pub trait RenderState {
 /// Entry point for the codex-auth plot layout boundary.
 pub fn render<State: RenderState>(frame: &mut Frame, area: Rect, state: &State) {
     let context = RenderContext::new(state, area);
-    let outer = Block::default().title("codex-auth plot").borders(Borders::ALL);
-    let inner = outer.inner(area);
-    frame.render_widget(outer, area);
-    if inner.width == 0 || inner.height == 0 {
+    if area.width == 0 || area.height == 0 {
         return;
     }
-
-    let chunks = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Min(12),
-        Constraint::Length(2),
-    ])
-    .split(inner);
-
-    let body = Layout::horizontal([Constraint::Percentage(68), Constraint::Percentage(32)])
-        .split(chunks[1]);
-    let selection = state.selection_state();
-    let chart = state.chart_state();
-    let current_label = selection
-        .current
-        .map(|profile| profile.label)
-        .unwrap_or("none");
-
-    let header = Paragraph::new(Text::from(vec![
-        Line::from("Rust codex-auth plot view"),
-        Line::from(format!(
-            "Selected: {} · Current: {} · Visible profiles: {} · Samples: {}",
-            state.selected_profile_label(),
-            current_label,
-            chart.series.len(),
-            chart.total_points
-        )),
-    ]))
-    .wrap(Wrap { trim: true });
-    frame.render_widget(header, chunks[0]);
-
-    chart::render_chart(frame, &context.with_area(body[0]));
-
-    let footer = Paragraph::new(Text::from(vec![Line::from(format!(
-        "Viewport: {}x{} · Left/Right cycles selected profile · Tab switches panel focus",
-        context.viewport.width, context.viewport.height
-    ))]))
-    .wrap(Wrap { trim: true });
-    frame.render_widget(footer, chunks[2]);
-
-    panels::draw_panels(frame, &context.with_area(body[1]));
+    chart::render_chart(frame, &context.with_area(area));
 }
