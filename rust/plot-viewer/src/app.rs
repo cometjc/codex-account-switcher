@@ -1,4 +1,4 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use crossterm::event;
@@ -99,6 +99,12 @@ pub struct App {
     store: Option<AccountStore>,
     usage_service: Option<UsageService>,
     cron_status: CronStatus,
+    solo_mode: bool,
+    x_window_days: u8,
+    cursor_x: Option<f64>,
+    filter_input: Option<String>,
+    last_auto_reload: Instant,
+    y_zoom_user_adjusted: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -106,6 +112,9 @@ pub(crate) struct AppRenderState<'a> {
     profiles: &'a [ProfileEntry],
     selected_profile_index: usize,
     y_zoom_lower: f64,
+    solo: bool,
+    x_window_days: u8,
+    cursor_x: Option<f64>,
 }
 
 impl ProfileChartData {
@@ -146,6 +155,12 @@ impl App {
             store: Some(store),
             usage_service: Some(usage_service),
             cron_status,
+            solo_mode: false,
+            x_window_days: 7,
+            cursor_x: None,
+            filter_input: None,
+            last_auto_reload: Instant::now(),
+            y_zoom_user_adjusted: false,
         })
     }
 
@@ -180,6 +195,12 @@ impl App {
             store: None,
             usage_service: None,
             cron_status: CronStatus::uninstalled(),
+            solo_mode: false,
+            x_window_days: 7,
+            cursor_x: None,
+            filter_input: None,
+            last_auto_reload: Instant::now(),
+            y_zoom_user_adjusted: false,
         }
     }
 
@@ -207,6 +228,12 @@ impl App {
                     self.handle_action(action)?;
                 }
             }
+
+            // Auto-reload every 30s to pick up cron-refreshed usage data
+            if self.last_auto_reload.elapsed() >= Duration::from_secs(30) {
+                let _ = self.reload_profiles(false, None);
+                self.last_auto_reload = Instant::now();
+            }
         }
         Ok(())
     }
@@ -214,6 +241,9 @@ impl App {
     fn handle_action(&mut self, action: InputAction) -> Result<()> {
         if self.dialog.is_some() {
             return self.handle_dialog_action(action);
+        }
+        if self.filter_input.is_some() {
+            return self.handle_filter_action(action);
         }
 
         match action {
@@ -224,12 +254,12 @@ impl App {
             }
             InputAction::Left => {
                 if self.pane_focus == PaneFocus::Plot {
-                    self.step_profile(-1);
+                    self.move_cursor(-1);
                 }
             }
             InputAction::Right => {
                 if self.pane_focus == PaneFocus::Plot {
-                    self.step_profile(1);
+                    self.move_cursor(1);
                 }
             }
             InputAction::NextFocus | InputAction::PreviousFocus => {
@@ -237,31 +267,125 @@ impl App {
             }
             InputAction::ZoomIn => {
                 self.y_zoom_lower = (self.y_zoom_lower + 5.0).min(95.0);
+                self.y_zoom_user_adjusted = true;
             }
             InputAction::ZoomOut => {
                 self.y_zoom_lower = (self.y_zoom_lower - 5.0).max(0.0);
+                self.y_zoom_user_adjusted = true;
             }
             InputAction::ResetZoom => {
-                self.y_zoom_lower = 0.0;
+                self.y_zoom_lower = auto_y_lower(&self.profiles);
+                self.y_zoom_user_adjusted = false;
             }
             InputAction::ToggleSolo => {
-                // Placeholder for future solo toggle functionality
+                if self.pane_focus == PaneFocus::Plot {
+                    self.solo_mode = !self.solo_mode;
+                }
             }
-            InputAction::XWindow(_) => {
-                // Placeholder for window selection functionality
+            InputAction::XWindow(days) => {
+                if self.pane_focus == PaneFocus::Plot {
+                    self.x_window_days = days;
+                    if let Some(cx) = self.cursor_x {
+                        let new_lower = 7.0 - days as f64;
+                        self.cursor_x = Some(cx.clamp(new_lower, 7.0));
+                    }
+                }
             }
             InputAction::FilterEnter => {
-                // Placeholder for filter mode entry
+                if self.pane_focus == PaneFocus::Accounts {
+                    self.filter_input = Some(String::new());
+                }
             }
-            InputAction::Enter => self.activate_selected_profile()?,
-            InputAction::Rename => self.open_rename_dialog(),
-            InputAction::Delete => self.open_delete_dialog(),
-            InputAction::RefreshSelected => self.refresh_selected_profile(true)?,
+            InputAction::Enter => {
+                if self.pane_focus == PaneFocus::Accounts {
+                    self.activate_selected_profile()?;
+                }
+            }
+            InputAction::Rename => {
+                if self.pane_focus == PaneFocus::Accounts {
+                    self.open_rename_dialog();
+                }
+            }
+            InputAction::Delete => {
+                if self.pane_focus == PaneFocus::Accounts {
+                    self.open_delete_dialog();
+                }
+            }
+            InputAction::RefreshSelected => {
+                if self.pane_focus == PaneFocus::Accounts {
+                    self.refresh_selected_profile(true)?;
+                }
+            }
             InputAction::RefreshAll => self.reload_profiles(true, None)?,
             InputAction::Backspace | InputAction::Character(_) | InputAction::Cancel => {}
         }
 
         Ok(())
+    }
+
+    fn handle_filter_action(&mut self, action: InputAction) -> Result<()> {
+        match action {
+            InputAction::Quit | InputAction::Cancel => {
+                self.filter_input = None;
+            }
+            InputAction::Enter => {
+                self.filter_input = None;
+            }
+            InputAction::Backspace => {
+                if let Some(f) = self.filter_input.as_mut() {
+                    f.pop();
+                    if f.is_empty() {
+                        self.filter_input = None;
+                    }
+                }
+            }
+            InputAction::Character(ch) => {
+                if let Some(f) = self.filter_input.as_mut() {
+                    f.push(ch);
+                }
+            }
+            InputAction::Up => self.step_profile_filtered(-1),
+            InputAction::Down => self.step_profile_filtered(1),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn filtered_profile_indices(&self) -> Vec<usize> {
+        match &self.filter_input {
+            None => (0..self.profiles.len()).collect(),
+            Some(f) => {
+                let lower = f.to_lowercase();
+                self.profiles
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| p.profile_name.to_lowercase().contains(&lower))
+                    .map(|(i, _)| i)
+                    .collect()
+            }
+        }
+    }
+
+    fn step_profile_filtered(&mut self, delta: isize) {
+        let indices = self.filtered_profile_indices();
+        if indices.is_empty() {
+            return;
+        }
+        let pos = indices
+            .iter()
+            .position(|&i| i == self.selected_profile_index)
+            .unwrap_or(0);
+        let len = indices.len() as isize;
+        let next_pos = (pos as isize + delta).rem_euclid(len) as usize;
+        self.selected_profile_index = indices[next_pos];
+    }
+
+    fn move_cursor(&mut self, direction: isize) {
+        let x_lower = 7.0 - self.x_window_days as f64;
+        let step = self.x_window_days as f64 / 20.0;
+        let current = self.cursor_x.unwrap_or(7.0);
+        let next = (current + direction as f64 * step).clamp(x_lower, 7.0);
+        self.cursor_x = Some(next);
     }
 
     fn handle_dialog_action(&mut self, action: InputAction) -> Result<()> {
@@ -465,21 +589,29 @@ impl App {
             profiles: &self.profiles,
             selected_profile_index: self.selected_profile_index,
             y_zoom_lower: self.y_zoom_lower,
+            solo: self.solo_mode,
+            x_window_days: self.x_window_days,
+            cursor_x: self.cursor_x,
         };
         render::render(frame, right_area, &render_state);
 
-        let active_label = match self.pane_focus {
-            PaneFocus::Accounts => "accounts",
-            PaneFocus::Plot => "plot",
+        let footer_lines = match self.pane_focus {
+            PaneFocus::Accounts => vec![
+                Line::from("Enter=switch · n=rename · d=delete · u=refresh · a=all · q=quit"),
+                Line::from(format!(
+                    "Tab=plot · ↑↓=navigate · /=filter{}",
+                    if self.filter_input.is_some() { " (Esc=clear)" } else { "" }
+                )),
+            ],
+            PaneFocus::Plot => vec![
+                Line::from(format!(
+                    "1/3/7=window · s=solo{} · +/-=zoom · r=reset · a=refresh · q=quit",
+                    if self.solo_mode { "[ON]" } else { "" }
+                )),
+                Line::from("Tab=accounts · ↑↓=profile · ←→=cursor"),
+            ],
         };
-        let footer = Paragraph::new(Text::from(vec![
-            Line::from("Enter=switch · n=rename · d=delete · u=refresh · a=all · +/-=zoom · q=quit"),
-            Line::from(format!(
-                "Tab=switch pane [{}] · ↑↓=navigate · ←→=cycle profile (plot)",
-                active_label
-            )),
-        ]))
-        .wrap(Wrap { trim: true });
+        let footer = Paragraph::new(Text::from(footer_lines)).wrap(Wrap { trim: true });
         frame.render_widget(footer, footer_area);
 
         if self.dialog.is_some() {
@@ -488,23 +620,23 @@ impl App {
     }
 
     fn render_left_pane(&self, frame: &mut Frame, area: Rect) {
-        // Clamp profile list height to 3..=10 visible rows, plus 2 for borders
-        let list_lines = (self.profiles.len().max(3).min(10) + 2) as u16;
+        let indices = self.filtered_profile_indices();
+        let list_lines = (indices.len().max(3).min(10) + 2) as u16;
 
         let [list_area, detail_area] =
             Layout::vertical([Constraint::Length(list_lines), Constraint::Min(0)]).areas(area);
 
-        let profiles_title = if self.pane_focus == PaneFocus::Accounts {
-            "Profiles [active]"
-        } else {
-            "Profiles"
+        let profiles_title = match &self.filter_input {
+            Some(f) => format!("Profiles [/{}]", f),
+            None if self.pane_focus == PaneFocus::Accounts => "Profiles [active]".to_string(),
+            None => "Profiles".to_string(),
         };
-        let items = self
-            .profiles
+
+        let items = indices
             .iter()
-            .enumerate()
-            .map(|(index, profile)| {
-                let color = render::SERIES_COLORS[index % render::SERIES_COLORS.len()];
+            .map(|&i| {
+                let profile = &self.profiles[i];
+                let color = render::SERIES_COLORS[i % render::SERIES_COLORS.len()];
                 let prefix = if profile.is_current { "▶ " } else { "  " };
                 let unsaved_tag = if profile.saved_name.is_none() { " [unsaved]" } else { "" };
                 let usage = format_usage_badge(&profile.usage_view);
@@ -515,8 +647,13 @@ impl App {
                 ]))
             })
             .collect::<Vec<_>>();
+
+        let selected_pos_in_filtered = indices
+            .iter()
+            .position(|&i| i == self.selected_profile_index);
+
         let mut state = ListState::default();
-        state.select((!self.profiles.is_empty()).then_some(self.selected_profile_index));
+        state.select(selected_pos_in_filtered);
         let list = List::new(items)
             .block(Block::default().title(profiles_title).borders(Borders::ALL))
             .highlight_style(Style::default().add_modifier(Modifier::BOLD))
@@ -597,6 +734,9 @@ impl render::RenderState for AppRenderState<'_> {
         let mut state = build_chart_state(self.profiles, self.selected_profile_index);
         state.y_lower = self.y_zoom_lower;
         state.y_upper = 100.0;
+        state.x_lower = 7.0 - self.x_window_days as f64;
+        state.solo = self.solo;
+        state.cursor_x = self.cursor_x;
         state
     }
 }
@@ -882,6 +1022,10 @@ fn sanitize_name_part(input: Option<&str>) -> Option<String> {
                 .to_string()
         })
         .filter(|value| !value.is_empty())
+}
+
+fn auto_y_lower(_profiles: &[ProfileEntry]) -> f64 {
+    0.0
 }
 
 fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: usize) -> ChartState<'a> {
