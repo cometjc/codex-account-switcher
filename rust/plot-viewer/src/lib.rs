@@ -1,4 +1,6 @@
 pub mod app;
+pub mod claude;
+pub mod cron;
 pub mod input;
 pub mod model;
 pub mod paths;
