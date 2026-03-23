@@ -5,6 +5,8 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::usage::{UsageRateLimit, UsageResponse, UsageWindow};
+
 // ── Credential model ────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -284,6 +286,110 @@ fn normalize_account_name(raw: &str) -> Result<String> {
     Ok(trimmed.to_string())
 }
 
+// ── Usage fetching ─────────────────────────────────────────────────────────────
+
+/// Map a raw Claude usage API JSON response + subscription_type to UsageResponse.
+/// `now` is the current unix timestamp in seconds (injected for testability).
+pub fn map_claude_usage_response(raw: &Value, subscription_type: &str, now: i64) -> Option<UsageResponse> {
+    let five_hour = raw.get("five_hour")?;
+    let seven_day = raw.get("seven_day")?;
+
+    let five_h_utilization = five_hour.get("utilization")?.as_f64()?;
+    let five_h_resets_at = five_hour.get("resets_at")?.as_str()?;
+    let seven_d_utilization = seven_day.get("utilization")?.as_f64()?;
+    let seven_d_resets_at = seven_day.get("resets_at")?.as_str()?;
+
+    let five_h_reset_at = parse_rfc3339_unix(five_h_resets_at)?;
+    let seven_d_reset_at = parse_rfc3339_unix(seven_d_resets_at)?;
+
+    Some(UsageResponse {
+        email: None,
+        plan_type: Some(subscription_type.to_string()),
+        rate_limit: Some(UsageRateLimit {
+            primary_window: Some(UsageWindow {
+                used_percent: five_h_utilization.clamp(0.0, 100.0),
+                limit_window_seconds: 18_000,
+                reset_at: five_h_reset_at,
+                reset_after_seconds: (five_h_reset_at - now).max(0),
+            }),
+            secondary_window: Some(UsageWindow {
+                used_percent: seven_d_utilization.clamp(0.0, 100.0),
+                limit_window_seconds: 604_800,
+                reset_at: seven_d_reset_at,
+                reset_after_seconds: (seven_d_reset_at - now).max(0),
+            }),
+        }),
+    })
+}
+
+/// Parse an RFC3339 datetime string like "2025-11-04T04:59:59.943648+00:00"
+/// to a Unix timestamp in seconds. Only handles UTC / +00:00 offsets (Claude
+/// always returns UTC). Returns None on any parse failure.
+pub fn parse_rfc3339_unix(s: &str) -> Option<i64> {
+    let s = s.trim();
+    let t = s.find('T')?;
+    let date = &s[..t];
+    let rest = &s[t + 1..];
+    let time_end = rest.find(|c| c == '.' || c == '+' || c == 'Z').unwrap_or(rest.len());
+    let time = &rest[..time_end];
+
+    let dp: Vec<i64> = date.split('-').map(|p| p.parse().ok()).collect::<Option<_>>()?;
+    let tp: Vec<i64> = time.split(':').map(|p| p.parse().ok()).collect::<Option<_>>()?;
+    if dp.len() < 3 || tp.len() < 3 { return None; }
+
+    let (year, month, day) = (dp[0], dp[1], dp[2]);
+    let (hour, minute, second) = (tp[0], tp[1], tp[2]);
+
+    let days = days_since_epoch(year, month, day)?;
+    Some(days * 86_400 + hour * 3_600 + minute * 60 + second)
+}
+
+/// Compute days since Unix epoch (1970-01-01) for a Gregorian date.
+fn days_since_epoch(year: i64, month: i64, day: i64) -> Option<i64> {
+    if month < 1 || month > 12 || day < 1 || day > 31 { return None; }
+    // Algorithm: days_from_civil from http://howardhinnant.github.io/date_algorithms.html
+    let y = if month <= 2 { year - 1 } else { year };
+    let m = if month <= 2 { month + 9 } else { month - 3 };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let doy = (153 * m + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    Some(days)
+}
+
+/// HTTP fetcher for Claude usage. Signature matches UsageService::with_fetcher.
+/// Caller passes "claude-<id>|<subscription_type>" as account_id so we can
+/// extract subscription_type here without additional parameters.
+pub fn fetch_claude_usage(account_id: &str, access_token: &str) -> anyhow::Result<UsageResponse> {
+    let subscription_type = account_id
+        .rsplit('|')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("unknown");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    let client = reqwest::blocking::Client::builder()
+        .build()
+        .context("build reqwest client")?;
+    let raw: Value = client
+        .get("https://api.anthropic.com/api/oauth/usage")
+        .bearer_auth(access_token)
+        .header("User-Agent", "codex-auth")
+        .send()
+        .context("send Claude usage request")?
+        .error_for_status()
+        .context("Claude usage request failed")?
+        .json()
+        .context("parse Claude usage JSON")?;
+
+    map_claude_usage_response(&raw, subscription_type, now)
+        .ok_or_else(|| anyhow::anyhow!("unexpected Claude usage response shape"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -333,5 +439,26 @@ mod tests {
         assert_eq!(store.list_account_names().unwrap(), vec!["personal"]);
         store.delete_account("personal").unwrap();
         assert!(store.list_account_names().unwrap().is_empty());
+    }
+
+    #[test]
+    fn fetch_claude_usage_maps_response_correctly() {
+        let now = 1_730_000_000_i64;
+        let resets_at_5h = "2025-10-27T04:59:59.000000+00:00";
+        let resets_at_7d = "2025-10-29T04:59:59.000000+00:00";
+        let raw = serde_json::json!({
+            "five_hour": { "utilization": 40.0, "resets_at": resets_at_5h },
+            "seven_day":  { "utilization": 28.0, "resets_at": resets_at_7d }
+        });
+        let response = map_claude_usage_response(&raw, "team", now).unwrap();
+        assert_eq!(response.plan_type.as_deref(), Some("team"));
+        let rl = response.rate_limit.as_ref().unwrap();
+        let five_h = rl.primary_window.as_ref().unwrap();
+        assert_eq!(five_h.limit_window_seconds, 18_000);
+        assert!((five_h.used_percent - 40.0).abs() < 0.01);
+        assert!(five_h.reset_at > 0);
+        let seven_d = rl.secondary_window.as_ref().unwrap();
+        assert_eq!(seven_d.limit_window_seconds, 604_800);
+        assert!((seven_d.used_percent - 28.0).abs() < 0.01);
     }
 }
