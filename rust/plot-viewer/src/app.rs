@@ -907,14 +907,14 @@ fn render_account_detail(
         }
         if let Some(w) = pick_weekly_window(usage) {
             lines.push(Line::from(format!(
-                "Weekly:  {:.0}% used, reset in {}s",
-                w.used_percent, w.reset_after_seconds
+                "Weekly:  {:.0}% used, reset in {}",
+                w.used_percent, format_duration_short(w.reset_after_seconds)
             )));
         }
         if let Some(w) = pick_five_hour_window(usage) {
             lines.push(Line::from(format!(
-                "5h:      {:.0}% used, reset in {}s",
-                w.used_percent, w.reset_after_seconds
+                "5h:      {:.0}% used, reset in {}",
+                w.used_percent, format_duration_short(w.reset_after_seconds)
             )));
         }
     }
@@ -960,6 +960,30 @@ fn format_age(fetched_at: Option<i64>, stale: bool) -> String {
         format!("stale {}", age_str)
     } else {
         age_str
+    }
+}
+
+/// Format a duration in seconds as "3d 9h", "9h 38m", "45m", etc.
+/// Uses the two largest non-zero units.
+fn format_duration_short(secs: i64) -> String {
+    let secs = secs.max(0) as u64;
+    let days = secs / 86400;
+    let hours = (secs % 86400) / 3600;
+    let mins = (secs % 3600) / 60;
+    if days > 0 {
+        if hours > 0 {
+            format!("{}d {}h", days, hours)
+        } else {
+            format!("{}d", days)
+        }
+    } else if hours > 0 {
+        if mins > 0 {
+            format!("{}h {}m", hours, mins)
+        } else {
+            format!("{}h", hours)
+        }
+    } else {
+        format!("{}m", mins.max(1))
     }
 }
 
@@ -1406,5 +1430,22 @@ mod tests {
         let subframe_no_hist = build_five_hour_subframe(Some(&weekly), Some(&five_hour), None);
         assert_eq!(subframe_no_hist.lower_y, Some(30.0));
         assert_eq!(subframe_no_hist.upper_y, Some(100.0));
+    }
+}
+
+#[cfg(test)]
+mod duration_tests {
+    use super::*;
+
+    #[test]
+    fn format_duration_short_covers_all_tiers() {
+        assert_eq!(format_duration_short(293927), "3d 9h");  // 3*86400 + 9*3600 + 38*60 + 47
+        assert_eq!(format_duration_short(86400),  "1d");
+        assert_eq!(format_duration_short(9000),   "2h 30m");
+        assert_eq!(format_duration_short(3600),   "1h");
+        assert_eq!(format_duration_short(120),    "2m");
+        assert_eq!(format_duration_short(30),     "1m");     // < 1m rounds up to 1m
+        assert_eq!(format_duration_short(0),      "1m");
+        assert_eq!(format_duration_short(-1),     "1m");     // negative clamped
     }
 }
