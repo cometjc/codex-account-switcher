@@ -39,3 +39,4 @@
 - 當 workflow 已經擴張到 plan、lane、review、result branch 與多份 markdown/state surface 彼此互相引用時，不要再靠「多份文件同步」維持一致性；應收斂成中央執行器與單一資料庫，並強制所有交換只走同一個 executor 介面。
 - `nlsdd-go` 不是只做一次 truth scan；它語意上包含「補齊 truth 後繼續推進」。除非遇到需要使用者選路的分岔，否則不該停在 active lanes 已存在但尚未繼續執行的中間態。
 - `nlsdd-go` 的終點不能只看當前 execution 是否 no-op；要看相關 plan 是否真的跑完。若 execution 沒 lane 可跑但 plan 還有未完成項，應繼續 replan / reopen truthful work，而不是把「execution 暫時空了」誤報成整輪完成。
+- 當使用者糾正回覆語言時，要立刻切換到指定語言，並把這個偏好上升成明確本地規則寫進 `AGENTS.md`，避免後續回覆再漂回預設語言。

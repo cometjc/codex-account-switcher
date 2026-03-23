@@ -1,3 +1,9 @@
+### 0. Response Language
+- 預設以繁體中文（zhtw）回覆使用者。
+- 若使用者在當前對話中明確指定其他語言，才針對該次請求改用指定語言。
+
+---
+
 ### 1. Plan Node Default
 - Enter plan mode for ANY non-trivial task (3+ steps or architectural decisions)
 - If something goes sideways, STOP and re-plan immediately - don't keep pushing
