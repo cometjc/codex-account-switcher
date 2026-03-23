@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use crossterm::event;
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::prelude::*;
-use ratatui::style::{Modifier, Stylize};
+use ratatui::style::Stylize;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use serde_json::Value;
@@ -677,7 +677,7 @@ impl App {
         state.select(selected_pos_in_filtered);
         let list = List::new(items)
             .block(Block::default().title(profiles_title).borders(Borders::ALL))
-            .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+            .highlight_style(Style::default().bg(Color::DarkGray))
             .highlight_symbol("> ");
         frame.render_stateful_widget(list, list_area, &mut state);
 
@@ -1093,6 +1093,15 @@ fn popup_area(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn render_buffer(app: &App, width: u16, height: u16) -> ratatui::buffer::Buffer {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let frame = terminal.draw(|frame| app.render(frame)).unwrap();
+        frame.buffer.clone()
+    }
 
     #[test]
     fn app_starts_on_current_profile_and_toggles_pane_focus() {
@@ -1132,6 +1141,23 @@ mod tests {
 
         let lines = render_account_detail(Some(&profile), None, &CronStatus::uninstalled());
         assert!(lines.iter().any(|line| line.to_string() == "Last updated: never"));
+    }
+
+    #[test]
+    fn selected_profile_row_uses_darker_background_without_losing_series_color() {
+        let app = App::from_profile_names(vec!["Alpha".to_string(), "Beta".to_string()], 1);
+        let buffer = render_buffer(&app, 100, 24);
+
+        let cell = (0..24)
+            .flat_map(|y| (0..100).map(move |x| (x, y)))
+            .find_map(|(x, y)| {
+                let cell = &buffer[(x, y)];
+                (cell.symbol() == "B").then_some(cell)
+            })
+            .expect("selected profile label should be rendered");
+
+        assert_eq!(cell.fg, render::SERIES_COLORS[1]);
+        assert_eq!(cell.bg, Color::DarkGray);
     }
 }
 
