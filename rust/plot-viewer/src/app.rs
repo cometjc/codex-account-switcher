@@ -146,9 +146,9 @@ impl App {
         let profiles = load_profiles(&store, &usage_service, false, None)?;
         Ok(Self {
             selected_profile_index: initial_selected_index(&profiles),
+            y_zoom_lower: auto_y_lower(&profiles),
             profiles,
             pane_focus: PaneFocus::Accounts,
-            y_zoom_lower: 0.0,
             should_quit: false,
             dialog: None,
             status_message: None,
@@ -529,6 +529,9 @@ impl App {
         self.selected_profile_index = self
             .selected_profile_index
             .min(self.profiles.len().saturating_sub(1));
+        if !self.y_zoom_user_adjusted {
+            self.y_zoom_lower = auto_y_lower(&self.profiles);
+        }
         Ok(())
     }
 
@@ -1054,8 +1057,18 @@ fn sanitize_name_part(input: Option<&str>) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn auto_y_lower(_profiles: &[ProfileEntry]) -> f64 {
-    0.0
+/// Compute the default y_zoom_lower from actual data: floor(min_y, 5%).
+/// Returns 0.0 if no data.
+fn auto_y_lower(profiles: &[ProfileEntry]) -> f64 {
+    let min_y = profiles
+        .iter()
+        .flat_map(|p| p.chart_data.seven_day_points.iter())
+        .map(|pt| pt.y)
+        .fold(f64::INFINITY, f64::min);
+    if min_y.is_infinite() {
+        return 0.0;
+    }
+    (min_y / 5.0).floor() * 5.0
 }
 
 fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: usize) -> ChartState<'a> {
