@@ -610,7 +610,7 @@ impl App {
 
         let footer_lines = match self.pane_focus {
             PaneFocus::Accounts => vec![
-                Line::from("Enter=switch · n=rename · d=delete · u=refresh · a=all · q=quit"),
+                Line::from("Enter=switch/save · n=rename · d=delete · u=refresh · a=all · q=quit"),
                 Line::from(format!(
                     "Tab=plot · ↑↓=navigate · /=filter{}",
                     if self.filter_input.is_some() { " (Esc=clear)" } else { "" }
@@ -655,9 +655,13 @@ impl App {
                     ProfileKind::Codex => "[cx]",
                     ProfileKind::Claude => "[cl]",
                 };
-                let unsaved_tag = if profile.saved_name.is_none() { " [unsaved]" } else { "" };
+                let state_tag = if profile.saved_name.is_some() {
+                    " [saved]"
+                } else {
+                    " [unsaved]"
+                };
                 let usage = format_usage_badge(&profile.usage_view);
-                let label = format!("{prefix}{service_tag} {}{unsaved_tag}", profile.profile_name);
+                let label = format!("{prefix}{service_tag} {}{state_tag}", profile.profile_name);
                 ListItem::new(Line::from(vec![
                     Span::styled(label, Style::default().fg(color)),
                     Span::raw(format!(" {usage}")),
@@ -801,7 +805,7 @@ fn render_account_detail(
 ) -> Vec<Line<'static>> {
     let Some(profile) = profile else {
         return vec![
-            Line::from("No Codex auth profile loaded."),
+            Line::from("No auth profile loaded."),
             Line::from("Save or switch an account to continue."),
         ];
     };
@@ -820,29 +824,29 @@ fn render_account_detail(
     let mut lines = vec![
         Line::from(format!("Profile: {}", profile.profile_name)),
         Line::from(format!("Service: {}", service_label)),
-        Line::from(format!("State:   {}", state_label)),
+        Line::from(format!("State: {}", state_label)),
         Line::from(format!(
-            "Updated: {}",
+            "Last updated: {}",
             format_age(profile.usage_view.fetched_at, profile.usage_view.stale)
         )),
     ];
 
     if let Some(usage) = profile.usage_view.usage.as_ref() {
         if let Some(email) = usage.email.as_deref() {
-            lines.push(Line::from(format!("Email:   {}", email)));
+            lines.push(Line::from(format!("Email: {}", email)));
         }
         if let Some(plan) = usage.plan_type.as_deref() {
-            lines.push(Line::from(format!("Plan:    {}", plan)));
+            lines.push(Line::from(format!("Plan: {}", plan)));
         }
         if let Some(w) = pick_weekly_window(usage) {
             lines.push(Line::from(format!(
-                "Weekly:  {:.0}% used, reset in {}",
+                "Weekly: {:.0}% used, reset in {}",
                 w.used_percent, format_duration_short(w.reset_after_seconds)
             )));
         }
         if let Some(w) = pick_five_hour_window(usage) {
             lines.push(Line::from(format!(
-                "5h:      {:.0}% used, reset in {}",
+                "5h: {:.0}% used, reset in {}",
                 w.used_percent, format_duration_short(w.reset_after_seconds)
             )));
         }
@@ -1099,6 +1103,35 @@ mod tests {
         app.pane_focus = app.pane_focus.toggle();
         assert_eq!(app.pane_focus, PaneFocus::Plot);
         assert_eq!(app.selected_profile_label(), Some("Beta"));
+    }
+
+    #[test]
+    fn account_detail_empty_state_is_service_agnostic() {
+        let lines = render_account_detail(None, None, &CronStatus::uninstalled());
+        assert_eq!(lines[0].to_string(), "No auth profile loaded.");
+        assert_eq!(lines[1].to_string(), "Save or switch an account to continue.");
+    }
+
+    #[test]
+    fn account_detail_uses_last_updated_label() {
+        let profile = ProfileEntry {
+            kind: ProfileKind::Claude,
+            saved_name: Some("demo".to_string()),
+            profile_name: "demo".to_string(),
+            snapshot: serde_json::json!({}),
+            usage_view: UsageReadResult {
+                usage: None,
+                source: UsageSource::None,
+                fetched_at: None,
+                stale: false,
+            },
+            account_id: Some("claude-demo".to_string()),
+            is_current: false,
+            chart_data: ProfileChartData::empty("no usage data"),
+        };
+
+        let lines = render_account_detail(Some(&profile), None, &CronStatus::uninstalled());
+        assert!(lines.iter().any(|line| line.to_string() == "Last updated: never"));
     }
 }
 
