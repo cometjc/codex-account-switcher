@@ -1,19 +1,20 @@
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use crossterm::event;
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::prelude::*;
 use ratatui::style::{Modifier, Stylize};
-use ratatui::text::{Line, Text};
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use serde_json::Value;
 
+use crate::cron::CronStatus;
 use crate::input::{self, InputAction};
 use crate::render;
 use crate::render::{
     ChartPoint, ChartSeries, ChartSeriesStyle, ChartState, FiveHourBandState, FiveHourSubframeState,
-    FocusTarget, RenderProfile, SelectionState,
+    RenderProfile, SelectionState,
 };
 use crate::store::{AccountStore, SavedProfile};
 use crate::usage::{
@@ -21,36 +22,20 @@ use crate::usage::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ViewMode {
+enum PaneFocus {
     Accounts,
     Plot,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FocusPanel {
-    Chart,
-    Summary,
-}
-
-impl FocusPanel {
-    fn next(self) -> Self {
+impl PaneFocus {
+    fn toggle(self) -> Self {
         match self {
-            Self::Chart => Self::Summary,
-            Self::Summary => Self::Chart,
-        }
-    }
-
-    fn previous(self) -> Self {
-        self.next()
-    }
-
-    fn as_target(self) -> FocusTarget {
-        match self {
-            Self::Chart => FocusTarget::Chart,
-            Self::Summary => FocusTarget::Summary,
+            Self::Accounts => Self::Plot,
+            Self::Plot => Self::Accounts,
         }
     }
 }
+
 
 #[derive(Debug, Clone)]
 struct ProfileEntry {
@@ -106,20 +91,21 @@ struct DialogState {
 pub struct App {
     profiles: Vec<ProfileEntry>,
     selected_profile_index: usize,
-    focus: FocusPanel,
-    view_mode: ViewMode,
+    pane_focus: PaneFocus,
+    y_zoom_lower: f64,
     should_quit: bool,
     dialog: Option<DialogState>,
     status_message: Option<String>,
     store: Option<AccountStore>,
     usage_service: Option<UsageService>,
+    cron_status: CronStatus,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AppRenderState<'a> {
     profiles: &'a [ProfileEntry],
     selected_profile_index: usize,
-    focus: FocusPanel,
+    y_zoom_lower: f64,
 }
 
 impl ProfileChartData {
@@ -147,18 +133,19 @@ impl ProfileChartData {
 }
 
 impl App {
-    pub fn load(store: AccountStore, usage_service: UsageService) -> Result<Self> {
+    pub fn load(store: AccountStore, usage_service: UsageService, cron_status: CronStatus) -> Result<Self> {
         let profiles = load_profiles(&store, &usage_service, false, None)?;
         Ok(Self {
             selected_profile_index: initial_selected_index(&profiles),
             profiles,
-            focus: FocusPanel::Chart,
-            view_mode: ViewMode::Accounts,
+            pane_focus: PaneFocus::Accounts,
+            y_zoom_lower: 0.0,
             should_quit: false,
             dialog: None,
             status_message: None,
             store: Some(store),
             usage_service: Some(usage_service),
+            cron_status,
         })
     }
 
@@ -185,27 +172,19 @@ impl App {
         Self {
             profiles,
             selected_profile_index,
-            focus: FocusPanel::Chart,
-            view_mode: ViewMode::Accounts,
+            pane_focus: PaneFocus::Accounts,
+            y_zoom_lower: 0.0,
             should_quit: false,
             dialog: None,
             status_message: None,
             store: None,
             usage_service: None,
+            cron_status: CronStatus::uninstalled(),
         }
-    }
-
-    pub fn view_mode(&self) -> ViewMode {
-        self.view_mode
     }
 
     pub fn selected_profile_label(&self) -> Option<&str> {
         self.selected_profile().map(|profile| profile.profile_name.as_str())
-    }
-
-    pub fn toggle_plot_mode(mut self) -> Self {
-        self.view_mode = self.next_view_mode();
-        self
     }
 
     pub fn select_previous_profile(mut self) -> Self {
@@ -239,28 +218,40 @@ impl App {
 
         match action {
             InputAction::Quit => self.should_quit = true,
-            InputAction::Up => self.step_profile(-1),
-            InputAction::Down => self.step_profile(1),
+            InputAction::Up | InputAction::Down => {
+                let delta = if matches!(action, InputAction::Up) { -1 } else { 1 };
+                self.step_profile(delta);
+            }
             InputAction::Left => {
-                if self.view_mode == ViewMode::Plot {
+                if self.pane_focus == PaneFocus::Plot {
                     self.step_profile(-1);
                 }
             }
             InputAction::Right => {
-                if self.view_mode == ViewMode::Plot {
+                if self.pane_focus == PaneFocus::Plot {
                     self.step_profile(1);
                 }
             }
-            InputAction::TogglePlot => self.view_mode = self.next_view_mode(),
-            InputAction::NextFocus => {
-                if self.view_mode == ViewMode::Plot {
-                    self.focus = self.focus.next();
-                }
+            InputAction::NextFocus | InputAction::PreviousFocus => {
+                self.pane_focus = self.pane_focus.toggle();
             }
-            InputAction::PreviousFocus => {
-                if self.view_mode == ViewMode::Plot {
-                    self.focus = self.focus.previous();
-                }
+            InputAction::ZoomIn => {
+                self.y_zoom_lower = (self.y_zoom_lower + 5.0).min(95.0);
+            }
+            InputAction::ZoomOut => {
+                self.y_zoom_lower = (self.y_zoom_lower - 5.0).max(0.0);
+            }
+            InputAction::ResetZoom => {
+                self.y_zoom_lower = 0.0;
+            }
+            InputAction::ToggleSolo => {
+                // Placeholder for future solo toggle functionality
+            }
+            InputAction::XWindow(_) => {
+                // Placeholder for window selection functionality
+            }
+            InputAction::FilterEnter => {
+                // Placeholder for filter mode entry
             }
             InputAction::Enter => self.activate_selected_profile()?,
             InputAction::Rename => self.open_rename_dialog(),
@@ -427,83 +418,117 @@ impl App {
         self.selected_profile_index = next as usize;
     }
 
-    fn next_view_mode(&self) -> ViewMode {
-        match self.view_mode {
-            ViewMode::Accounts => ViewMode::Plot,
-            ViewMode::Plot => ViewMode::Accounts,
-        }
+    fn left_pane_width(&self, total_width: u16) -> u16 {
+        // Width needed for profile list items:
+        // "  " highlight_symbol + "▶ {name}{unsaved_tag} {badge}" + 2 border cols
+        let max_list = self
+            .profiles
+            .iter()
+            .map(|profile| {
+                let unsaved_tag = if profile.saved_name.is_none() { " [unsaved]".len() } else { 0 };
+                let badge = format_usage_badge(&profile.usage_view);
+                2 + profile.profile_name.len() + unsaved_tag + 1 + badge.len() + 2
+            })
+            .max()
+            .unwrap_or(20);
+
+        // Width needed for Details panel: measure every detail line for every profile,
+        // so the pane is wide enough regardless of which profile is selected.
+        let max_detail = self
+            .profiles
+            .iter()
+            .flat_map(|profile| {
+                render_account_detail(Some(profile), None, &self.cron_status)
+            })
+            .map(|line| line.width())
+            .max()
+            .unwrap_or(0) + 2; // +2 for "Details" block borders
+
+        let max_content = max_list.max(max_detail) as u16;
+        // Give the chart at least 40 columns; always at least 20 for the left pane.
+        let max_allowed = total_width.saturating_sub(40).max(20);
+        max_content.min(max_allowed)
     }
 
     fn render(&self, frame: &mut Frame) {
-        match self.view_mode {
-            ViewMode::Accounts => self.render_accounts(frame),
-            ViewMode::Plot => self.render_plot(frame),
-        }
+        let area = frame.area();
+        let [body, footer_area] =
+            Layout::vertical([Constraint::Min(0), Constraint::Length(2)]).areas(area);
+
+        let left_width = self.left_pane_width(body.width);
+        let [left_area, right_area] =
+            Layout::horizontal([Constraint::Length(left_width), Constraint::Min(0)]).areas(body);
+
+        self.render_left_pane(frame, left_area);
+
+        let render_state = AppRenderState {
+            profiles: &self.profiles,
+            selected_profile_index: self.selected_profile_index,
+            y_zoom_lower: self.y_zoom_lower,
+        };
+        render::render(frame, right_area, &render_state);
+
+        let active_label = match self.pane_focus {
+            PaneFocus::Accounts => "accounts",
+            PaneFocus::Plot => "plot",
+        };
+        let footer = Paragraph::new(Text::from(vec![
+            Line::from("Enter=switch · n=rename · d=delete · u=refresh · a=all · +/-=zoom · q=quit"),
+            Line::from(format!(
+                "Tab=switch pane [{}] · ↑↓=navigate · ←→=cycle profile (plot)",
+                active_label
+            )),
+        ]))
+        .wrap(Wrap { trim: true });
+        frame.render_widget(footer, footer_area);
 
         if self.dialog.is_some() {
             self.render_dialog(frame);
         }
     }
 
-    fn render_accounts(&self, frame: &mut Frame) {
-        let outer = Block::default().title("codex-auth").borders(Borders::ALL);
-        let inner = outer.inner(frame.area());
-        frame.render_widget(outer, frame.area());
-        if inner.width == 0 || inner.height == 0 {
-            return;
-        }
+    fn render_left_pane(&self, frame: &mut Frame, area: Rect) {
+        // Clamp profile list height to 3..=10 visible rows, plus 2 for borders
+        let list_lines = (self.profiles.len().max(3).min(10) + 2) as u16;
 
-        let [list_area, detail_area, footer_area] = Layout::vertical([
-            Constraint::Min(8),
-            Constraint::Length(9),
-            Constraint::Length(3),
-        ])
-        .areas(inner);
+        let [list_area, detail_area] =
+            Layout::vertical([Constraint::Length(list_lines), Constraint::Min(0)]).areas(area);
 
+        let profiles_title = if self.pane_focus == PaneFocus::Accounts {
+            "Profiles [active]"
+        } else {
+            "Profiles"
+        };
         let items = self
             .profiles
             .iter()
-            .map(|profile| {
-                let prefix = if profile.is_current { "▶" } else { " " };
-                let saved = if profile.saved_name.is_some() {
-                    "saved"
-                } else {
-                    "unsaved"
-                };
+            .enumerate()
+            .map(|(index, profile)| {
+                let color = render::SERIES_COLORS[index % render::SERIES_COLORS.len()];
+                let prefix = if profile.is_current { "▶ " } else { "  " };
+                let unsaved_tag = if profile.saved_name.is_none() { " [unsaved]" } else { "" };
                 let usage = format_usage_badge(&profile.usage_view);
-                ListItem::new(format!("{prefix} {} [{saved}] {usage}", profile.profile_name))
+                let label = format!("{}{}{unsaved_tag}", prefix, profile.profile_name);
+                ListItem::new(Line::from(vec![
+                    Span::styled(label, Style::default().fg(color)),
+                    Span::raw(format!(" {usage}")),
+                ]))
             })
             .collect::<Vec<_>>();
         let mut state = ListState::default();
         state.select((!self.profiles.is_empty()).then_some(self.selected_profile_index));
         let list = List::new(items)
-            .block(Block::default().title("Profiles").borders(Borders::ALL))
+            .block(Block::default().title(profiles_title).borders(Borders::ALL))
             .highlight_style(Style::default().add_modifier(Modifier::BOLD))
             .highlight_symbol("> ");
         frame.render_stateful_widget(list, list_area, &mut state);
 
-        let detail_lines = render_account_detail(self.selected_profile(), self.status_message.as_deref());
+        let detail_lines =
+            render_account_detail(self.selected_profile(), self.status_message.as_deref(), &self.cron_status);
         let details = Paragraph::new(Text::from(detail_lines))
             .block(Block::default().title("Details").borders(Borders::ALL))
             .wrap(Wrap { trim: true });
         frame.render_widget(details, detail_area);
-
-        let footer = Paragraph::new(Text::from(vec![
-            Line::from("Enter=switch/save current · n=rename · d=delete · u=refresh one · a=refresh all"),
-            Line::from("p/b=plot view · q=quit"),
-        ]))
-        .block(Block::default().title("Actions").borders(Borders::ALL))
-        .wrap(Wrap { trim: true });
-        frame.render_widget(footer, footer_area);
-    }
-
-    fn render_plot(&self, frame: &mut Frame) {
-        let render_state = AppRenderState {
-            profiles: &self.profiles,
-            selected_profile_index: self.selected_profile_index,
-            focus: self.focus,
-        };
-        render::render(frame, frame.area(), &render_state);
     }
 
     fn render_dialog(&self, frame: &mut Frame) {
@@ -565,12 +590,14 @@ impl render::RenderState for AppRenderState<'_> {
                 label: profile.profile_name.as_str(),
                 is_current: profile.is_current,
             }),
-            focus: self.focus.as_target(),
         }
     }
 
     fn chart_state(&self) -> ChartState<'_> {
-        build_chart_state(self.profiles, self.selected_profile_index)
+        let mut state = build_chart_state(self.profiles, self.selected_profile_index);
+        state.y_lower = self.y_zoom_lower;
+        state.y_upper = 100.0;
+        state
     }
 }
 
@@ -701,6 +728,7 @@ fn initial_selected_index(profiles: &[ProfileEntry]) -> usize {
 fn render_account_detail(
     profile: Option<&ProfileEntry>,
     status_message: Option<&str>,
+    cron_status: &CronStatus,
 ) -> Vec<Line<'static>> {
     let Some(profile) = profile else {
         return vec![
@@ -709,40 +737,52 @@ fn render_account_detail(
         ];
     };
 
+    let state_label = match (profile.is_current, profile.saved_name.is_some()) {
+        (true, _) => "current",
+        (false, true) => "saved",
+        (false, false) => "unsaved",
+    };
+
     let mut lines = vec![
         Line::from(format!("Profile: {}", profile.profile_name)),
+        Line::from(format!("State:   {}", state_label)),
         Line::from(format!(
-            "State: {}{}",
-            if profile.is_current { "current" } else { "saved" },
-            if profile.saved_name.is_none() { " · unsaved" } else { "" }
-        )),
-        Line::from(format!(
-            "Account: {}",
-            profile.account_id.as_deref().unwrap_or("n/a")
-        )),
-        Line::from(format!(
-            "Usage source: {}{}",
-            match profile.usage_view.source {
-                UsageSource::Api => "api",
-                UsageSource::Cache => "cache",
-                UsageSource::None => "none",
-            },
-            if profile.usage_view.stale { " (stale)" } else { "" }
+            "Updated: {}",
+            format_age(profile.usage_view.fetched_at, profile.usage_view.stale)
         )),
     ];
 
     if let Some(usage) = profile.usage_view.usage.as_ref() {
-        lines.push(Line::from(format!(
-            "Email / plan: {} / {}",
-            usage.email.as_deref().unwrap_or("unknown"),
-            usage.plan_type.as_deref().unwrap_or("unknown")
-        )));
-        lines.push(Line::from(format!(
-            "Weekly / 5h: {} / {}",
-            summarize_window(pick_weekly_window(usage)),
-            summarize_window(pick_five_hour_window(usage))
-        )));
+        if let Some(email) = usage.email.as_deref() {
+            lines.push(Line::from(format!("Email:   {}", email)));
+        }
+        if let Some(plan) = usage.plan_type.as_deref() {
+            lines.push(Line::from(format!("Plan:    {}", plan)));
+        }
+        if let Some(w) = pick_weekly_window(usage) {
+            lines.push(Line::from(format!(
+                "Weekly:  {:.0}% used, reset in {}s",
+                w.used_percent, w.reset_after_seconds
+            )));
+        }
+        if let Some(w) = pick_five_hour_window(usage) {
+            lines.push(Line::from(format!(
+                "5h:      {:.0}% used, reset in {}s",
+                w.used_percent, w.reset_after_seconds
+            )));
+        }
     }
+
+    lines.push(Line::from(""));
+    let cron_line = if cron_status.installed {
+        let age = cron_status.last_run
+            .map(|ts| format_age(Some(ts), false))
+            .unwrap_or_else(|| "never".to_string());
+        format!("Cron: installed · {}", age)
+    } else {
+        "Cron: not installed".to_string()
+    };
+    lines.push(Line::from(cron_line));
 
     if let Some(message) = status_message {
         lines.push(Line::from(""));
@@ -752,14 +792,29 @@ fn render_account_detail(
     lines
 }
 
-fn summarize_window(window: Option<&UsageWindow>) -> String {
-    let Some(window) = window else {
-        return "n/a".to_string();
+fn format_age(fetched_at: Option<i64>, stale: bool) -> String {
+    let Some(ts) = fetched_at else {
+        return "never".to_string();
     };
-    format!(
-        "{:.0}% used, reset in {}s",
-        window.used_percent, window.reset_after_seconds
-    )
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let age_secs = now.saturating_sub(ts).max(0) as u64;
+    let age_str = if age_secs < 60 {
+        format!("{}s ago", age_secs)
+    } else if age_secs < 3600 {
+        format!("{}m ago", age_secs / 60)
+    } else if age_secs < 86400 {
+        format!("{}h ago", age_secs / 3600)
+    } else {
+        format!("{}d ago", age_secs / 86400)
+    };
+    if stale {
+        format!("stale {}", age_str)
+    } else {
+        age_str
+    }
 }
 
 fn format_usage_badge(view: &UsageReadResult) -> String {
@@ -887,6 +942,14 @@ fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: u
                 is_current: profile.is_current,
             },
             points: profile.chart_data.seven_day_points.clone(),
+            five_hour_subframe: FiveHourSubframeState {
+                available: profile.chart_data.five_hour_subframe.available,
+                start_x: profile.chart_data.five_hour_subframe.start_x,
+                end_x: profile.chart_data.five_hour_subframe.end_x,
+                lower_y: profile.chart_data.five_hour_subframe.lower_y,
+                upper_y: profile.chart_data.five_hour_subframe.upper_y,
+                reason: profile.chart_data.five_hour_subframe.reason.as_deref(),
+            },
         })
         .collect::<Vec<_>>();
 
@@ -897,6 +960,11 @@ fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: u
         five_hour_band: selected_band,
         five_hour_subframe: selected_subframe,
         total_points,
+        y_lower: 0.0,
+        y_upper: 100.0,
+        x_lower: 0.0,
+        solo: false,
+        cursor_x: None,
     };
 
     if chart_state.series.is_empty() && chart_state.seven_day_points.is_empty() {
@@ -922,12 +990,13 @@ fn build_profile_chart_data(
     let history = usage_service.profile_history(Some(account_id))?;
     let weekly_window = pick_weekly_window(usage);
     let five_hour_window = pick_five_hour_window(usage);
-    let seven_day_points = weekly_window
-        .and_then(|window| find_matching_window(&history.weekly_windows, window))
+    let weekly_history = weekly_window
+        .and_then(|window| find_matching_window(&history.weekly_windows, window));
+    let seven_day_points = weekly_history
         .map(project_history_points)
         .unwrap_or_default();
     let five_hour_band = build_five_hour_band(weekly_window, five_hour_window);
-    let five_hour_subframe = build_five_hour_subframe(weekly_window, five_hour_window);
+    let five_hour_subframe = build_five_hour_subframe(weekly_window, five_hour_window, weekly_history);
 
     Ok(ProfileChartData {
         seven_day_points,
@@ -964,6 +1033,7 @@ fn build_five_hour_band(
 fn build_five_hour_subframe(
     weekly_window: Option<&UsageWindow>,
     five_hour_window: Option<&UsageWindow>,
+    weekly_history: Option<&UsageWindowHistory>,
 ) -> OwnedFiveHourSubframeState {
     let Some(weekly_window) = weekly_window else {
         return OwnedFiveHourSubframeState {
@@ -990,14 +1060,35 @@ fn build_five_hour_subframe(
     let five_hour_start = five_hour_window.reset_at - five_hour_window.limit_window_seconds;
     let start_x = (((five_hour_start - weekly_start) as f64) / weekly_duration * 7.0).clamp(0.0, 7.0);
     let end_x = (((five_hour_window.reset_at - weekly_start) as f64) / weekly_duration * 7.0).clamp(0.0, 7.0);
-    let used = five_hour_window.used_percent.clamp(0.0, 100.0);
+
+    let current_7d = weekly_window.used_percent.clamp(0.0, 100.0);
+    let five_hour_used = five_hour_window.used_percent.clamp(0.0, 100.0);
+
+    // lower_y: first 7d observation at or after the 5h window start timestamp
+    let lower_y = weekly_history
+        .and_then(|hist| {
+            hist.observations
+                .iter()
+                .find(|obs| obs.observed_at >= five_hour_start)
+                .map(|obs| obs.used_percent.clamp(0.0, 100.0))
+        })
+        .unwrap_or_else(|| (current_7d - five_hour_used).max(0.0));
+
+    // upper_y: project 5h usage to 100% using the observed 7d growth rate
+    // Formula: lower_y + (7d_delta / 5h_used%) * 100
+    let seven_day_delta = (current_7d - lower_y).max(0.0);
+    let upper_y = if five_hour_used > 0.0 {
+        (lower_y + (seven_day_delta / five_hour_used) * 100.0).clamp(lower_y, 100.0)
+    } else {
+        lower_y
+    };
 
     OwnedFiveHourSubframeState {
         available: true,
         start_x: Some(start_x),
         end_x: Some(end_x.max(start_x)),
-        lower_y: Some((used - 10.0).max(0.0)),
-        upper_y: Some((used + 10.0).min(100.0)),
+        lower_y: Some(lower_y),
+        upper_y: Some(upper_y),
         reason: None,
     }
 }
@@ -1084,13 +1175,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn app_starts_on_current_profile_and_toggles_plot_mode() {
-        let app = App::from_profile_names(vec!["Alpha".to_string(), "Beta".to_string()], 1);
-        assert_eq!(app.view_mode(), ViewMode::Accounts);
+    fn app_starts_on_current_profile_and_toggles_pane_focus() {
+        let mut app = App::from_profile_names(vec!["Alpha".to_string(), "Beta".to_string()], 1);
+        assert_eq!(app.pane_focus, PaneFocus::Accounts);
         assert_eq!(app.selected_profile_label(), Some("Beta"));
 
-        let app = app.toggle_plot_mode();
-        assert_eq!(app.view_mode(), ViewMode::Plot);
+        app.pane_focus = app.pane_focus.toggle();
+        assert_eq!(app.pane_focus, PaneFocus::Plot);
         assert_eq!(app.selected_profile_label(), Some("Beta"));
     }
 
@@ -1125,6 +1216,8 @@ mod tests {
 
     #[test]
     fn five_hour_subframe_is_bounded_inside_weekly_chart_space() {
+        // weekly: 0..604800, currently at 60%
+        // five_hour: 522000..540000 (start = reset_at - limit = 540000 - 18000), currently at 30%
         let weekly = UsageWindow {
             used_percent: 60.0,
             limit_window_seconds: 604_800,
@@ -1138,11 +1231,30 @@ mod tests {
             reset_at: 540_000,
         };
 
-        let subframe = build_five_hour_subframe(Some(&weekly), Some(&five_hour));
+        // With history: first observation at or after five_hour_start (522000) is at 522000, used=45%
+        // lower_y = 45.0 (data lookup)
+        // 7d_delta = 60 - 45 = 15, 5h_used = 30
+        // upper_y = 45 + (15/30)*100 = 45 + 50 = 95
+        let history = crate::usage::UsageWindowHistory {
+            limit_window_seconds: 604_800,
+            start_at: 0,
+            end_at: 604_800,
+            observations: vec![
+                crate::usage::UsageObservation { observed_at: 300_000, used_percent: 30.0 },
+                crate::usage::UsageObservation { observed_at: 522_000, used_percent: 45.0 },
+                crate::usage::UsageObservation { observed_at: 604_800, used_percent: 60.0 },
+            ],
+        };
+        let subframe = build_five_hour_subframe(Some(&weekly), Some(&five_hour), Some(&history));
         assert!(subframe.available);
         assert!(subframe.start_x.unwrap() < subframe.end_x.unwrap());
         assert!(subframe.end_x.unwrap() <= 7.0);
-        assert_eq!(subframe.lower_y, Some(20.0));
-        assert_eq!(subframe.upper_y, Some(40.0));
+        assert_eq!(subframe.lower_y, Some(45.0));
+        assert_eq!(subframe.upper_y, Some(95.0));
+
+        // Without history: fallback to weekly_used - 5h_used = 30, upper = 30 + (30/30)*100 = 130 → 100
+        let subframe_no_hist = build_five_hour_subframe(Some(&weekly), Some(&five_hour), None);
+        assert_eq!(subframe_no_hist.lower_y, Some(30.0));
+        assert_eq!(subframe_no_hist.upper_y, Some(100.0));
     }
 }
