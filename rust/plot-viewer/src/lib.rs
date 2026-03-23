@@ -1,7 +1,9 @@
 pub mod app;
+pub mod app_data;
 pub mod claude;
 pub mod cron;
 pub mod input;
+pub mod loader;
 pub mod model;
 pub mod paths;
 pub mod render;

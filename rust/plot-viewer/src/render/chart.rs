@@ -107,7 +107,7 @@ fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_stat
                 style = style.add_modifier(Modifier::DIM);
             }
             Dataset::default()
-                .name(series.profile.label)
+                .name("")
                 .marker(Marker::Dot)
                 .graph_type(GraphType::Line)
                 .style(style)
@@ -136,7 +136,13 @@ fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_stat
     }
 
     let cursor_points: Option<Vec<(f64, f64)>> = chart_state.cursor_x.map(|cx| {
-        vec![(cx, y_bounds[0]), (cx, y_bounds[1])]
+        let steps = 40usize;
+        (0..=steps)
+            .map(|i| {
+                let y = y_bounds[0] + (y_bounds[1] - y_bounds[0]) * (i as f64 / steps as f64);
+                (cx, y)
+            })
+            .collect()
     });
     if let Some(ref pts) = cursor_points {
         datasets.push(
@@ -144,7 +150,7 @@ fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_stat
                 .name("")
                 .marker(Marker::Braille)
                 .graph_type(GraphType::Line)
-                .style(Style::default().fg(Color::DarkGray))
+                .style(Style::default().fg(Color::Gray))
                 .data(pts),
         );
     }
@@ -427,4 +433,5 @@ mod tests {
         assert!(joined.contains("Band drift: 7d ? | 5h ?"));
         assert!(!joined.contains("pending Canvas plot"));
     }
+
 }

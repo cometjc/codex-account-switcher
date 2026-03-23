@@ -9,6 +9,7 @@ pub struct AppPaths {
     limit_cache_path: PathBuf,
     usage_history_path: PathBuf,
     ui_state_path: PathBuf,
+    cron_status_path: PathBuf,
 }
 
 impl AppPaths {
@@ -25,6 +26,7 @@ impl AppPaths {
             limit_cache_path: codex_dir.join("codex-auth-limit-cache.json"),
             usage_history_path: codex_dir.join("codex-auth-usage-history.json"),
             ui_state_path: codex_dir.join("codex-auth-ui-state.json"),
+            cron_status_path: codex_dir.join("codex-auth-cron-last-run"),
             codex_dir,
         }
     }
@@ -55,6 +57,10 @@ impl AppPaths {
 
     pub fn ui_state_path(&self) -> &Path {
         &self.ui_state_path
+    }
+
+    pub fn cron_status_path(&self) -> &Path {
+        &self.cron_status_path
     }
 }
 

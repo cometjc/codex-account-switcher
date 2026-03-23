@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use codex_auth::app::{App, ViewMode};
+use codex_auth::app::App;
 use codex_auth::paths::AppPaths;
 use codex_auth::store::{AccountStore, StorePlatform};
 use codex_auth::usage::{UsageCache, UsageReadResult, UsageResponse, UsageService};
@@ -98,19 +98,10 @@ fn usage_service_returns_stale_cache_when_fetch_fails() {
 }
 
 #[test]
-fn app_state_toggles_between_accounts_and_plot_modes() {
+fn app_state_tracks_selected_profile_and_navigates() {
     let app = App::from_profile_names(vec!["Alpha".to_string(), "Beta".to_string()], 1);
-    assert_eq!(app.view_mode(), ViewMode::Accounts);
-    assert_eq!(app.selected_profile_label(), Some("Beta"));
-
-    let app = app.toggle_plot_mode();
-    assert_eq!(app.view_mode(), ViewMode::Plot);
     assert_eq!(app.selected_profile_label(), Some("Beta"));
 
     let app = app.select_previous_profile();
-    assert_eq!(app.selected_profile_label(), Some("Alpha"));
-
-    let app = app.toggle_plot_mode();
-    assert_eq!(app.view_mode(), ViewMode::Accounts);
     assert_eq!(app.selected_profile_label(), Some("Alpha"));
 }

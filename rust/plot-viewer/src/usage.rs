@@ -382,6 +382,44 @@ fn default_now_seconds() -> i64 {
         .as_secs() as i64
 }
 
+pub fn pick_five_hour_window(usage: &UsageResponse) -> Option<&UsageWindow> {
+    let rate_limit = usage.rate_limit.as_ref()?;
+    if rate_limit
+        .primary_window
+        .as_ref()
+        .is_some_and(|window| window.limit_window_seconds == 18_000)
+    {
+        return rate_limit.primary_window.as_ref();
+    }
+    if rate_limit
+        .secondary_window
+        .as_ref()
+        .is_some_and(|window| window.limit_window_seconds == 18_000)
+    {
+        return rate_limit.secondary_window.as_ref();
+    }
+    None
+}
+
+pub fn pick_weekly_window(usage: &UsageResponse) -> Option<&UsageWindow> {
+    let rate_limit = usage.rate_limit.as_ref()?;
+    if rate_limit
+        .secondary_window
+        .as_ref()
+        .is_some_and(|window| window.limit_window_seconds == 604_800)
+    {
+        return rate_limit.secondary_window.as_ref();
+    }
+    if rate_limit
+        .primary_window
+        .as_ref()
+        .is_some_and(|window| window.limit_window_seconds == 604_800)
+    {
+        return rate_limit.primary_window.as_ref();
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;

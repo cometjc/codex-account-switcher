@@ -4,7 +4,7 @@ use codex_auth::cron;
 use codex_auth::paths::AppPaths;
 use codex_auth::store::{AccountStore, StorePlatform};
 use codex_auth::usage::UsageService;
-use codex_auth::claude::{ClaudePaths, ClaudeStore};
+use codex_auth::claude::{ClaudePaths, ClaudeStore, ClaudeCredentials};
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -82,6 +82,37 @@ fn run_refresh_all() -> Result<()> {
             .and_then(|v| v.as_str());
         if let Ok(result) = usage.read_usage(account_id, access_token, true, false) {
             let _ = usage.record_usage_snapshot(account_id, result.usage.as_ref());
+        }
+    }
+
+    // Refresh Claude profiles
+    let claude_paths = ClaudePaths::detect();
+    if claude_paths.credentials_path().exists() {
+        let cl_store = ClaudeStore::new(claude_paths.clone());
+        let cl_usage = UsageService::new(
+            claude_paths.limit_cache_path().to_path_buf(),
+            claude_paths.usage_history_path().to_path_buf(),
+            300,
+        ).with_fetcher(codex_auth::claude::fetch_claude_usage);
+
+        if let Ok(saved) = cl_store.list_saved_profiles() {
+            for profile in saved {
+                if let Ok(creds) = serde_json::from_value::<ClaudeCredentials>(profile.snapshot) {
+                    let composite_id = format!("{}|{}", creds.account_id(), creds.subscription_type());
+                    let _ = cl_usage.read_usage(Some(composite_id.as_str()), Some(creds.access_token()), true, false);
+                    if let Ok(result) = cl_usage.read_usage(Some(composite_id.as_str()), Some(creds.access_token()), false, false) {
+                        let _ = cl_usage.record_usage_snapshot(Some(composite_id.as_str()), result.usage.as_ref());
+                    }
+                }
+            }
+        }
+
+        if let Ok(creds) = cl_store.get_current_credentials() {
+            let composite_id = format!("{}|{}", creds.account_id(), creds.subscription_type());
+            let _ = cl_usage.read_usage(Some(composite_id.as_str()), Some(creds.access_token()), true, false);
+            if let Ok(result) = cl_usage.read_usage(Some(composite_id.as_str()), Some(creds.access_token()), false, false) {
+                let _ = cl_usage.record_usage_snapshot(Some(composite_id.as_str()), result.usage.as_ref());
+            }
         }
     }
 
