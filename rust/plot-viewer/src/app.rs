@@ -334,14 +334,20 @@ impl App {
             InputAction::Backspace => {
                 if let Some(f) = self.filter_input.as_mut() {
                     f.pop();
-                    if f.is_empty() {
-                        self.filter_input = None;
-                    }
+                    // Keep filter mode even when empty; Esc/Enter/Cancel exits
+                }
+                let indices = self.filtered_profile_indices();
+                if !indices.is_empty() && !indices.contains(&self.selected_profile_index) {
+                    self.selected_profile_index = indices[0];
                 }
             }
             InputAction::Character(ch) => {
                 if let Some(f) = self.filter_input.as_mut() {
                     f.push(ch);
+                }
+                let indices = self.filtered_profile_indices();
+                if !indices.is_empty() && !indices.contains(&self.selected_profile_index) {
+                    self.selected_profile_index = indices[0];
                 }
             }
             InputAction::Up => self.step_profile_filtered(-1),
