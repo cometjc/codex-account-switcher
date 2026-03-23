@@ -62,6 +62,21 @@ codex-auth
 - The built-in plot view renders a 7-day usage line and a 5-hour band from the same Rust-side state used by the account list.
 - If no separate 5-hour window exists for an account, the plot stays truthful and marks the band as unavailable.
 
+### Claude live verification
+
+If you want to verify Claude live refresh and chart generation on a machine that can reach the Claude usage API, run:
+
+```sh
+./scripts/verify-claude-live.sh
+```
+
+The script will:
+
+- run `codex-auth --refresh-all`
+- assert that Claude cache/history files were created or updated under `~/.claude/`
+- summarize whether weekly / 5h history entries exist
+- print the final manual TUI smoke-check steps
+
 Notes:
 
 - Works on macOS/Linux with symlink switching and on Windows with file copy switching.
