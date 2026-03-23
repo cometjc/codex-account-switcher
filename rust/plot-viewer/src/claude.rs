@@ -394,11 +394,16 @@ pub fn fetch_claude_usage(account_id: &str, access_token: &str) -> anyhow::Resul
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static TEST_DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
     fn temp_dir_pair() -> (PathBuf, PathBuf) {
+        let unique = TEST_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
         let base = std::env::temp_dir().join(format!(
-            "claude-store-test-{}",
-            std::process::id()
+            "claude-store-test-{}-{}",
+            std::process::id(),
+            unique
         ));
         let _ = fs::remove_dir_all(&base);
         let claude_dir = base.join("dot-claude");
