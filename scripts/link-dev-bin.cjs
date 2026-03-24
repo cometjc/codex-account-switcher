@@ -5,9 +5,9 @@ const path = require('node:path');
 const {execFileSync} = require('node:child_process');
 
 const repoRoot = path.resolve(__dirname, '..');
-const sourcePath = path.join(repoRoot, 'bin', 'codex-auth.cjs');
-const targetDir = process.env.CODEX_AUTH_DEV_BIN_DIR || getGlobalBinDir();
-const targetPath = path.join(targetDir, 'codex-auth');
+const sourcePath = path.join(repoRoot, 'bin', 'agent-switch.cjs');
+const targetDir = process.env.AGENT_SWITCH_DEV_BIN_DIR || process.env.CODEX_AUTH_DEV_BIN_DIR || getGlobalBinDir();
+const targetPath = path.join(targetDir, 'agent-switch');
 
 fs.mkdirSync(targetDir, {recursive: true});
 
@@ -17,7 +17,7 @@ try {
     const linkedPath = fs.readlinkSync(targetPath);
     const resolvedLinkedPath = path.resolve(targetDir, linkedPath);
     if (resolvedLinkedPath === sourcePath) {
-      console.log(`codex-auth is already linked at ${targetPath}`);
+      console.log(`agent-switch is already linked at ${targetPath}`);
       process.exit(0);
     }
   }
@@ -29,7 +29,7 @@ try {
 
 fs.symlinkSync(sourcePath, targetPath);
 
-console.log(`Linked codex-auth -> ${sourcePath}`);
+console.log(`Linked agent-switch -> ${sourcePath}`);
 console.log(`Target: ${targetPath}`);
 
 function getGlobalBinDir() {

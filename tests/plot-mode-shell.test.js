@@ -12,19 +12,18 @@ test('plot mode is rendered from Rust app state, not Node shell wiring', () => {
   const renderMod = readText('rust/plot-viewer/src/render/mod.rs');
   const chartRs = readText('rust/plot-viewer/src/render/chart.rs');
 
-  assert.match(appRs, /pub enum ViewMode \{/);
-  assert.match(appRs, /ViewMode::Plot/);
-  assert.match(appRs, /render::render\(frame, frame\.area\(\), &render_state\);/);
+  assert.match(appRs, /enum PaneFocus \{/);
+  assert.match(appRs, /PaneFocus::Plot/);
+  assert.match(appRs, /render::render\(frame, right_area, &render_state\);/);
 
   assert.match(renderMod, /pub mod chart;/);
-  assert.match(renderMod, /pub mod panels;/);
-  assert.match(renderMod, /title\("codex-auth plot"\)/);
-  assert.match(renderMod, /Selected: .*Current: .*Visible profiles:/);
-  assert.match(renderMod, /Tab switches panel focus/);
+  assert.match(renderMod, /Rust agent-switch plot view/);
+  assert.match(appRs, /cursor_x: None/);
+  assert.match(appRs, /x_window_days: 7/);
 
-  assert.match(chartRs, /usage plot overlays/);
-  assert.match(chartRs, /Profiles: /);
-  assert.match(chartRs, /Legend: /);
+  assert.match(chartRs, /usage chart \(align to 7d window\)/);
+  assert.match(chartRs, /Window: \{\} · \+\/-=zoom · r=reset · 1\/3\/7=window/);
+  assert.match(chartRs, /Band drift: 7d/);
   assert.match(chartRs, /5h frame: /);
   assert.match(chartRs, /5h band: /);
 });

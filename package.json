@@ -1,13 +1,13 @@
 {
-  "name": "codex-auth",
+  "name": "agent-switch",
   "version": "0.1.1",
-  "description": "A command-line tool that lets you manage and switch between multiple Codex accounts instantly, no more constant logins and logouts.",
+  "description": "A command-line tool that lets you manage and switch between multiple agent accounts instantly, no more constant logins and logouts.",
   "license": "MIT",
   "bin": {
-    "codex-auth": "bin/codex-auth.cjs"
+    "agent-switch": "bin/agent-switch.cjs"
   },
   "scripts": {
-    "build": "cargo build --manifest-path rust/plot-viewer/Cargo.toml --bin codex-auth",
+    "build": "cargo build --manifest-path rust/plot-viewer/Cargo.toml --bin agent-switch",
     "link:dev": "node scripts/link-dev-bin.cjs",
     "unlink:dev": "node scripts/unlink-dev-bin.cjs",
     "nlsdd:scoreboard:refresh": "node NLSDD/scripts/nlsdd-refresh-scoreboard.cjs",

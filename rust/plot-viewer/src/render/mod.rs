@@ -14,7 +14,7 @@ pub const SERIES_COLORS: [Color; 8] = [
     Color::White,
 ];
 
-/// Shared render inputs for the Rust codex-auth plot view.
+/// Shared render inputs for the Rust agent-switch plot view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RenderContext<'a, State> {
     pub state: &'a State,
@@ -86,12 +86,15 @@ pub struct ChartSeries<'a> {
     pub profile: RenderProfile<'a>,
     pub style: ChartSeriesStyle,
     pub points: Vec<ChartPoint>,
+    pub last_seven_day_percent: Option<f64>,
+    pub five_hour_used_percent: Option<f64>,
     pub five_hour_subframe: FiveHourSubframeState<'a>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FiveHourBandState<'a> {
     pub available: bool,
+    pub used_percent: Option<f64>,
     pub lower_y: Option<f64>,
     pub upper_y: Option<f64>,
     pub delta_seven_day_percent: Option<f64>,
@@ -135,7 +138,7 @@ pub trait RenderState {
     }
 }
 
-/// Entry point for the codex-auth plot layout boundary.
+/// Entry point for the agent-switch plot layout boundary.
 pub fn render<State: RenderState>(frame: &mut Frame, area: Rect, state: &State) {
     let context = RenderContext::new(state, area);
     if area.width == 0 || area.height == 0 {

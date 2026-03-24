@@ -219,19 +219,24 @@ impl UsageService {
                     stale: false,
                 })
             }
-            Err(_) => Ok(cached
-                .map(|record| UsageReadResult {
-                    usage: Some(record.usage),
-                    source: UsageSource::Cache,
-                    fetched_at: Some(record.fetched_at),
-                    stale: true,
-                })
-                .unwrap_or(UsageReadResult {
-                    usage: None,
-                    source: UsageSource::None,
-                    fetched_at: None,
-                    stale: false,
-                })),
+            Err(error) => {
+                if force_refresh {
+                    return Err(error);
+                }
+                Ok(cached
+                    .map(|record| UsageReadResult {
+                        usage: Some(record.usage),
+                        source: UsageSource::Cache,
+                        fetched_at: Some(record.fetched_at),
+                        stale: true,
+                    })
+                    .unwrap_or(UsageReadResult {
+                        usage: None,
+                        source: UsageSource::None,
+                        fetched_at: None,
+                        stale: false,
+                    }))
+            }
         }
     }
 
@@ -367,7 +372,7 @@ fn fetch_usage_from_api(account_id: &str, access_token: &str) -> Result<UsageRes
         .get("https://chatgpt.com/backend-api/wham/usage")
         .bearer_auth(access_token)
         .header("ChatGPT-Account-Id", account_id)
-        .header("User-Agent", "codex-auth")
+        .header("User-Agent", "agent-switch")
         .send()
         .context("send usage request")?
         .error_for_status()
@@ -428,7 +433,7 @@ mod tests {
 
     fn temp_file(name: &str) -> PathBuf {
         let base = std::env::temp_dir().join(format!(
-            "codex-auth-usage-tests-{}-{}",
+            "agent-switch-usage-tests-{}-{}",
             std::process::id(),
             name
         ));
@@ -471,6 +476,18 @@ mod tests {
         assert_eq!(history.weekly_windows[0].observations[0].observed_at, 500);
         assert_eq!(history.weekly_windows[0].observations[0].used_percent, 41.0);
         assert_eq!(history.five_hour_windows[0].start_at, 0);
+    }
+
+    #[test]
+    fn force_refresh_without_cache_surfaces_fetch_error() {
+        let cache_path = temp_file("force-refresh-cache.json");
+        let history_path = temp_file("force-refresh-history.json");
+        let service = UsageService::new(cache_path, history_path, 300)
+            .with_fetcher(|_, _| Err(anyhow::anyhow!("fetch failed")));
+
+        let result = service.read_usage(Some("acct-alpha"), Some("token"), true, false);
+
+        assert!(result.is_err(), "force refresh should surface fetch failures");
     }
 
     #[test]

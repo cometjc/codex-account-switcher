@@ -11,15 +11,16 @@ function readText(relativePath) {
   return fs.readFileSync(repoPath(relativePath), 'utf8');
 }
 
-test('Rust main entrypoint stays wired to the unified codex-auth app', () => {
+test('Rust main entrypoint stays wired to the unified agent-switch app', () => {
   const mainRs = readText('rust/plot-viewer/src/main.rs');
   const libRs = readText('rust/plot-viewer/src/lib.rs');
 
-  assert.match(mainRs, /^use codex_auth::app::App;$/m);
-  assert.match(mainRs, /^use codex_auth::paths::AppPaths;$/m);
-  assert.match(mainRs, /^use codex_auth::store::\{AccountStore, StorePlatform\};$/m);
-  assert.match(mainRs, /^use codex_auth::usage::UsageService;$/m);
-  assert.match(mainRs, /let mut app = App::load\(store, usage\)\?;/);
+  assert.match(mainRs, /^use agent_switch::app::App;$/m);
+  assert.match(mainRs, /^use agent_switch::paths::AppPaths;$/m);
+  assert.match(mainRs, /^use agent_switch::store::\{AccountStore, StorePlatform\};$/m);
+  assert.match(mainRs, /^use agent_switch::usage::UsageService;$/m);
+  assert.match(mainRs, /^use agent_switch::claude::\{ClaudePaths, ClaudeStore, ClaudeCredentials\};$/m);
+  assert.match(mainRs, /let mut app = App::load\(store, usage, cron_status, claude_store, claude_usage_service\)\?;/);
   assert.match(mainRs, /app\.run\(\)/);
 
   assert.match(libRs, /^pub mod app;$/m);
@@ -30,19 +31,19 @@ test('Rust main entrypoint stays wired to the unified codex-auth app', () => {
 
 test('package bin points at the Rust thin shim', () => {
   const packageJson = require(repoPath('package.json'));
-  const shimPath = repoPath('bin/codex-auth.cjs');
+  const shimPath = repoPath('bin/agent-switch.cjs');
 
-  assert.equal(packageJson.bin['codex-auth'], 'bin/codex-auth.cjs');
+  assert.equal(packageJson.bin['agent-switch'], 'bin/agent-switch.cjs');
   assert.equal(
     packageJson.scripts.build,
-    'cargo build --manifest-path rust/plot-viewer/Cargo.toml --bin codex-auth',
+    'cargo build --manifest-path rust/plot-viewer/Cargo.toml --bin agent-switch',
   );
   assert.ok(fs.existsSync(shimPath), 'expected Rust thin shim to exist');
 
   const shimSource = fs.readFileSync(shimPath, 'utf8');
   assert.match(shimSource, /run\(cargo, \['run'/);
   assert.match(shimSource, /Cargo\.toml/);
-  assert.match(shimSource, /CODEX_AUTH_BIN/);
+  assert.match(shimSource, /AGENT_SWITCH_BIN/);
 });
 
 test('dev link scripts point at the Rust thin shim workflow', () => {
@@ -52,9 +53,9 @@ test('dev link scripts point at the Rust thin shim workflow', () => {
 
   assert.equal(packageJson.scripts['link:dev'], 'node scripts/link-dev-bin.cjs');
   assert.equal(packageJson.scripts['unlink:dev'], 'node scripts/unlink-dev-bin.cjs');
-  assert.match(linkScript, /codex-auth\.cjs/);
-  assert.match(linkScript, /const targetPath = path\.join\(targetDir, 'codex-auth'\);/);
-  assert.match(unlinkScript, /codex-auth\.cjs/);
+  assert.match(linkScript, /agent-switch\.cjs/);
+  assert.match(linkScript, /const targetPath = path\.join\(targetDir, 'agent-switch'\);/);
+  assert.match(unlinkScript, /agent-switch\.cjs/);
   assert.match(unlinkScript, /Refusing to remove symlink not owned by this repo/);
 });
 
@@ -65,5 +66,5 @@ test('legacy Node product entrypoints are gone', () => {
   assert.equal(packageJson.oclif, undefined);
   assert.equal(fs.existsSync(repoPath('src/index.ts')), false);
   assert.equal(fs.existsSync(repoPath('src/commands')), false);
-  assert.equal(fs.existsSync(repoPath('bin/codex-auth-dev.cjs')), false);
+  assert.equal(fs.existsSync(repoPath('bin/agent-switch-dev.cjs')), false);
 });

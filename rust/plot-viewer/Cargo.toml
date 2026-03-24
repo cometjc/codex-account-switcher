@@ -1,9 +1,9 @@
 [package]
-name = "codex-auth"
+name = "agent-switch"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Rust TUI for Codex auth profile management and usage plots"
+description = "Rust TUI for agent profile management and usage plots"
 
 [dependencies]
 anyhow = "1"

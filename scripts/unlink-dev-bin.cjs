@@ -5,9 +5,9 @@ const path = require('node:path');
 const {execFileSync} = require('node:child_process');
 
 const repoRoot = path.resolve(__dirname, '..');
-const sourcePath = path.join(repoRoot, 'bin', 'codex-auth.cjs');
-const targetDir = process.env.CODEX_AUTH_DEV_BIN_DIR || getGlobalBinDir();
-const targetPath = path.join(targetDir, 'codex-auth');
+const sourcePath = path.join(repoRoot, 'bin', 'agent-switch.cjs');
+const targetDir = process.env.AGENT_SWITCH_DEV_BIN_DIR || process.env.CODEX_AUTH_DEV_BIN_DIR || getGlobalBinDir();
+const targetPath = path.join(targetDir, 'agent-switch');
 
 try {
   const existing = fs.lstatSync(targetPath);

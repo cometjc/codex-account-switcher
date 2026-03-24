@@ -34,6 +34,7 @@ impl ProfileChartData {
             seven_day_points: Vec::new(),
             five_hour_band: OwnedFiveHourBandState {
                 available: false,
+                used_percent: None,
                 lower_y: None,
                 upper_y: None,
                 delta_seven_day_percent: None,
@@ -55,6 +56,7 @@ impl ProfileChartData {
 #[derive(Debug, Clone, PartialEq)]
 pub struct OwnedFiveHourBandState {
     pub available: bool,
+    pub used_percent: Option<f64>,
     pub lower_y: Option<f64>,
     pub upper_y: Option<f64>,
     pub delta_seven_day_percent: Option<f64>,

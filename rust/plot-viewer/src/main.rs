@@ -1,10 +1,10 @@
-use anyhow::Result;
-use codex_auth::app::App;
-use codex_auth::cron;
-use codex_auth::paths::AppPaths;
-use codex_auth::store::{AccountStore, StorePlatform};
-use codex_auth::usage::UsageService;
-use codex_auth::claude::{ClaudePaths, ClaudeStore, ClaudeCredentials};
+use anyhow::{Result, bail};
+use agent_switch::app::App;
+use agent_switch::cron;
+use agent_switch::paths::AppPaths;
+use agent_switch::store::{AccountStore, StorePlatform};
+use agent_switch::usage::UsageService;
+use agent_switch::claude::{ClaudePaths, ClaudeStore, ClaudeCredentials};
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -14,7 +14,7 @@ fn main() -> Result<()> {
 
     let paths = AppPaths::detect();
     let binary_path = std::env::current_exe()
-        .unwrap_or_else(|_| std::path::PathBuf::from("codex-auth"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("agent-switch"))
         .to_string_lossy()
         .into_owned();
     let _ = cron::ensure_installed(&binary_path);
@@ -35,7 +35,7 @@ fn main() -> Result<()> {
             claude_paths.limit_cache_path().to_path_buf(),
             claude_paths.usage_history_path().to_path_buf(),
             300,
-        ).with_fetcher(codex_auth::claude::fetch_claude_usage);
+        ).with_fetcher(agent_switch::claude::fetch_claude_usage);
         (Some(cl_store), Some(cl_usage))
     } else {
         (None, None)
@@ -54,6 +54,8 @@ fn run_refresh_all() -> Result<()> {
         paths.usage_history_path().to_path_buf(),
         300,
     );
+    let mut codex_errors = Vec::new();
+    let mut claude_errors = Vec::new();
 
     // Force-refresh usage for every saved profile
     let saved = store.list_saved_profiles()?;
@@ -66,9 +68,8 @@ fn run_refresh_all() -> Result<()> {
             .get("tokens")
             .and_then(|t| t.get("access_token"))
             .and_then(|v| v.as_str());
-        let _ = usage.read_usage(account_id, access_token, true, false);
-        if let Ok(result) = usage.read_usage(account_id, access_token, false, false) {
-            let _ = usage.record_usage_snapshot(account_id, result.usage.as_ref());
+        if let Err(error) = refresh_usage_snapshot(&usage, account_id, access_token) {
+            codex_errors.push(format!("saved {}: {error:#}", profile.name));
         }
     }
 
@@ -80,8 +81,8 @@ fn run_refresh_all() -> Result<()> {
         let access_token = current.get("tokens")
             .and_then(|t| t.get("access_token"))
             .and_then(|v| v.as_str());
-        if let Ok(result) = usage.read_usage(account_id, access_token, true, false) {
-            let _ = usage.record_usage_snapshot(account_id, result.usage.as_ref());
+        if let Err(error) = refresh_usage_snapshot(&usage, account_id, access_token) {
+            codex_errors.push(format!("current: {error:#}"));
         }
     }
 
@@ -93,15 +94,18 @@ fn run_refresh_all() -> Result<()> {
             claude_paths.limit_cache_path().to_path_buf(),
             claude_paths.usage_history_path().to_path_buf(),
             300,
-        ).with_fetcher(codex_auth::claude::fetch_claude_usage);
+        ).with_fetcher(agent_switch::claude::fetch_claude_usage);
 
         if let Ok(saved) = cl_store.list_saved_profiles() {
             for profile in saved {
                 if let Ok(creds) = serde_json::from_value::<ClaudeCredentials>(profile.snapshot) {
                     let composite_id = format!("{}|{}", creds.account_id(), creds.subscription_type());
-                    let _ = cl_usage.read_usage(Some(composite_id.as_str()), Some(creds.access_token()), true, false);
-                    if let Ok(result) = cl_usage.read_usage(Some(composite_id.as_str()), Some(creds.access_token()), false, false) {
-                        let _ = cl_usage.record_usage_snapshot(Some(composite_id.as_str()), result.usage.as_ref());
+                    if let Err(error) = refresh_usage_snapshot(
+                        &cl_usage,
+                        Some(composite_id.as_str()),
+                        Some(creds.access_token()),
+                    ) {
+                        claude_errors.push(format!("saved {}: {error:#}", profile.name));
                     }
                 }
             }
@@ -109,13 +113,83 @@ fn run_refresh_all() -> Result<()> {
 
         if let Ok(creds) = cl_store.get_current_credentials() {
             let composite_id = format!("{}|{}", creds.account_id(), creds.subscription_type());
-            let _ = cl_usage.read_usage(Some(composite_id.as_str()), Some(creds.access_token()), true, false);
-            if let Ok(result) = cl_usage.read_usage(Some(composite_id.as_str()), Some(creds.access_token()), false, false) {
-                let _ = cl_usage.record_usage_snapshot(Some(composite_id.as_str()), result.usage.as_ref());
+            if let Err(error) = refresh_usage_snapshot(
+                &cl_usage,
+                Some(composite_id.as_str()),
+                Some(creds.access_token()),
+            ) {
+                claude_errors.push(format!("current: {error:#}"));
             }
         }
     }
 
-    cron::write_last_run_success(paths.cron_status_path())?;
+    let report = cron::CronRunReport {
+        attempted_at: current_unix_seconds(),
+        codex_error: summarize_client_errors("Codex", &codex_errors),
+        claude_error: summarize_client_errors("Claude", &claude_errors),
+    };
+    cron::write_run_report(paths.cron_status_path(), &report)?;
+    if report.has_errors() {
+        bail!(
+            "{}",
+            [report.codex_error.as_deref(), report.claude_error.as_deref()]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" | ")
+        );
+    }
     Ok(())
+}
+
+fn refresh_usage_snapshot(
+    usage: &UsageService,
+    account_id: Option<&str>,
+    access_token: Option<&str>,
+) -> Result<()> {
+    let result = usage.read_usage(account_id, access_token, true, false)?;
+    usage.record_usage_snapshot(account_id, result.usage.as_ref())
+}
+
+fn summarize_client_errors(service: &str, errors: &[String]) -> Option<String> {
+    match errors {
+        [] => None,
+        [single] => Some(format!("{service}: {single}")),
+        [first, rest @ ..] => Some(format!(
+            "{service}: {first} (and {} more error{})",
+            rest.len(),
+            if rest.len() == 1 { "" } else { "s" }
+        )),
+    }
+}
+
+fn current_unix_seconds() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refresh_usage_snapshot_surfaces_force_refresh_errors() {
+        let cache_path = std::env::temp_dir().join(format!(
+            "agent-switch-main-refresh-cache-{}",
+            std::process::id()
+        ));
+        let history_path = std::env::temp_dir().join(format!(
+            "agent-switch-main-refresh-history-{}",
+            std::process::id()
+        ));
+        let usage = UsageService::new(cache_path, history_path, 300)
+            .with_fetcher(|_, _| Err(anyhow::anyhow!("fetch failed")));
+
+        let result = refresh_usage_snapshot(&usage, Some("acct-alpha"), Some("token"));
+
+        assert!(result.is_err(), "refresh helper should not swallow fetch failures");
+    }
 }

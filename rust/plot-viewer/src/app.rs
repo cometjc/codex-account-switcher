@@ -10,7 +10,7 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragra
 use serde_json::Value;
 
 use crate::cron::CronStatus;
-use crate::input::{self, InputAction};
+use crate::input::{self, InputAction, InputContext};
 use crate::loader::load_profiles;
 use crate::render;
 use crate::render::{
@@ -176,7 +176,7 @@ impl App {
 
             if event::poll(Duration::from_millis(150))? {
                 let event = event::read()?;
-                if let Some(action) = input::map_event(&event) {
+                if let Some(action) = input::map_event(&event, self.input_context()) {
                     self.handle_action(action)?;
                 }
             }
@@ -265,14 +265,50 @@ impl App {
             }
             InputAction::RefreshSelected => {
                 if self.pane_focus == PaneFocus::Accounts {
-                    self.refresh_selected_profile(true)?;
+                    match self.refresh_selected_profile(true) {
+                        Ok(errors) if errors.is_empty() => {
+                            self.status_message = Some("Refresh completed.".to_string());
+                        }
+                        Ok(errors) => {
+                            self.status_message = Some(format!(
+                                "Refresh completed with errors: {}",
+                                errors.join(" | ")
+                            ));
+                        }
+                        Err(error) => {
+                            self.status_message = Some(format!("Refresh failed: {error:#}"));
+                        }
+                    }
                 }
             }
-            InputAction::RefreshAll => self.reload_profiles(true, None)?,
+            InputAction::RefreshAll => {
+                match self.reload_profiles(true, None) {
+                    Ok(errors) if errors.is_empty() => {
+                        self.status_message = Some("Refresh completed.".to_string());
+                    }
+                    Ok(errors) => {
+                        self.status_message = Some(format!(
+                            "Refresh completed with errors: {}",
+                            errors.join(" | ")
+                        ));
+                    }
+                    Err(error) => {
+                        self.status_message = Some(format!("Refresh failed: {error:#}"));
+                    }
+                }
+            }
             InputAction::Backspace | InputAction::Character(_) | InputAction::Cancel => {}
         }
 
         Ok(())
+    }
+
+    fn input_context(&self) -> InputContext {
+        if self.dialog.is_some() || self.filter_input.is_some() {
+            InputContext::TextEntry
+        } else {
+            InputContext::Normal
+        }
     }
 
     fn handle_filter_action(&mut self, action: InputAction) -> Result<()> {
@@ -395,7 +431,7 @@ impl App {
                 };
                 self.status_message = Some(format!("Saved current profile as \"{name}\"."));
                 self.dialog = None;
-                self.reload_profiles(false, profile.account_id.clone())?;
+                let _ = self.reload_profiles(false, profile.account_id.clone())?;
             }
             DialogMode::RenameSaved(current_name) => {
                 let name = match self.selected_profile().map(|p| p.kind) {
@@ -416,7 +452,7 @@ impl App {
                 };
                 self.status_message = Some(format!("Renamed to \"{name}\"."));
                 self.dialog = None;
-                self.reload_profiles(false, None)?;
+                let _ = self.reload_profiles(false, None)?;
             }
             DialogMode::ConfirmDelete(target_name) => {
                 if dialog.input.trim().eq_ignore_ascii_case("y")
@@ -440,7 +476,7 @@ impl App {
                         }
                     }
                     self.status_message = Some(format!("Deleted \"{target_name}\"."));
-                    self.reload_profiles(false, None)?;
+                    let _ = self.reload_profiles(false, None)?;
                 }
                 self.dialog = None;
             }
@@ -460,7 +496,7 @@ impl App {
                     if let Some(cs) = self.claude_store.as_ref() {
                         let activated = cs.use_account(saved_name)?;
                         self.status_message = Some(format!("Switched Claude auth to \"{activated}\"."));
-                        self.reload_profiles(false, profile.account_id.clone())?;
+                        let _ = self.reload_profiles(false, profile.account_id.clone())?;
                     }
                 } else {
                     self.dialog = Some(DialogState {
@@ -474,7 +510,7 @@ impl App {
                     if let Some(store) = self.store.as_ref() {
                         let activated = store.use_account(saved_name)?;
                         self.status_message = Some(format!("Switched Codex auth to \"{activated}\"."));
-                        self.reload_profiles(false, profile.account_id.clone())?;
+                        let _ = self.reload_profiles(false, profile.account_id.clone())?;
                     }
                 } else {
                     self.dialog = Some(DialogState {
@@ -513,16 +549,20 @@ impl App {
         });
     }
 
-    fn refresh_selected_profile(&mut self, force_refresh: bool) -> Result<()> {
+    fn refresh_selected_profile(&mut self, force_refresh: bool) -> Result<Vec<String>> {
         let account_id = self.selected_profile().and_then(|profile| profile.account_id.clone());
         self.reload_profiles(force_refresh, account_id)
     }
 
-    fn reload_profiles(&mut self, force_refresh: bool, refresh_account_id: Option<String>) -> Result<()> {
+    fn reload_profiles(
+        &mut self,
+        force_refresh: bool,
+        refresh_account_id: Option<String>,
+    ) -> Result<Vec<String>> {
         let (Some(store), Some(usage_service)) = (self.store.as_ref(), self.usage_service.as_ref()) else {
-            return Ok(());
+            return Ok(Vec::new());
         };
-        self.profiles = load_profiles(
+        let report = crate::loader::load_profiles_with_report(
             store,
             usage_service,
             force_refresh,
@@ -530,13 +570,15 @@ impl App {
             self.claude_store.as_ref(),
             self.claude_usage_service.as_ref(),
         )?;
+        self.profiles = report.profiles;
+        self.cron_status = crate::cron::read_status(store.paths().cron_status_path());
         self.selected_profile_index = self
             .selected_profile_index
             .min(self.profiles.len().saturating_sub(1));
         if !self.y_zoom_user_adjusted {
             self.y_zoom_lower = auto_y_lower(&self.profiles);
         }
-        Ok(())
+        Ok(report.refresh_errors)
     }
 
     fn selected_profile(&self) -> Option<&ProfileEntry> {
@@ -575,7 +617,7 @@ impl App {
             .profiles
             .iter()
             .flat_map(|profile| {
-                render_account_detail(Some(profile), None, &self.cron_status)
+                render_account_detail(Some(profile), None)
             })
             .map(|line| line.width())
             .max()
@@ -589,8 +631,13 @@ impl App {
 
     fn render(&self, frame: &mut Frame) {
         let area = frame.area();
-        let [body, footer_area] =
-            Layout::vertical([Constraint::Min(0), Constraint::Length(2)]).areas(area);
+        let [body, cron_area, footer_area] =
+            Layout::vertical([
+                Constraint::Min(0),
+                Constraint::Length(1),
+                Constraint::Length(2),
+            ])
+            .areas(area);
 
         let left_width = self.left_pane_width(body.width);
         let [left_area, right_area] =
@@ -607,6 +654,10 @@ impl App {
             cursor_x: self.cursor_x,
         };
         render::render(frame, right_area, &render_state);
+
+        let cron = Paragraph::new(Text::from(vec![render_cron_status_line(&self.cron_status)]))
+            .wrap(Wrap { trim: true });
+        frame.render_widget(cron, cron_area);
 
         let footer_lines = match self.pane_focus {
             PaneFocus::Accounts => vec![
@@ -652,13 +703,13 @@ impl App {
                 let color = render::SERIES_COLORS[i % render::SERIES_COLORS.len()];
                 let prefix = if profile.is_current { "▶ " } else { "  " };
                 let service_tag = match profile.kind {
-                    ProfileKind::Codex => "[cx]",
-                    ProfileKind::Claude => "[cl]",
+                    ProfileKind::Codex => "[codex]",
+                    ProfileKind::Claude => "[claude]",
                 };
-                let state_tag = if profile.saved_name.is_some() {
-                    " [saved]"
-                } else {
+                let state_tag = if profile.saved_name.is_none() {
                     " [unsaved]"
+                } else {
+                    ""
                 };
                 let usage = format_usage_badge(&profile.usage_view);
                 let label = format!("{prefix}{service_tag} {}{state_tag}", profile.profile_name);
@@ -682,7 +733,7 @@ impl App {
         frame.render_stateful_widget(list, list_area, &mut state);
 
         let detail_lines =
-            render_account_detail(self.selected_profile(), self.status_message.as_deref(), &self.cron_status);
+            render_account_detail(self.selected_profile(), self.status_message.as_deref());
         let details = Paragraph::new(Text::from(detail_lines))
             .block(Block::default().title("Details").borders(Borders::ALL))
             .wrap(Wrap { trim: true });
@@ -801,7 +852,6 @@ fn initial_selected_index(profiles: &[ProfileEntry]) -> usize {
 fn render_account_detail(
     profile: Option<&ProfileEntry>,
     status_message: Option<&str>,
-    cron_status: &CronStatus,
 ) -> Vec<Line<'static>> {
     let Some(profile) = profile else {
         return vec![
@@ -817,8 +867,8 @@ fn render_account_detail(
     };
 
     let service_label = match profile.kind {
-        ProfileKind::Codex => "Codex [cx]",
-        ProfileKind::Claude => "Claude [cl]",
+        ProfileKind::Codex => "Codex [codex]",
+        ProfileKind::Claude => "Claude [claude]",
     };
 
     let mut lines = vec![
@@ -852,23 +902,40 @@ fn render_account_detail(
         }
     }
 
-    lines.push(Line::from(""));
-    let cron_line = if cron_status.installed {
-        let age = cron_status.last_run
-            .map(|ts| format_age(Some(ts), false))
-            .unwrap_or_else(|| "never".to_string());
-        format!("Cron: installed · {}", age)
-    } else {
-        "Cron: not installed".to_string()
-    };
-    lines.push(Line::from(cron_line));
-
     if let Some(message) = status_message {
         lines.push(Line::from(""));
         lines.push(Line::from(message.to_string()));
     }
 
     lines
+}
+
+fn render_cron_status_line(cron_status: &CronStatus) -> Line<'static> {
+    if !cron_status.installed {
+        return Line::from("Cron: not installed");
+    }
+
+    let attempt_age = cron_status
+        .last_attempt
+        .or(cron_status.last_run)
+        .map(|ts| format_age(Some(ts), false))
+        .unwrap_or_else(|| "never".to_string());
+    let mut parts = vec![format!("Cron: installed · last attempt {attempt_age}")];
+
+    if let Some(last_success) = cron_status.last_run {
+        parts.push(format!(
+            "last success {}",
+            format_age(Some(last_success), false)
+        ));
+    }
+    if let Some(error) = cron_status.codex_error.as_deref() {
+        parts.push(format!("Codex issue: {error}"));
+    }
+    if let Some(error) = cron_status.claude_error.as_deref() {
+        parts.push(format!("Claude issue: {error}"));
+    }
+
+    Line::from(parts.join(" · "))
 }
 
 fn format_age(fetched_at: Option<i64>, stale: bool) -> String {
@@ -979,16 +1046,24 @@ fn sanitize_name_part(input: Option<&str>) -> Option<String> {
 
 /// Compute the default y_zoom_lower from actual data: floor(min_y, 5%).
 /// Returns 0.0 if no data.
+const END_LABEL_Y_PADDING_PERCENT: f64 = 10.0;
+
 fn auto_y_lower(profiles: &[ProfileEntry]) -> f64 {
     let min_y = profiles
         .iter()
-        .flat_map(|p| p.chart_data.seven_day_points.iter())
-        .map(|pt| pt.y)
+        .flat_map(|profile| {
+            profile
+                .chart_data
+                .seven_day_points
+                .iter()
+                .map(|pt| pt.y)
+                .chain(profile.chart_data.five_hour_subframe.lower_y.into_iter())
+        })
         .fold(f64::INFINITY, f64::min);
     if min_y.is_infinite() {
         return 0.0;
     }
-    (min_y / 5.0).floor() * 5.0
+    ((min_y - END_LABEL_Y_PADDING_PERCENT) / 5.0).floor() * 5.0
 }
 
 fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: usize) -> ChartState<'a> {
@@ -1002,6 +1077,7 @@ fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: u
     let selected_band = selected_profile
         .map(|profile| FiveHourBandState {
             available: profile.chart_data.five_hour_band.available,
+            used_percent: profile.chart_data.five_hour_band.used_percent,
             lower_y: profile.chart_data.five_hour_band.lower_y,
             upper_y: profile.chart_data.five_hour_band.upper_y,
             delta_seven_day_percent: profile.chart_data.five_hour_band.delta_seven_day_percent,
@@ -1010,6 +1086,7 @@ fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: u
         })
         .unwrap_or(FiveHourBandState {
             available: false,
+            used_percent: None,
             lower_y: None,
             upper_y: None,
             delta_seven_day_percent: None,
@@ -1049,6 +1126,8 @@ fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: u
                 is_current: profile.is_current,
             },
             points: profile.chart_data.seven_day_points.clone(),
+            last_seven_day_percent: profile.chart_data.seven_day_points.last().map(|point| point.y),
+            five_hour_used_percent: profile.chart_data.five_hour_band.used_percent,
             five_hour_subframe: FiveHourSubframeState {
                 available: profile.chart_data.five_hour_subframe.available,
                 start_x: profile.chart_data.five_hour_subframe.start_x,
@@ -1092,6 +1171,8 @@ fn popup_area(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
 
 #[cfg(test)]
 mod tests {
+    use crate::app_data::{OwnedFiveHourBandState, OwnedFiveHourSubframeState};
+    use crate::render::ChartPoint;
     use super::*;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
@@ -1101,6 +1182,18 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         let frame = terminal.draw(|frame| app.render(frame)).unwrap();
         frame.buffer.clone()
+    }
+
+    fn buffer_row_text(
+        buffer: &ratatui::buffer::Buffer,
+        y: u16,
+        width: u16,
+    ) -> String {
+        (0..width)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect::<String>()
+            .trim_end()
+            .to_string()
     }
 
     #[test]
@@ -1116,7 +1209,7 @@ mod tests {
 
     #[test]
     fn account_detail_empty_state_is_service_agnostic() {
-        let lines = render_account_detail(None, None, &CronStatus::uninstalled());
+        let lines = render_account_detail(None, None);
         assert_eq!(lines[0].to_string(), "No auth profile loaded.");
         assert_eq!(lines[1].to_string(), "Save or switch an account to continue.");
     }
@@ -1139,8 +1232,75 @@ mod tests {
             chart_data: ProfileChartData::empty("no usage data"),
         };
 
-        let lines = render_account_detail(Some(&profile), None, &CronStatus::uninstalled());
+        let lines = render_account_detail(Some(&profile), None);
         assert!(lines.iter().any(|line| line.to_string() == "Last updated: never"));
+    }
+
+    #[test]
+    fn account_detail_shows_last_cron_failure_summary() {
+        let profile = ProfileEntry {
+            kind: ProfileKind::Claude,
+            saved_name: Some("demo".to_string()),
+            profile_name: "demo".to_string(),
+            snapshot: serde_json::json!({}),
+            usage_view: UsageReadResult {
+                usage: None,
+                source: UsageSource::None,
+                fetched_at: None,
+                stale: false,
+            },
+            account_id: Some("claude-demo".to_string()),
+            is_current: false,
+            chart_data: ProfileChartData::empty("no usage data"),
+        };
+        let lines = render_account_detail(Some(&profile), None);
+
+        assert!(!lines.iter().any(|line| line.to_string().contains("Cron")));
+    }
+
+    #[test]
+    fn account_detail_no_longer_embeds_cron_lines() {
+        let profile = ProfileEntry {
+            kind: ProfileKind::Claude,
+            saved_name: Some("demo".to_string()),
+            profile_name: "demo".to_string(),
+            snapshot: serde_json::json!({}),
+            usage_view: UsageReadResult {
+                usage: None,
+                source: UsageSource::None,
+                fetched_at: None,
+                stale: false,
+            },
+            account_id: Some("claude-demo".to_string()),
+            is_current: false,
+            chart_data: ProfileChartData::empty("no usage data"),
+        };
+        let lines = render_account_detail(Some(&profile), None);
+
+        assert!(!lines.iter().any(|line| line.to_string().starts_with("Cron:")));
+        assert!(!lines
+            .iter()
+            .any(|line| line.to_string().starts_with("Cron issue:")));
+    }
+
+    #[test]
+    fn cron_status_renders_in_global_status_line_above_actions() {
+        let mut app = App::from_profile_names(vec!["Alpha".to_string()], 0);
+        app.cron_status = CronStatus {
+            installed: true,
+            last_run: Some(1_700_000_000),
+            last_attempt: Some(1_700_000_300),
+            codex_error: None,
+            claude_error: Some("HTTP 429 Too Many Requests".to_string()),
+        };
+
+        let buffer = render_buffer(&app, 100, 24);
+        let status_line = buffer_row_text(&buffer, 21, 100);
+        let actions_line = buffer_row_text(&buffer, 22, 100);
+
+        assert!(status_line.contains("Cron:"));
+        assert!(status_line.contains("Claude issue:"));
+        assert!(actions_line.contains("Enter=switch/save"));
     }
 
     #[test]
@@ -1158,6 +1318,59 @@ mod tests {
 
         assert_eq!(cell.fg, render::SERIES_COLORS[1]);
         assert_eq!(cell.bg, Color::DarkGray);
+    }
+
+    #[test]
+    fn profile_list_uses_long_service_tags_and_hides_saved_suffix() {
+        let app = App::from_profile_names(vec!["Alpha".to_string()], 0);
+        let buffer = render_buffer(&app, 100, 24);
+        let joined = (0..24)
+            .map(|y| buffer_row_text(&buffer, y, 100))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(joined.contains("[codex] Alpha"));
+        assert!(!joined.contains("[saved]"));
+    }
+
+    #[test]
+    fn auto_y_lower_includes_band_floor_and_label_padding() {
+        let profiles = vec![ProfileEntry {
+            kind: ProfileKind::Codex,
+            saved_name: Some("alpha".to_string()),
+            profile_name: "Alpha".to_string(),
+            snapshot: serde_json::json!({}),
+            usage_view: UsageReadResult {
+                usage: None,
+                source: UsageSource::None,
+                fetched_at: None,
+                stale: false,
+            },
+            account_id: Some("acct-alpha".to_string()),
+            is_current: true,
+            chart_data: ProfileChartData {
+                seven_day_points: vec![ChartPoint { x: 7.0, y: 14.0 }],
+                five_hour_band: OwnedFiveHourBandState {
+                    available: true,
+                    used_percent: Some(12.0),
+                    lower_y: Some(8.0),
+                    upper_y: Some(20.0),
+                    delta_seven_day_percent: Some(3.0),
+                    delta_five_hour_percent: Some(1.5),
+                    reason: None,
+                },
+                five_hour_subframe: OwnedFiveHourSubframeState {
+                    available: true,
+                    start_x: Some(6.5),
+                    end_x: Some(7.0),
+                    lower_y: Some(8.0),
+                    upper_y: Some(20.0),
+                    reason: None,
+                },
+            },
+        }];
+
+        assert_eq!(auto_y_lower(&profiles), -5.0);
     }
 }
 

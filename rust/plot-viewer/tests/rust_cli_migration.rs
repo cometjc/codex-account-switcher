@@ -2,17 +2,17 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use codex_auth::app::App;
-use codex_auth::paths::AppPaths;
-use codex_auth::store::{AccountStore, StorePlatform};
-use codex_auth::usage::{UsageCache, UsageReadResult, UsageResponse, UsageService};
+use agent_switch::app::App;
+use agent_switch::paths::AppPaths;
+use agent_switch::store::{AccountStore, StorePlatform};
+use agent_switch::usage::{UsageCache, UsageReadResult, UsageResponse, UsageService};
 
 fn temp_dir(label: &str) -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("time drift")
         .as_nanos();
-    let path = std::env::temp_dir().join(format!("codex-auth-{label}-{unique}"));
+    let path = std::env::temp_dir().join(format!("agent-switch-{label}-{unique}"));
     fs::create_dir_all(&path).expect("create temp dir");
     path
 }
@@ -90,7 +90,7 @@ fn usage_service_returns_stale_cache_when_fetch_fails() {
         result,
         UsageReadResult {
             usage: Some(cached_usage),
-            source: codex_auth::usage::UsageSource::Cache,
+            source: agent_switch::usage::UsageSource::Cache,
             fetched_at: Some(100),
             stale: true,
         }

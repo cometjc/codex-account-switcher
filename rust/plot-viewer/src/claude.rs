@@ -7,6 +7,9 @@ use serde_json::Value;
 
 use crate::usage::{UsageRateLimit, UsageResponse, UsageWindow};
 
+const CLAUDE_OAUTH_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+const CLAUDE_OAUTH_BETA_HEADER: &str = "oauth-2025-04-20";
+
 // ── Credential model ────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -43,6 +46,13 @@ impl ClaudeCredentials {
     pub fn subscription_type(&self) -> &str {
         &self.claude_ai_oauth.subscription_type
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RefreshedClaudeTokens {
+    access_token: String,
+    refresh_token: String,
+    expires_at: i64,
 }
 
 // ── Path helpers ─────────────────────────────────────────────────────────────
@@ -362,6 +372,39 @@ fn days_since_epoch(year: i64, month: i64, day: i64) -> Option<i64> {
 /// Caller passes "claude-<id>|<subscription_type>" as account_id so we can
 /// extract subscription_type here without additional parameters.
 pub fn fetch_claude_usage(account_id: &str, access_token: &str) -> anyhow::Result<UsageResponse> {
+    let paths = ClaudePaths::detect();
+    fetch_claude_usage_with_auto_refresh(
+        &paths,
+        account_id,
+        access_token,
+        fetch_claude_usage_once,
+        refresh_claude_oauth_tokens,
+    )
+}
+
+fn fetch_claude_usage_with_auto_refresh<FUsage, FRefresh>(
+    paths: &ClaudePaths,
+    account_id: &str,
+    access_token: &str,
+    mut usage_fetch: FUsage,
+    mut refresh_tokens: FRefresh,
+) -> anyhow::Result<UsageResponse>
+where
+    FUsage: FnMut(&str, &str) -> anyhow::Result<UsageResponse>,
+    FRefresh: FnMut(&str) -> anyhow::Result<RefreshedClaudeTokens>,
+{
+    match usage_fetch(account_id, access_token) {
+        Ok(usage) => Ok(usage),
+        Err(error) if is_usage_rate_limited(&error) => {
+            let rotated_access_token =
+                refresh_current_claude_credentials(paths, access_token, &mut refresh_tokens)?;
+            usage_fetch(account_id, rotated_access_token.as_str())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn fetch_claude_usage_once(account_id: &str, access_token: &str) -> anyhow::Result<UsageResponse> {
     let subscription_type = account_id
         .rsplit('|')
         .next()
@@ -375,12 +418,13 @@ pub fn fetch_claude_usage(account_id: &str, access_token: &str) -> anyhow::Resul
     let client = reqwest::blocking::Client::builder()
         .build()
         .context("build reqwest client")?;
-    let raw: Value = client
-        .get("https://api.anthropic.com/api/oauth/usage")
-        .bearer_auth(access_token)
-        .header("User-Agent", "codex-auth")
+    let response = build_claude_usage_request(&client, access_token)
         .send()
-        .context("send Claude usage request")?
+        .context("send Claude usage request")?;
+    if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        bail!("Claude usage request failed: HTTP 429 Too Many Requests");
+    }
+    let raw: Value = response
         .error_for_status()
         .context("Claude usage request failed")?
         .json()
@@ -388,6 +432,120 @@ pub fn fetch_claude_usage(account_id: &str, access_token: &str) -> anyhow::Resul
 
     map_claude_usage_response(&raw, subscription_type, now)
         .ok_or_else(|| anyhow::anyhow!("unexpected Claude usage response shape"))
+}
+
+fn build_claude_usage_request(
+    client: &reqwest::blocking::Client,
+    access_token: &str,
+) -> reqwest::blocking::RequestBuilder {
+    client
+        .get("https://api.anthropic.com/api/oauth/usage")
+        .bearer_auth(access_token)
+        .header("User-Agent", "agent-switch")
+        .header("anthropic-beta", CLAUDE_OAUTH_BETA_HEADER)
+}
+
+fn refresh_current_claude_credentials<FRefresh>(
+    paths: &ClaudePaths,
+    current_access_token: &str,
+    refresh_tokens: &mut FRefresh,
+) -> anyhow::Result<String>
+where
+    FRefresh: FnMut(&str) -> anyhow::Result<RefreshedClaudeTokens>,
+{
+    let mut snapshot = read_snapshot(paths.credentials_path())?;
+    let oauth = snapshot
+        .get_mut("claudeAiOauth")
+        .and_then(Value::as_object_mut)
+        .context("parse Claude credentials oauth payload")?;
+    let stored_access_token = oauth
+        .get("accessToken")
+        .and_then(Value::as_str)
+        .context("Claude credentials missing accessToken")?
+        .to_string();
+    if stored_access_token != current_access_token {
+        bail!("current Claude credentials do not match the rate-limited token");
+    }
+    let stored_refresh_token = oauth
+        .get("refreshToken")
+        .and_then(Value::as_str)
+        .context("Claude credentials missing refreshToken")?
+        .to_string();
+
+    let rotated = refresh_tokens(stored_refresh_token.as_str())?;
+    oauth.insert(
+        "accessToken".to_string(),
+        Value::String(rotated.access_token.clone()),
+    );
+    oauth.insert(
+        "refreshToken".to_string(),
+        Value::String(rotated.refresh_token.clone()),
+    );
+    oauth.insert("expiresAt".to_string(), Value::from(rotated.expires_at));
+    write_json(paths.credentials_path(), &snapshot)?;
+    Ok(rotated.access_token)
+}
+
+fn refresh_claude_oauth_tokens(refresh_token: &str) -> anyhow::Result<RefreshedClaudeTokens> {
+    let client = reqwest::blocking::Client::builder()
+        .build()
+        .context("build reqwest client")?;
+    let raw: Value = client
+        .post("https://console.anthropic.com/v1/oauth/token")
+        .header("User-Agent", "agent-switch")
+        .json(&serde_json::json!({
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": CLAUDE_OAUTH_CLIENT_ID,
+        }))
+        .send()
+        .context("send Claude token refresh request")?
+        .error_for_status()
+        .context("Claude token refresh failed")?
+        .json()
+        .context("parse Claude token refresh JSON")?;
+    parse_refreshed_claude_tokens(&raw, current_unix_seconds())
+}
+
+fn parse_refreshed_claude_tokens(raw: &Value, now: i64) -> anyhow::Result<RefreshedClaudeTokens> {
+    let access_token = raw
+        .get("access_token")
+        .or_else(|| raw.get("accessToken"))
+        .and_then(Value::as_str)
+        .context("Claude token refresh response missing access_token")?;
+    let refresh_token = raw
+        .get("refresh_token")
+        .or_else(|| raw.get("refreshToken"))
+        .and_then(Value::as_str)
+        .context("Claude token refresh response missing refresh_token")?;
+    let expires_at = raw
+        .get("expires_at")
+        .or_else(|| raw.get("expiresAt"))
+        .and_then(Value::as_i64)
+        .or_else(|| {
+            raw.get("expires_in")
+                .or_else(|| raw.get("expiresIn"))
+                .and_then(Value::as_i64)
+                .map(|seconds| now + seconds)
+        })
+        .context("Claude token refresh response missing expiry")?;
+    Ok(RefreshedClaudeTokens {
+        access_token: access_token.to_string(),
+        refresh_token: refresh_token.to_string(),
+        expires_at,
+    })
+}
+
+fn is_usage_rate_limited(error: &anyhow::Error) -> bool {
+    let message = format!("{error:#}").to_ascii_lowercase();
+    message.contains("429") || message.contains("rate limited")
+}
+
+fn current_unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 #[cfg(test)]
@@ -465,5 +623,81 @@ mod tests {
         let seven_d = rl.secondary_window.as_ref().unwrap();
         assert_eq!(seven_d.limit_window_seconds, 604_800);
         assert!((seven_d.used_percent - 28.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn usage_429_refreshes_current_token_once_and_persists_rotated_credentials() {
+        let (claude_dir, _base) = temp_dir_pair();
+        let paths = ClaudePaths::from_claude_dir(claude_dir.clone());
+        fs::write(paths.credentials_path(), sample_creds_json()).unwrap();
+
+        let mut seen_tokens = Vec::new();
+        let usage = fetch_claude_usage_with_auto_refresh(
+            &paths,
+            "claude-bbb|pro",
+            "sk-ant-oat01-aaa",
+            |_, token: &str| {
+                seen_tokens.push(token.to_string());
+                match token {
+                    "sk-ant-oat01-aaa" => Err(anyhow::anyhow!(
+                        "Claude usage request failed: HTTP 429 Too Many Requests"
+                    )),
+                    "sk-ant-oat01-new" => Ok(UsageResponse {
+                        email: None,
+                        plan_type: Some("pro".to_string()),
+                        rate_limit: Some(UsageRateLimit {
+                            primary_window: Some(UsageWindow {
+                                used_percent: 12.0,
+                                limit_window_seconds: 18_000,
+                                reset_at: 1_730_010_000,
+                                reset_after_seconds: 600,
+                            }),
+                            secondary_window: Some(UsageWindow {
+                                used_percent: 34.0,
+                                limit_window_seconds: 604_800,
+                                reset_at: 1_730_100_000,
+                                reset_after_seconds: 9_000,
+                            }),
+                        }),
+                    }),
+                    other => Err(anyhow::anyhow!("unexpected token {other}")),
+                }
+            },
+            |_refresh_token: &str| {
+                Ok(RefreshedClaudeTokens {
+                    access_token: "sk-ant-oat01-new".to_string(),
+                    refresh_token: "sk-ant-ort01-new".to_string(),
+                    expires_at: 1_730_200_000,
+                })
+            },
+        )
+        .unwrap();
+
+        let persisted = read_credentials(paths.credentials_path()).unwrap();
+        assert_eq!(usage.plan_type.as_deref(), Some("pro"));
+        assert_eq!(
+            seen_tokens,
+            vec!["sk-ant-oat01-aaa".to_string(), "sk-ant-oat01-new".to_string()]
+        );
+        assert_eq!(persisted.access_token(), "sk-ant-oat01-new");
+        assert_eq!(persisted.claude_ai_oauth.refresh_token, "sk-ant-ort01-new");
+        assert_eq!(persisted.claude_ai_oauth.expires_at, 1_730_200_000);
+    }
+
+    #[test]
+    fn claude_usage_request_includes_oauth_beta_header() {
+        let client = reqwest::blocking::Client::new();
+
+        let request = build_claude_usage_request(&client, "test-access-token")
+            .build()
+            .unwrap();
+
+        assert_eq!(
+            request
+                .headers()
+                .get("anthropic-beta")
+                .and_then(|value: &reqwest::header::HeaderValue| value.to_str().ok()),
+            Some(CLAUDE_OAUTH_BETA_HEADER)
+        );
     }
 }

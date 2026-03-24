@@ -8,8 +8,13 @@ use crate::render::ChartPoint;
 use crate::store::{AccountStore, SavedProfile};
 use crate::usage::{
     pick_five_hour_window, pick_weekly_window, UsageResponse, UsageService, UsageWindow,
-    UsageWindowHistory,
+    UsageWindowHistory, UsageReadResult,
 };
+
+pub struct ProfileLoadReport {
+    pub profiles: Vec<ProfileEntry>,
+    pub refresh_errors: Vec<String>,
+}
 
 pub fn load_profiles(
     store: &AccountStore,
@@ -19,10 +24,30 @@ pub fn load_profiles(
     claude_store: Option<&crate::claude::ClaudeStore>,
     claude_usage_service: Option<&UsageService>,
 ) -> Result<Vec<ProfileEntry>> {
+    Ok(load_profiles_with_report(
+        store,
+        usage_service,
+        force_refresh,
+        refresh_account_id,
+        claude_store,
+        claude_usage_service,
+    )?
+    .profiles)
+}
+
+pub fn load_profiles_with_report(
+    store: &AccountStore,
+    usage_service: &UsageService,
+    force_refresh: bool,
+    refresh_account_id: Option<&str>,
+    claude_store: Option<&crate::claude::ClaudeStore>,
+    claude_usage_service: Option<&UsageService>,
+) -> Result<ProfileLoadReport> {
     let saved_profiles = store.list_saved_profiles()?;
     let current_snapshot = store.get_current_snapshot().ok();
     let current_account_id = current_snapshot.as_ref().and_then(read_account_id);
     let current_access_token = current_snapshot.as_ref().and_then(read_access_token);
+    let mut refresh_errors = Vec::new();
 
     let mut profiles = saved_profiles
         .into_iter()
@@ -33,6 +58,7 @@ pub fn load_profiles(
                 usage_service,
                 force_refresh,
                 refresh_account_id,
+                &mut refresh_errors,
             )
         })
         .collect::<Result<Vec<_>>>()?;
@@ -47,12 +73,15 @@ pub fn load_profiles(
             let force_current = refresh_account_id
                 .is_some_and(|account_id| current_account_id.as_deref() == Some(account_id))
                 || force_refresh;
-            let usage_view = usage_service.read_usage(
+            let (usage_view, error) = read_usage_for_profile(
+                "Codex",
+                "current",
+                usage_service,
                 current_account_id.as_deref(),
                 current_access_token.as_deref(),
                 force_current,
-                false,
             )?;
+            push_refresh_error(&mut refresh_errors, error);
             usage_service
                 .record_usage_snapshot(current_account_id.as_deref(), usage_view.usage.as_ref())?;
             let chart_data = build_profile_chart_data(
@@ -78,12 +107,17 @@ pub fn load_profiles(
 
     // --- Claude entries ---
     if let (Some(cs), Some(cu)) = (claude_store, claude_usage_service) {
-        let claude_entries = load_claude_profiles(cs, cu, force_refresh, refresh_account_id)?;
+        let (claude_entries, claude_errors) =
+            load_claude_profiles(cs, cu, force_refresh, refresh_account_id)?;
         profiles.extend(claude_entries);
+        refresh_errors.extend(claude_errors);
     }
 
     profiles.sort_by(|left, right| left.profile_name.cmp(&right.profile_name));
-    Ok(profiles)
+    Ok(ProfileLoadReport {
+        profiles,
+        refresh_errors,
+    })
 }
 
 fn load_claude_profiles(
@@ -91,10 +125,11 @@ fn load_claude_profiles(
     usage_service: &UsageService,
     force_refresh: bool,
     refresh_account_id: Option<&str>,
-) -> Result<Vec<ProfileEntry>> {
+) -> Result<(Vec<ProfileEntry>, Vec<String>)> {
     let saved = store.list_saved_profiles()?;
     let current_creds = store.get_current_credentials().ok();
     let current_account_id = current_creds.as_ref().map(|c| c.account_id());
+    let mut refresh_errors = Vec::new();
 
     // Helper: composite key for UsageService cache
     let composite_id = |creds: &crate::claude::ClaudeCredentials| {
@@ -117,12 +152,15 @@ fn load_claude_profiles(
             };
             let force_this = force_refresh
                 || refresh_account_id.is_some_and(|t| acct_id.as_deref() == Some(t));
-            let usage_view = usage_service.read_usage(
+            let (usage_view, error) = read_usage_for_profile(
+                "Claude",
+                &saved_profile.name,
+                usage_service,
                 comp_id.as_deref(),
                 access_tok.as_deref(),
                 force_this,
-                false,
             )?;
+            push_refresh_error(&mut refresh_errors, error);
             usage_service
                 .record_usage_snapshot(comp_id.as_deref(), usage_view.usage.as_ref())?;
             let chart_data = build_profile_chart_data(
@@ -157,12 +195,15 @@ fn load_claude_profiles(
             let snapshot = store
                 .get_current_snapshot()
                 .unwrap_or(serde_json::json!({}));
-            let usage_view = usage_service.read_usage(
+            let (usage_view, error) = read_usage_for_profile(
+                "Claude",
+                "current",
+                usage_service,
                 Some(&comp_id),
                 Some(access_tok.as_str()),
                 force_current,
-                false,
             )?;
+            push_refresh_error(&mut refresh_errors, error);
             usage_service.record_usage_snapshot(Some(&comp_id), usage_view.usage.as_ref())?;
             let chart_data = build_profile_chart_data(
                 Some(&comp_id),
@@ -182,7 +223,7 @@ fn load_claude_profiles(
         }
     }
 
-    Ok(profiles)
+    Ok((profiles, refresh_errors))
 }
 
 fn build_saved_entry(
@@ -191,17 +232,21 @@ fn build_saved_entry(
     usage_service: &UsageService,
     force_refresh: bool,
     refresh_account_id: Option<&str>,
+    refresh_errors: &mut Vec<String>,
 ) -> Result<ProfileEntry> {
     let account_id = read_account_id(&profile.snapshot);
     let access_token = read_access_token(&profile.snapshot);
     let force_this_profile = force_refresh
         || refresh_account_id.is_some_and(|target| account_id.as_deref() == Some(target));
-    let usage_view = usage_service.read_usage(
+    let (usage_view, error) = read_usage_for_profile(
+        "Codex",
+        &profile.name,
+        usage_service,
         account_id.as_deref(),
         access_token.as_deref(),
         force_this_profile,
-        false,
     )?;
+    push_refresh_error(refresh_errors, error);
     usage_service.record_usage_snapshot(account_id.as_deref(), usage_view.usage.as_ref())?;
     let chart_data =
         build_profile_chart_data(account_id.as_deref(), usage_view.usage.as_ref(), usage_service)?;
@@ -216,6 +261,36 @@ fn build_saved_entry(
         is_current: current_account_id.as_deref() == account_id.as_deref(),
         chart_data,
     })
+}
+
+fn read_usage_for_profile(
+    service_label: &str,
+    profile_label: &str,
+    usage_service: &UsageService,
+    account_id: Option<&str>,
+    access_token: Option<&str>,
+    force_refresh: bool,
+) -> Result<(UsageReadResult, Option<String>)> {
+    if !force_refresh {
+        return Ok((
+            usage_service.read_usage(account_id, access_token, false, false)?,
+            None,
+        ));
+    }
+
+    match usage_service.read_usage(account_id, access_token, true, false) {
+        Ok(view) => Ok((view, None)),
+        Err(error) => Ok((
+            usage_service.read_usage(account_id, access_token, false, false)?,
+            Some(format!("{service_label} {profile_label}: {error:#}")),
+        )),
+    }
+}
+
+fn push_refresh_error(errors: &mut Vec<String>, error: Option<String>) {
+    if let Some(error) = error {
+        errors.push(error);
+    }
 }
 
 fn build_profile_chart_data(
@@ -256,6 +331,7 @@ fn build_five_hour_band(
     let Some(five_hour_window) = five_hour_window else {
         return OwnedFiveHourBandState {
             available: false,
+            used_percent: None,
             lower_y: None,
             upper_y: None,
             delta_seven_day_percent: None,
@@ -266,6 +342,7 @@ fn build_five_hour_band(
     let used = five_hour_window.used_percent.clamp(0.0, 100.0);
     OwnedFiveHourBandState {
         available: true,
+        used_percent: Some(used),
         lower_y: Some((used - 10.0).max(0.0)),
         upper_y: Some((used + 10.0).min(100.0)),
         delta_seven_day_percent: weekly_window.map(|weekly| used - weekly.used_percent),
@@ -418,6 +495,12 @@ fn sanitize_name_part(input: Option<&str>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::claude::{ClaudePaths, ClaudeStore};
+    use crate::paths::AppPaths;
+    use crate::store::{AccountStore, StorePlatform};
+    use crate::usage::UsageRateLimit;
+    use std::fs;
+    use std::path::PathBuf;
 
     #[test]
     fn matching_window_history_projects_real_observation_points() {
@@ -504,7 +587,6 @@ mod tests {
     #[test]
     fn claude_profile_chart_uses_recorded_history() {
         use crate::usage::{UsageRateLimit, UsageResponse, UsageWindow};
-        use std::path::PathBuf;
 
         let cache_path = PathBuf::from("dummy_cache.json");
         let history_path =
@@ -547,5 +629,110 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(history_path);
+    }
+
+    fn unique_temp_dir(prefix: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "{prefix}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn sample_usage(plan: &str) -> UsageResponse {
+        UsageResponse {
+            email: Some("demo@example.com".to_string()),
+            plan_type: Some(plan.to_string()),
+            rate_limit: Some(UsageRateLimit {
+                primary_window: Some(UsageWindow {
+                    used_percent: 42.0,
+                    limit_window_seconds: 604_800,
+                    reset_after_seconds: 3_600,
+                    reset_at: 1_700_000_000,
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: 18.0,
+                    limit_window_seconds: 18_000,
+                    reset_after_seconds: 900,
+                    reset_at: 1_699_990_000,
+                }),
+            }),
+        }
+    }
+
+    #[test]
+    fn force_refresh_collects_claude_errors_without_dropping_codex_profiles() {
+        let base = unique_temp_dir("loader-partial-refresh");
+        let codex_paths = AppPaths::from_codex_dir(base.join("codex"));
+        let store = AccountStore::new(codex_paths.clone(), StorePlatform::Copy);
+        let codex_snapshot = serde_json::json!({
+            "tokens": { "account_id": "acct-codex", "access_token": "token-codex" }
+        });
+        store.save_snapshot("codex-one", &codex_snapshot).unwrap();
+        fs::create_dir_all(codex_paths.codex_dir()).unwrap();
+        fs::write(
+            codex_paths.auth_path(),
+            serde_json::to_vec_pretty(&codex_snapshot).unwrap(),
+        )
+        .unwrap();
+
+        let claude_paths = ClaudePaths::from_claude_dir(base.join("claude"));
+        fs::create_dir_all(claude_paths.claude_dir()).unwrap();
+        let claude_snapshot = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "token-claude",
+                "refreshToken": "sk-ant-ort01-refresh-token-claude",
+                "expiresAt": 1700000000,
+                "subscriptionType": "pro"
+            }
+        });
+        fs::write(
+            claude_paths.credentials_path(),
+            serde_json::to_vec_pretty(&claude_snapshot).unwrap(),
+        )
+        .unwrap();
+        let claude_store = ClaudeStore::new(claude_paths.clone());
+        claude_store.save_snapshot("claude-one", &claude_snapshot).unwrap();
+
+        let codex_usage = UsageService::new(
+            codex_paths.limit_cache_path().to_path_buf(),
+            codex_paths.usage_history_path().to_path_buf(),
+            300,
+        )
+        .with_fetcher(|_, _| Ok(sample_usage("team")));
+        let claude_usage = UsageService::new(
+            claude_paths.limit_cache_path().to_path_buf(),
+            claude_paths.usage_history_path().to_path_buf(),
+            300,
+        )
+        .with_fetcher(|_, _| Err(anyhow::anyhow!("Claude usage request failed: 429")));
+
+        let report = load_profiles_with_report(
+            &store,
+            &codex_usage,
+            true,
+            None,
+            Some(&claude_store),
+            Some(&claude_usage),
+        )
+        .unwrap();
+
+        assert!(report
+            .profiles
+            .iter()
+            .any(|profile| profile.kind == ProfileKind::Codex));
+        assert!(report
+            .profiles
+            .iter()
+            .any(|profile| profile.kind == ProfileKind::Claude));
+        assert!(report
+            .refresh_errors
+            .iter()
+            .any(|error| error.contains("Claude")));
     }
 }

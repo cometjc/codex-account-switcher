@@ -7,8 +7,8 @@ const {spawnSync} = require('node:child_process');
 const repoRoot = path.resolve(__dirname, '..');
 const manifestPath = path.join(repoRoot, 'rust', 'plot-viewer', 'Cargo.toml');
 const binaryCandidates = [
-  path.join(repoRoot, 'rust', 'plot-viewer', 'target', 'release', 'codex-auth'),
-  path.join(repoRoot, 'rust', 'plot-viewer', 'target', 'debug', 'codex-auth'),
+  path.join(repoRoot, 'rust', 'plot-viewer', 'target', 'release', 'agent-switch'),
+  path.join(repoRoot, 'rust', 'plot-viewer', 'target', 'debug', 'agent-switch'),
 ];
 const argv = process.argv.slice(2);
 
@@ -26,6 +26,10 @@ function run(binaryPath, binaryArgs) {
   process.exit(result.status ?? 1);
 }
 
+if (process.env.AGENT_SWITCH_BIN) {
+  run(process.env.AGENT_SWITCH_BIN, argv);
+}
+
 if (process.env.CODEX_AUTH_BIN) {
   run(process.env.CODEX_AUTH_BIN, argv);
 }
@@ -37,4 +41,4 @@ for (const candidate of binaryCandidates) {
 }
 
 const cargo = process.env.CARGO || 'cargo';
-run(cargo, ['run', '--manifest-path', manifestPath, '--bin', 'codex-auth', '--', ...argv]);
+run(cargo, ['run', '--manifest-path', manifestPath, '--bin', 'agent-switch', '--', ...argv]);

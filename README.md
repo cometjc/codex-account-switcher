@@ -1,4 +1,4 @@
-# codex-auth
+# agent-switch
 
 A command-line tool that lets you manage, switch, and inspect multiple Codex accounts from a unified Rust TUI.
 
@@ -7,7 +7,7 @@ A command-line tool that lets you manage, switch, and inspect multiple Codex acc
 
 ## How it Works
 
-Codex stores your authentication session in a single `auth.json` file. This tool works by creating named snapshots of that file for each of your accounts. When you want to switch, `codex-auth` swaps the active `~/.codex/auth.json` with the snapshot you select, instantly changing your logged-in account.
+Codex stores your authentication session in a single `auth.json` file. This tool works by creating named snapshots of that file for each of your accounts. When you want to switch, `agent-switch` swaps the active `~/.codex/auth.json` with the snapshot you select, instantly changing your logged-in account.
 
 ## Requirements
 
@@ -16,22 +16,22 @@ Codex stores your authentication session in a single `auth.json` file. This tool
 
 ## Rust TUI
 
-`codex-auth` now has a Rust-first runtime for auth/profile management and plot rendering.
+`agent-switch` now has a Rust-first runtime for auth/profile management and plot rendering.
 
 - Auth snapshot storage, saved profile switching, usage cache reads, and the plot view all live in the same Rust app.
 - Plot is no longer treated as a separate external viewer truth; it is a built-in view of the main TUI.
-- The npm package is now a thin shim that forwards `codex-auth` into the single Rust `codex-auth` binary entrypoint.
+- The npm package is now a thin shim that forwards `agent-switch` into the single Rust `agent-switch` binary entrypoint.
 
 ## Build
 
 ```sh
-cargo build --manifest-path rust/plot-viewer/Cargo.toml --bin codex-auth
+cargo build --manifest-path rust/plot-viewer/Cargo.toml --bin agent-switch
 ```
 
 ## Install (npm)
 
 ```sh
-npm i -g codex-auth
+npm i -g agent-switch
 ```
 
 The npm package is only a thin shim; the product runtime lives in the Rust binary.
@@ -40,7 +40,7 @@ The npm package is only a thin shim; the product runtime lives in the Rust binar
 
 ```sh
 # start the Rust interactive profile manager
-codex-auth
+agent-switch
 ```
 
 ### Interactive controls
@@ -72,12 +72,13 @@ If you want to verify Claude live refresh and chart generation on a machine that
 
 The script will:
 
-- run `codex-auth --refresh-all`
+- run `agent-switch --refresh-all`
 - assert that Claude cache/history files were created or updated under `~/.claude/`
 - summarize whether weekly / 5h history entries exist
 - print the final manual TUI smoke-check steps
 
 Notes:
 
+- If Claude usage returns HTTP `429`, `agent-switch` does **not** retry with the same access token. It refreshes the current Claude OAuth credentials in `~/.claude/.credentials.json`, then makes one follow-up usage request with the rotated token.
 - Works on macOS/Linux with symlink switching and on Windows with file copy switching.
 - Node remains in the repo for executor automation and NLSDD tooling, not as the primary auth runtime.

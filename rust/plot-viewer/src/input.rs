@@ -25,7 +25,13 @@ pub enum InputAction {
     Cancel,
 }
 
-pub fn map_event(event: &Event) -> Option<InputAction> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputContext {
+    Normal,
+    TextEntry,
+}
+
+pub fn map_event(event: &Event, context: InputContext) -> Option<InputAction> {
     let Event::Key(KeyEvent {
         code,
         modifiers,
@@ -38,6 +44,25 @@ pub fn map_event(event: &Event) -> Option<InputAction> {
 
     if *kind != KeyEventKind::Press {
         return None;
+    }
+
+    if modifiers.contains(KeyModifiers::CONTROL) && matches!(code, KeyCode::Char('c')) {
+        return Some(InputAction::Quit);
+    }
+
+    if matches!(context, InputContext::TextEntry) {
+        return match code {
+            KeyCode::Esc => Some(InputAction::Cancel),
+            KeyCode::Enter => Some(InputAction::Enter),
+            KeyCode::Backspace | KeyCode::Delete => Some(InputAction::Backspace),
+            KeyCode::Up => Some(InputAction::Up),
+            KeyCode::Down => Some(InputAction::Down),
+            KeyCode::Left => Some(InputAction::Left),
+            KeyCode::Right => Some(InputAction::Right),
+            KeyCode::Tab => Some(InputAction::Character('\t')),
+            KeyCode::Char(ch) => Some(InputAction::Character(*ch)),
+            _ => None,
+        };
     }
 
     match code {
@@ -63,8 +88,56 @@ pub fn map_event(event: &Event) -> Option<InputAction> {
         KeyCode::Char('a') => Some(InputAction::RefreshAll),
         KeyCode::Char('n') => Some(InputAction::Rename),
         KeyCode::Delete | KeyCode::Char('d') => Some(InputAction::Delete),
-        KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => Some(InputAction::Quit),
         KeyCode::Char(ch) => Some(InputAction::Character(*ch)),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(code: KeyCode) -> Event {
+        Event::Key(KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    #[test]
+    fn normal_context_keeps_global_hotkeys() {
+        assert_eq!(
+            map_event(&key(KeyCode::Char('n')), InputContext::Normal),
+            Some(InputAction::Rename)
+        );
+        assert_eq!(
+            map_event(&key(KeyCode::Char('q')), InputContext::Normal),
+            Some(InputAction::Quit)
+        );
+    }
+
+    #[test]
+    fn text_entry_context_treats_hotkeys_as_characters() {
+        assert_eq!(
+            map_event(&key(KeyCode::Char('n')), InputContext::TextEntry),
+            Some(InputAction::Character('n'))
+        );
+        assert_eq!(
+            map_event(&key(KeyCode::Char('d')), InputContext::TextEntry),
+            Some(InputAction::Character('d'))
+        );
+        assert_eq!(
+            map_event(&key(KeyCode::Char('u')), InputContext::TextEntry),
+            Some(InputAction::Character('u'))
+        );
+        assert_eq!(
+            map_event(&key(KeyCode::Char('a')), InputContext::TextEntry),
+            Some(InputAction::Character('a'))
+        );
+        assert_eq!(
+            map_event(&key(KeyCode::Char('q')), InputContext::TextEntry),
+            Some(InputAction::Character('q'))
+        );
+        assert_eq!(
+            map_event(&key(KeyCode::Char('/')), InputContext::TextEntry),
+            Some(InputAction::Character('/'))
+        );
     }
 }

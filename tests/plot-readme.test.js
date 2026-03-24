@@ -9,7 +9,7 @@ function readReadme() {
   return fs.readFileSync(README_PATH, 'utf8');
 }
 
-test('README reflects the Rust-first codex-auth runtime and thin npm shim', () => {
+test('README reflects the Rust-first agent-switch runtime and thin npm shim', () => {
   const readme = readReadme();
 
   const plotSectionIndex = readme.indexOf('## Rust TUI');
@@ -29,7 +29,7 @@ test('README reflects the Rust-first codex-auth runtime and thin npm shim', () =
 
   assert.match(
     plotSection,
-    /`codex-auth` now has a Rust-first runtime for auth\/profile management and plot rendering\./,
+    /`agent-switch` now has a Rust-first runtime for auth\/profile management and plot rendering\./,
   );
   assert.match(
     plotSection,
@@ -41,7 +41,7 @@ test('README reflects the Rust-first codex-auth runtime and thin npm shim', () =
   );
   assert.match(
     plotSection,
-    /thin shim.*single Rust `codex-auth` binary entrypoint/i,
+    /thin shim.*single Rust `agent-switch` binary entrypoint/i,
   );
   assert.match(readme, /Node\.js 18 or newer for repo automation and NLSDD scripts/);
   assert.doesNotMatch(plotSection, /@oclif\/core|dist\/index\.js|legacy development helpers|plot:viewer:\*/);
