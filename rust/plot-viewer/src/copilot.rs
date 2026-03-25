@@ -179,14 +179,31 @@ fn parse_copilot_config(raw: &str) -> Result<CopilotCredentials> {
 pub(crate) struct CopilotUserResponse {
     login: Option<String>,
     copilot_plan: Option<String>,
+    // Individual/free plan fields
     monthly_quotas: Option<CopilotQuotas>,
     limited_user_quotas: Option<CopilotQuotas>,
     limited_user_reset_date: Option<String>,
+    // Business/Pro plan fields
+    quota_snapshots: Option<CopilotQuotaSnapshots>,
+    quota_reset_date_utc: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
 struct CopilotQuotas {
     chat: Option<u64>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct CopilotQuotaEntry {
+    pub(crate) entitlement: u64,
+    pub(crate) remaining: u64,
+    pub(crate) percent_remaining: f64,
+    pub(crate) unlimited: bool,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct CopilotQuotaSnapshots {
+    pub(crate) premium_interactions: Option<CopilotQuotaEntry>,
 }
 
 // ── Usage fetching ────────────────────────────────────────────────────────────
@@ -212,6 +229,38 @@ pub fn fetch_copilot_usage(_account_id: &str, access_token: &str) -> Result<Usag
 }
 
 pub(crate) fn map_copilot_usage_response(r: &CopilotUserResponse) -> Option<UsageResponse> {
+    let plan_type = r.copilot_plan.clone().unwrap_or_else(|| "copilot".to_string());
+
+    // ── Business/Pro path: quota_snapshots.premium_interactions ──────────────
+    if let Some(snapshots) = &r.quota_snapshots {
+        if let Some(pi) = &snapshots.premium_interactions {
+            if !pi.unlimited {
+                let used_percent = (100.0 - pi.percent_remaining).clamp(0.0, 100.0);
+                let reset_date = r.quota_reset_date_utc.as_deref().unwrap_or("");
+                let reset_at = crate::claude::parse_rfc3339_unix(reset_date).unwrap_or(0);
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64;
+                let reset_after_seconds = (reset_at - now).max(0);
+                return Some(UsageResponse {
+                    email: r.login.clone(),
+                    plan_type: Some(plan_type),
+                    rate_limit: Some(UsageRateLimit {
+                        primary_window: None,
+                        secondary_window: Some(UsageWindow {
+                            used_percent,
+                            limit_window_seconds: 604_800,
+                            reset_at,
+                            reset_after_seconds,
+                        }),
+                    }),
+                });
+            }
+        }
+    }
+
+    // ── Individual/free path: limited_user_quotas.chat ───────────────────────
     let total = r.monthly_quotas.as_ref()?.chat? as f64;
     let remaining = r.limited_user_quotas.as_ref()?.chat? as f64;
     let used = (total - remaining).max(0.0);
@@ -228,8 +277,6 @@ pub(crate) fn map_copilot_usage_response(r: &CopilotUserResponse) -> Option<Usag
         .unwrap_or_default()
         .as_secs() as i64;
     let reset_after_seconds = (reset_at - now).max(0);
-
-    let plan_type = r.copilot_plan.clone().unwrap_or_else(|| "copilot".to_string());
 
     Some(UsageResponse {
         email: r.login.clone(),
@@ -283,6 +330,8 @@ mod tests {
             monthly_quotas: Some(CopilotQuotas { chat: Some(500) }),
             limited_user_quotas: Some(CopilotQuotas { chat: Some(290) }),
             limited_user_reset_date: Some("2026-03-28".to_string()),
+            quota_snapshots: None,
+            quota_reset_date_utc: None,
         };
         let usage = map_copilot_usage_response(&r).unwrap();
         assert_eq!(usage.plan_type.as_deref(), Some("individual"));
@@ -310,5 +359,49 @@ mod tests {
     fn parse_copilot_config_returns_err_when_no_last_user() {
         let raw = r#"{"copilot_tokens": {"https://github.com:x": "tok"}}"#;
         assert!(parse_copilot_config(raw).is_err());
+    }
+
+    #[test]
+    fn map_copilot_usage_response_handles_business_quota_snapshots() {
+        let r = CopilotUserResponse {
+            login: Some("teamt5-it".to_string()),
+            copilot_plan: Some("business".to_string()),
+            monthly_quotas: None,
+            limited_user_quotas: None,
+            limited_user_reset_date: None,
+            quota_snapshots: Some(CopilotQuotaSnapshots {
+                premium_interactions: Some(CopilotQuotaEntry {
+                    entitlement: 300,
+                    remaining: 40,
+                    percent_remaining: 13.4,
+                    unlimited: false,
+                }),
+            }),
+            quota_reset_date_utc: Some("2026-04-01T00:00:00.000Z".to_string()),
+        };
+        let usage = map_copilot_usage_response(&r).unwrap();
+        assert_eq!(usage.plan_type.as_deref(), Some("business"));
+        let window = usage.rate_limit.unwrap().secondary_window.unwrap();
+        // used = 100 - 13.4 = 86.6
+        assert!((window.used_percent - 86.6).abs() < 0.1,
+            "expected ~86.6%, got {}", window.used_percent);
+        assert!(window.reset_at > 0);
+    }
+
+    #[test]
+    fn map_copilot_usage_response_falls_back_to_individual_schema() {
+        let r = CopilotUserResponse {
+            login: Some("alice".to_string()),
+            copilot_plan: Some("individual".to_string()),
+            monthly_quotas: Some(CopilotQuotas { chat: Some(500) }),
+            limited_user_quotas: Some(CopilotQuotas { chat: Some(290) }),
+            limited_user_reset_date: Some("2026-03-28".to_string()),
+            quota_snapshots: None,
+            quota_reset_date_utc: None,
+        };
+        let usage = map_copilot_usage_response(&r).unwrap();
+        let window = usage.rate_limit.unwrap().secondary_window.unwrap();
+        assert!((window.used_percent - 42.0).abs() < 0.01,
+            "expected ~42%, got {}", window.used_percent);
     }
 }
