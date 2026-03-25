@@ -15,6 +15,7 @@ use crate::usage::{UsageRateLimit, UsageResponse, UsageWindow};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CopilotPaths {
     gh_hosts_path: PathBuf,
+    copilot_config_path: PathBuf,
     limit_cache_path: PathBuf,
     usage_history_path: PathBuf,
 }
@@ -32,12 +33,14 @@ impl CopilotPaths {
         let cache_dir = home.join(".config").join("agent-switch").join("copilot");
         Self {
             gh_hosts_path: gh_config_dir.join("hosts.yml"),
+            copilot_config_path: home.join(".copilot").join("config.json"),
             limit_cache_path: cache_dir.join("limit-cache.json"),
             usage_history_path: cache_dir.join("usage-history.json"),
         }
     }
 
     pub fn gh_hosts_path(&self) -> &Path { &self.gh_hosts_path }
+    pub fn copilot_config_path(&self) -> &Path { &self.copilot_config_path }
     pub fn limit_cache_path(&self) -> &Path { &self.limit_cache_path }
     pub fn usage_history_path(&self) -> &Path { &self.usage_history_path }
 }
@@ -56,10 +59,13 @@ impl CopilotCredentials {
         format!("copilot-{}", self.login)
     }
 
-    /// Try to detect credentials from the default gh hosts.yml location.
+    /// Try to detect credentials, preferring the copilot CLI's own token store
+    /// (`~/.copilot/config.json`) over the gh CLI hosts file.
     pub fn detect() -> Option<Self> {
         let paths = CopilotPaths::detect();
-        detect_from_path(paths.gh_hosts_path()).ok()
+        detect_from_copilot_config(paths.copilot_config_path())
+            .or_else(|_| detect_from_path(paths.gh_hosts_path()))
+            .ok()
     }
 }
 
@@ -67,6 +73,13 @@ pub fn detect_from_path(path: &Path) -> Result<CopilotCredentials> {
     let raw = fs::read_to_string(path)
         .with_context(|| format!("read {}", path.display()))?;
     parse_gh_hosts(&raw)
+        .with_context(|| format!("parse {}", path.display()))
+}
+
+pub fn detect_from_copilot_config(path: &Path) -> Result<CopilotCredentials> {
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("read {}", path.display()))?;
+    parse_copilot_config(&raw)
         .with_context(|| format!("parse {}", path.display()))
 }
 
@@ -121,6 +134,43 @@ fn parse_gh_hosts(raw: &str) -> Result<CopilotCredentials> {
         (None, _) => bail!("no GitHub user found in gh hosts.yml"),
         (_, None) => bail!("no oauth_token found in gh hosts.yml"),
     }
+}
+
+/// Parse ~/.copilot/config.json to extract the last-logged-in user and their token.
+///
+/// Expected format:
+/// ```json
+/// {
+///   "last_logged_in_user": {"host": "https://github.com", "login": "alice"},
+///   "copilot_tokens": {"https://github.com:alice": "gho_..."}
+/// }
+/// ```
+fn parse_copilot_config(raw: &str) -> Result<CopilotCredentials> {
+    #[derive(serde::Deserialize)]
+    struct UserEntry {
+        host: String,
+        login: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct CopilotConfig {
+        last_logged_in_user: Option<UserEntry>,
+        copilot_tokens: Option<std::collections::HashMap<String, String>>,
+    }
+
+    let cfg: CopilotConfig = serde_json::from_str(raw)
+        .context("parse copilot config.json")?;
+
+    let user = cfg.last_logged_in_user
+        .ok_or_else(|| anyhow::anyhow!("no last_logged_in_user in copilot config.json"))?;
+
+    let key = format!("{}:{}", user.host.trim_end_matches('/'), user.login);
+    let token = cfg.copilot_tokens
+        .as_ref()
+        .and_then(|m| m.get(&key))
+        .ok_or_else(|| anyhow::anyhow!("no copilot_token for {key}"))?
+        .clone();
+
+    Ok(CopilotCredentials { login: user.login, oauth_token: token })
 }
 
 // ── API response types ────────────────────────────────────────────────────────
@@ -240,5 +290,25 @@ mod tests {
         // (500-290)/500 * 100 = 42%
         assert!((window.used_percent - 42.0).abs() < 0.01, "expected ~42%, got {}", window.used_percent);
         assert!(window.reset_at > 0);
+    }
+
+    #[test]
+    fn parse_copilot_config_extracts_login_and_token() {
+        let raw = r#"{
+            "logged_in_users": [{"host": "https://github.com", "login": "teamt5-it"}],
+            "last_logged_in_user": {"host": "https://github.com", "login": "teamt5-it"},
+            "copilot_tokens": {
+                "https://github.com:teamt5-it": "gho_businesstoken"
+            }
+        }"#;
+        let creds = parse_copilot_config(raw).unwrap();
+        assert_eq!(creds.login, "teamt5-it");
+        assert_eq!(creds.oauth_token, "gho_businesstoken");
+    }
+
+    #[test]
+    fn parse_copilot_config_returns_err_when_no_last_user() {
+        let raw = r#"{"copilot_tokens": {"https://github.com:x": "tok"}}"#;
+        assert!(parse_copilot_config(raw).is_err());
     }
 }
