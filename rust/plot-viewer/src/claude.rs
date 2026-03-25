@@ -165,6 +165,22 @@ impl ClaudeStore {
         Ok(name)
     }
 
+    /// Overwrite a saved profile with the current credentials (e.g. after token rotation).
+    pub fn update_account(&self, raw_name: &str) -> Result<String> {
+        let name = normalize_account_name(raw_name)?;
+        self.ensure_credentials_exist()?;
+        fs::copy(self.paths.credentials_path(), self.account_file_path(&name))
+            .with_context(|| format!("update saved profile {}", name))?;
+        Ok(name)
+    }
+
+    /// Write the current profile name file without switching credentials.
+    pub fn set_current_name(&self, raw_name: &str) -> Result<()> {
+        let name = normalize_account_name(raw_name)?;
+        fs::write(self.paths.current_name_path(), format!("{name}\n"))
+            .with_context(|| format!("write {}", self.paths.current_name_path().display()))
+    }
+
     pub fn save_snapshot(&self, raw_name: &str, snapshot: &Value) -> Result<String> {
         let name = normalize_account_name(raw_name)?;
         self.ensure_accounts_dir()?;
@@ -466,7 +482,8 @@ where
         .context("Claude credentials missing accessToken")?
         .to_string();
     if stored_access_token != current_access_token {
-        bail!("current Claude credentials do not match the rate-limited token");
+        // Credentials were already rotated externally (e.g. by Claude Code) — use the fresher stored token
+        return Ok(stored_access_token);
     }
     let stored_refresh_token = oauth
         .get("refreshToken")

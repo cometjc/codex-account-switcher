@@ -146,7 +146,10 @@ pub fn load_profiles_with_report(
         }
     }
 
-    profiles.sort_by(|left, right| left.profile_name.cmp(&right.profile_name));
+    profiles.sort_by(|left, right| {
+        left.kind.as_str().cmp(right.kind.as_str())
+            .then_with(|| left.profile_name.cmp(&right.profile_name))
+    });
     Ok(ProfileLoadReport {
         profiles,
         refresh_errors,
@@ -162,6 +165,7 @@ fn load_claude_profiles(
     let saved = store.list_saved_profiles()?;
     let current_creds = store.get_current_credentials().ok();
     let current_account_id = current_creds.as_ref().map(|c| c.account_id());
+    let current_name = store.get_current_account_name().ok().flatten();
     let mut refresh_errors = Vec::new();
 
     // Helper: composite key for UsageService cache
@@ -201,6 +205,8 @@ fn load_claude_profiles(
                 usage_view.usage.as_ref(),
                 usage_service,
             )?;
+            let is_current = current_account_id.as_deref() == acct_id.as_deref()
+                || current_name.as_deref() == Some(saved_profile.name.as_str());
             Ok(ProfileEntry {
                 kind: ProfileKind::Claude,
                 saved_name: Some(saved_profile.name.clone()),
@@ -208,11 +214,25 @@ fn load_claude_profiles(
                 snapshot: saved_profile.snapshot,
                 usage_view,
                 account_id: acct_id.clone(),
-                is_current: current_account_id.as_deref() == acct_id.as_deref(),
+                is_current,
                 chart_data,
             })
         })
         .collect::<Result<Vec<_>>>()?;
+
+    // When Claude Code rotates tokens, the saved profile's account_id becomes stale.
+    // If current_name matches a saved profile by name but has a different account_id,
+    // update the saved file on disk with the fresh credentials so future loads match correctly.
+    if let (Some(creds), Some(ref name)) = (&current_creds, &current_name) {
+        let new_acct_id = creds.account_id();
+        let stale = profiles.iter().any(|p| {
+            p.saved_name.as_deref() == Some(name.as_str())
+                && p.account_id.as_deref() != Some(new_acct_id.as_str())
+        });
+        if stale {
+            let _ = store.update_account(name);
+        }
+    }
 
     // Add unsaved current Claude profile if not already in saved list
     if let Some(creds) = &current_creds {
@@ -220,8 +240,42 @@ fn load_claude_profiles(
         let access_tok = creds.access_token().to_string();
         let comp_id = composite_id(creds);
         let sub_type = creds.subscription_type().to_string();
-        let already_saved =
-            profiles.iter().any(|p| p.account_id.as_deref() == Some(acct_id.as_str()));
+
+        let matched_by_acct_or_name = profiles.iter().any(|p| {
+            p.account_id.as_deref() == Some(acct_id.as_str())
+                || current_name.as_deref().is_some_and(|n| p.saved_name.as_deref() == Some(n))
+        });
+
+        // Fallback: if exactly one saved profile shares the same subscriptionType,
+        // treat it as the same account (e.g. after a full re-auth that changes refresh token).
+        let sub_type_match_name: Option<String> = if !matched_by_acct_or_name {
+            let matches: Vec<_> = profiles
+                .iter()
+                .filter(|p| {
+                    serde_json::from_value::<crate::claude::ClaudeCredentials>(p.snapshot.clone())
+                        .ok()
+                        .map(|c| c.subscription_type() == sub_type.as_str())
+                        .unwrap_or(false)
+                })
+                .collect();
+            if matches.len() == 1 { matches[0].saved_name.clone() } else { None }
+        } else {
+            None
+        };
+
+        if let Some(ref matched_name) = sub_type_match_name {
+            // Auto-merge: update saved file with current credentials and record current name
+            let _ = store.update_account(matched_name);
+            let _ = store.set_current_name(matched_name);
+            for p in profiles.iter_mut() {
+                if p.saved_name.as_deref() == Some(matched_name.as_str()) {
+                    p.is_current = true;
+                    p.account_id = Some(acct_id.clone());
+                }
+            }
+        }
+
+        let already_saved = matched_by_acct_or_name || sub_type_match_name.is_some();
         if !already_saved {
             let force_current =
                 force_refresh || refresh_account_id.is_some_and(|t| t == acct_id.as_str());

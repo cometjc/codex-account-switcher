@@ -50,17 +50,16 @@ pub fn render_chart<State: RenderState>(frame: &mut Frame, context: &RenderConte
 
     render_usage_chart(frame, chart_area, &chart_state);
 
-    let hint_line = match chart_state.cursor_x {
-        Some(cx) => format!("Cursor: {:.1}d ago  (←→ move, ↑↓ profile)", 7.0 - cx),
-        None => {
-            let window_label = match (chart_state.x_lower * 10.0).round() as i32 {
-                0 => "7d",
-                40 => "3d",
-                60 => "1d",
-                _ => "?d",
-            };
-            format!("Window: {} · ←→ zoom · ↑↓=y · z=reset · 1/3/7=snap", window_label)
-        }
+    let window_label = match (chart_state.x_lower * 10.0).round() as i32 {
+        0 => "7d",
+        40 => "3d",
+        60 => "1d",
+        _ => "?d",
+    };
+    let hint_line = if chart_state.fullscreen {
+        format!("Window: {} · ←→ zoom · ↑↓=y · z=reset · 1/3/7=snap · {}", window_label, env!("BUILD_VER"))
+    } else {
+        format!("Window: {} · ←→ zoom · ↑↓=y · z=reset · 1/3/7=snap", window_label)
     };
     let band_summary = Paragraph::new(Text::from(vec![Line::from(hint_line)]))
         .wrap(Wrap { trim: true });
@@ -134,25 +133,6 @@ fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_stat
         })
         .collect::<Vec<_>>();
 
-    let cursor_points: Option<Vec<(f64, f64)>> = chart_state.cursor_x.map(|cx| {
-        let steps = 40usize;
-        (0..=steps)
-            .map(|i| {
-                let y = y_bounds[0] + (y_bounds[1] - y_bounds[0]) * (i as f64 / steps as f64);
-                (cx, y)
-            })
-            .collect()
-    });
-    if let Some(ref pts) = cursor_points {
-        datasets.push(
-            Dataset::default()
-                .name("")
-                .marker(Marker::Braille)
-                .graph_type(GraphType::Line)
-                .style(Style::default().fg(Color::Gray))
-                .data(pts),
-        );
-    }
 
     let x_mid = (x_bounds[0] + 7.0) / 2.0;
     let x_label_lo = format!("{:.1}d", x_bounds[0]);
@@ -322,7 +302,8 @@ fn band_background_color(color_slot: usize) -> Color {
 
 fn format_end_label(series: &super::ChartSeries<'_>) -> String {
     format!(
-        "{} (7d {} 5h {})",
+        "[{}] {} {}/{}",
+        series.profile.agent_type,
         series.profile.label,
         format_unsigned_percent(series.last_seven_day_percent),
         format_unsigned_percent(series.five_hour_used_percent),
@@ -331,7 +312,7 @@ fn format_end_label(series: &super::ChartSeries<'_>) -> String {
 
 fn format_unsigned_percent(value: Option<f64>) -> String {
     value
-        .map(|value| format!("{value:.1}%"))
+        .map(|value| format!("{:.0}%", value))
         .unwrap_or("?%".to_string())
 }
 
@@ -516,6 +497,7 @@ mod tests {
                 id: "alpha",
                 label: "Alpha",
                 is_current: true,
+                agent_type: "codex",
             },
             style: ChartSeriesStyle {
                 color_slot: 0,
@@ -535,7 +517,7 @@ mod tests {
             },
         };
 
-        assert_eq!(format_end_label(&series), "Alpha (7d 76.0% 5h 40.0%)");
+        assert_eq!(format_end_label(&series), "[codex] Alpha 76%/40%");
     }
 
     #[test]
@@ -546,11 +528,13 @@ mod tests {
                     id: "alpha",
                     label: "Alpha",
                     is_current: false,
+                    agent_type: "codex",
                 }),
                 current: Some(RenderProfile {
                     id: "beta",
                     label: "Beta",
                     is_current: true,
+                    agent_type: "codex",
                 }),
             },
             chart: ChartState {
@@ -559,6 +543,7 @@ mod tests {
                         id: "alpha",
                         label: "Alpha",
                         is_current: false,
+                        agent_type: "codex",
                     },
                     style: ChartSeriesStyle {
                         color_slot: 0,
@@ -612,7 +597,6 @@ mod tests {
                 y_upper: 100.0,
                 x_lower: 0.0,
                 solo: false,
-                cursor_x: None,
                 focused: false,
                 fullscreen: false,
             },
@@ -622,7 +606,7 @@ mod tests {
         let joined = lines.join("\n");
 
         assert!(joined.contains("usage chart (align to 7d window)"));
-        assert!(joined.contains("Alpha (7d 76.0% 5h 40.0%)"));
+        assert!(joined.contains("[codex] Alpha 76%/40%"));
         assert!(joined.contains("0.0d"));
         assert!(joined.contains("3.5d"));
         assert!(joined.contains("now"));
@@ -645,11 +629,13 @@ mod tests {
                     id: "alpha",
                     label: "Alpha",
                     is_current: true,
+                    agent_type: "codex",
                 }),
                 current: Some(RenderProfile {
                     id: "alpha",
                     label: "Alpha",
                     is_current: true,
+                    agent_type: "codex",
                 }),
             },
             chart: ChartState {
@@ -658,6 +644,7 @@ mod tests {
                         id: "alpha",
                         label: "Alpha",
                         is_current: true,
+                        agent_type: "codex",
                     },
                     style: ChartSeriesStyle {
                         color_slot: 0,
@@ -707,7 +694,6 @@ mod tests {
                 y_upper: 100.0,
                 x_lower: 0.0,
                 solo: false,
-                cursor_x: None,
                 focused: false,
                 fullscreen: false,
             },

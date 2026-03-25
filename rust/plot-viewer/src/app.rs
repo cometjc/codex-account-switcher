@@ -92,6 +92,7 @@ pub struct App {
     pane_focus: PaneFocus,
     y_zoom_lower: f64,
     should_quit: bool,
+    should_exec: bool,
     dialog: Option<DialogState>,
     status_message: Option<String>,
     store: Option<AccountStore>,
@@ -103,10 +104,11 @@ pub struct App {
     solo_mode: bool,
     fullscreen: bool,
     x_window_days: f64,
-    cursor_x: Option<f64>,
     filter_input: Option<String>,
     last_auto_reload: Instant,
     y_zoom_user_adjusted: bool,
+    binary_path: String,
+    binary_mtime: Option<std::time::SystemTime>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -116,7 +118,6 @@ pub(crate) struct AppRenderState<'a> {
     y_zoom_lower: f64,
     solo: bool,
     x_window_days: f64,
-    cursor_x: Option<f64>,
     plot_focused: bool,
     fullscreen: bool,
 }
@@ -131,12 +132,18 @@ impl App {
         copilot_usage_service: Option<UsageService>,
     ) -> Result<Self> {
         let profiles = load_profiles(&store, &usage_service, false, None, claude_store.as_ref(), claude_usage_service.as_ref(), copilot_usage_service.as_ref())?;
+        let binary_path = std::env::current_exe()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let binary_mtime = binary_mtime(&binary_path);
         Ok(Self {
             selected_profile_index: initial_selected_index(&profiles),
             y_zoom_lower: auto_y_lower(&profiles),
             profiles,
-            pane_focus: PaneFocus::Accounts,
+            pane_focus: PaneFocus::Plot,
             should_quit: false,
+            should_exec: false,
             dialog: None,
             status_message: None,
             store: Some(store),
@@ -146,12 +153,13 @@ impl App {
             copilot_usage_service,
             cron_status,
             solo_mode: false,
-            fullscreen: false,
+            fullscreen: true,
             x_window_days: 7.0,
-            cursor_x: None,
             filter_input: None,
             last_auto_reload: Instant::now(),
             y_zoom_user_adjusted: false,
+            binary_path,
+            binary_mtime,
         })
     }
 
@@ -179,9 +187,10 @@ impl App {
         Self {
             profiles,
             selected_profile_index,
-            pane_focus: PaneFocus::Accounts,
+            pane_focus: PaneFocus::Plot,
             y_zoom_lower: 0.0,
             should_quit: false,
+            should_exec: false,
             dialog: None,
             status_message: None,
             store: None,
@@ -191,12 +200,13 @@ impl App {
             copilot_usage_service: None,
             cron_status: CronStatus::uninstalled(),
             solo_mode: false,
-            fullscreen: false,
+            fullscreen: true,
             x_window_days: 7.0,
-            cursor_x: None,
             filter_input: None,
             last_auto_reload: Instant::now(),
             y_zoom_user_adjusted: false,
+            binary_path: String::new(),
+            binary_mtime: None,
         }
     }
 
@@ -210,12 +220,22 @@ impl App {
     }
 
     pub fn run(&mut self) -> Result<()> {
-        let mut terminal = TerminalSession::enter();
-        terminal.run(self)
+        {
+            let mut terminal = TerminalSession::enter();
+            terminal.run(self)?;
+        } // terminal restored here via Drop
+        if self.should_exec && !self.binary_path.is_empty() {
+            use std::os::unix::process::CommandExt;
+            let args: Vec<String> = std::env::args().collect();
+            let _ = std::process::Command::new(&self.binary_path)
+                .args(&args[1..])
+                .exec();
+        }
+        Ok(())
     }
 
     fn run_loop(&mut self, terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
-        while !self.should_quit {
+        while !self.should_quit && !self.should_exec {
             terminal.draw(|frame| self.render(frame))?;
 
             if event::poll(Duration::from_millis(150))? {
@@ -229,6 +249,10 @@ impl App {
             if self.last_auto_reload.elapsed() >= Duration::from_secs(30) {
                 let _ = self.reload_profiles(false, None);
                 self.last_auto_reload = Instant::now();
+                // Check if binary was updated — exec new version if so
+                if binary_mtime(&self.binary_path) != self.binary_mtime {
+                    self.should_exec = true;
+                }
             }
         }
         Ok(())
@@ -259,27 +283,21 @@ impl App {
             }
             InputAction::Left => {
                 if self.pane_focus == PaneFocus::Plot {
-                    if self.cursor_x.is_some() {
-                        self.move_cursor(-1);
-                    } else {
-                        self.x_window_days = (self.x_window_days + 0.5).min(7.0);
-                    }
+                    self.x_window_days = (self.x_window_days + 0.5).min(7.0);
                 }
             }
             InputAction::Right => {
                 if self.pane_focus == PaneFocus::Plot {
-                    if self.cursor_x.is_some() {
-                        self.move_cursor(1);
-                    } else {
-                        self.x_window_days = (self.x_window_days - 0.5).max(0.5);
-                    }
+                    self.x_window_days = (self.x_window_days - 0.5).max(0.5);
                 }
             }
-            InputAction::ToggleFullscreen => {
+            InputAction::ToggleProfiles => {
                 self.fullscreen = !self.fullscreen;
-                if self.fullscreen {
-                    self.pane_focus = PaneFocus::Plot;
-                }
+                self.pane_focus = if self.fullscreen {
+                    PaneFocus::Plot
+                } else {
+                    PaneFocus::Accounts
+                };
             }
             InputAction::NextFocus | InputAction::PreviousFocus => {
                 if !self.fullscreen {
@@ -307,10 +325,6 @@ impl App {
             InputAction::XWindow(days) => {
                 if self.pane_focus == PaneFocus::Plot {
                     self.x_window_days = days as f64;
-                    if let Some(cx) = self.cursor_x {
-                        let new_lower = 7.0 - days as f64;
-                        self.cursor_x = Some(cx.clamp(new_lower, 7.0));
-                    }
                 }
             }
             InputAction::FilterEnter => {
@@ -446,14 +460,6 @@ impl App {
         let len = indices.len() as isize;
         let next_pos = (pos as isize + delta).rem_euclid(len) as usize;
         self.selected_profile_index = indices[next_pos];
-    }
-
-    fn move_cursor(&mut self, direction: isize) {
-        let x_lower = 7.0 - self.x_window_days;
-        let step = self.x_window_days / 20.0;
-        let current = self.cursor_x.unwrap_or(7.0);
-        let next = (current + direction as f64 * step).clamp(x_lower, 7.0);
-        self.cursor_x = Some(next);
     }
 
     fn handle_dialog_action(&mut self, action: InputAction) -> Result<()> {
@@ -761,7 +767,6 @@ impl App {
             y_zoom_lower: self.y_zoom_lower,
             solo: self.solo_mode,
             x_window_days: self.x_window_days,
-            cursor_x: self.cursor_x,
             plot_focused: self.pane_focus == PaneFocus::Plot,
             fullscreen: self.fullscreen,
         };
@@ -773,19 +778,19 @@ impl App {
 
         let footer_lines = if self.fullscreen {
             vec![
-                Line::from("f=exit fullscreen · a=refresh · q=quit"),
+                Line::from("p=profiles · a=refresh · q=quit"),
             ]
         } else {
             match self.pane_focus {
                 PaneFocus::Accounts => vec![
                     Line::from("Enter=switch/save · r=rename · d=delete · u=refresh · a=all · q=quit"),
                     Line::from(format!(
-                        "Tab=plot · f=fullscreen · ↑↓=navigate · /=filter{}",
+                        "Tab=plot · p=profiles · ↑↓=navigate · /=filter{}",
                         if self.filter_input.is_some() { " (Esc=clear)" } else { "" }
                     )),
                 ],
                 PaneFocus::Plot => vec![
-                    Line::from("Tab=accounts · f=fullscreen · a=refresh · q=quit"),
+                    Line::from("Tab=accounts · p=profiles · a=refresh · q=quit"),
                 ],
             }
         };
@@ -920,11 +925,13 @@ impl render::RenderState for AppRenderState<'_> {
                 id: profile.account_id.as_deref().unwrap_or(profile.profile_name.as_str()),
                 label: profile.profile_name.as_str(),
                 is_current: profile.is_current,
+                agent_type: profile.kind.as_str(),
             }),
             current: self.current_profile().map(|profile| RenderProfile {
                 id: profile.account_id.as_deref().unwrap_or(profile.profile_name.as_str()),
                 label: profile.profile_name.as_str(),
                 is_current: profile.is_current,
+                agent_type: profile.kind.as_str(),
             }),
         }
     }
@@ -935,7 +942,6 @@ impl render::RenderState for AppRenderState<'_> {
         state.y_upper = 100.0;
         state.x_lower = 7.0 - self.x_window_days as f64;
         state.solo = self.solo;
-        state.cursor_x = self.cursor_x;
         state.focused = self.plot_focused;
         state.fullscreen = self.fullscreen;
         state
@@ -972,6 +978,10 @@ impl Drop for TerminalSession {
     fn drop(&mut self) {
         ratatui::restore();
     }
+}
+
+fn binary_mtime(path: &str) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).ok()?.modified().ok()
 }
 
 fn initial_selected_index(profiles: &[ProfileEntry]) -> usize {
@@ -1041,8 +1051,14 @@ fn render_account_detail(
 }
 
 fn render_cron_status_line(cron_status: &CronStatus) -> Line<'static> {
+    let version_tag = env!("BUILD_VER").to_string();
+
     if !cron_status.installed {
-        return Line::from("Cron: not installed");
+        return Line::from(if version_tag.is_empty() {
+            "Cron: not installed".to_string()
+        } else {
+            format!("Cron: not installed · {version_tag}")
+        });
     }
 
     let attempt_age = cron_status
@@ -1066,6 +1082,9 @@ fn render_cron_status_line(cron_status: &CronStatus) -> Line<'static> {
     }
     if let Some(error) = cron_status.copilot_error.as_deref() {
         parts.push(format!("Copilot issue: {error}"));
+    }
+    if !version_tag.is_empty() {
+        parts.push(version_tag);
     }
 
     Line::from(parts.join(" · "))
@@ -1252,6 +1271,7 @@ fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: u
                 id: profile.account_id.as_deref().unwrap_or(profile.profile_name.as_str()),
                 label: profile.profile_name.as_str(),
                 is_current: profile.is_current,
+                agent_type: profile.kind.as_str(),
             },
             style: ChartSeriesStyle {
                 color_slot: index,
@@ -1283,7 +1303,6 @@ fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: u
         y_upper: 100.0,
         x_lower: 0.0,
         solo: false,
-        cursor_x: None,
         focused: false,
         fullscreen: false,
     };
@@ -1351,11 +1370,11 @@ mod tests {
     #[test]
     fn app_starts_on_current_profile_and_toggles_pane_focus() {
         let mut app = App::from_profile_names(vec!["Alpha".to_string(), "Beta".to_string()], 1);
-        assert_eq!(app.pane_focus, PaneFocus::Accounts);
+        assert_eq!(app.pane_focus, PaneFocus::Plot);
         assert_eq!(app.selected_profile_label(), Some("Beta"));
 
         app.pane_focus = app.pane_focus.toggle();
-        assert_eq!(app.pane_focus, PaneFocus::Plot);
+        assert_eq!(app.pane_focus, PaneFocus::Accounts);
         assert_eq!(app.selected_profile_label(), Some("Beta"));
     }
 
@@ -1438,6 +1457,8 @@ mod tests {
     #[test]
     fn cron_status_renders_in_global_status_line_above_actions() {
         let mut app = App::from_profile_names(vec!["Alpha".to_string()], 0);
+        app.fullscreen = false;
+        app.pane_focus = PaneFocus::Accounts;
         app.cron_status = CronStatus {
             installed: true,
             last_run: Some(1_700_000_000),
@@ -1458,7 +1479,8 @@ mod tests {
 
     #[test]
     fn selected_profile_row_uses_darker_background_without_losing_series_color() {
-        let app = App::from_profile_names(vec!["Alpha".to_string(), "Beta".to_string()], 1);
+        let mut app = App::from_profile_names(vec!["Alpha".to_string(), "Beta".to_string()], 1);
+        app.fullscreen = false;
         let buffer = render_buffer(&app, 100, 24);
 
         let cell = (0..24)
@@ -1475,7 +1497,8 @@ mod tests {
 
     #[test]
     fn profile_list_uses_long_service_tags_and_hides_saved_suffix() {
-        let app = App::from_profile_names(vec!["Alpha".to_string()], 0);
+        let mut app = App::from_profile_names(vec!["Alpha".to_string()], 0);
+        app.fullscreen = false;
         let buffer = render_buffer(&app, 100, 24);
         let joined = (0..24)
             .map(|y| buffer_row_text(&buffer, y, 100))

@@ -60,6 +60,7 @@ pub struct RenderProfile<'a> {
     pub id: &'a str,
     pub label: &'a str,
     pub is_current: bool,
+    pub agent_type: &'a str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,7 +124,6 @@ pub struct ChartState<'a> {
     pub y_upper: f64,
     pub x_lower: f64,          // X-axis left bound: 0.0=7d, 4.0=3d, 6.0=1d
     pub solo: bool,             // if true, only render selected series
-    pub cursor_x: Option<f64>, // cursor X position (0..7), None = no cursor
     pub focused: bool,          // true when Plot pane has keyboard focus
     pub fullscreen: bool,       // true when fullscreen mode is active
 }

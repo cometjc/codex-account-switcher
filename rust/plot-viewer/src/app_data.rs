@@ -10,6 +10,16 @@ pub enum ProfileKind {
     Copilot,
 }
 
+impl ProfileKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Codex => "codex",
+            Self::Claude => "claude",
+            Self::Copilot => "copilot",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ProfileEntry {
     pub kind: ProfileKind,
