@@ -146,39 +146,43 @@ fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_stat
         .collect::<Vec<_>>();
 
 
-    let x_mid = (x_bounds[0] + x_bounds[1]) / 2.0;
-    let x_label_lo = format!("{:.1}d", x_bounds[0]);
-    let x_label_mid = format!("{:.1}d", x_mid);
-    let x_label_hi = if (x_bounds[1] - 7.0).abs() < 0.01 {
+    let x_range = x_bounds[1] - x_bounds[0];
+    let x_label_lo  = format!("{:.1}d", x_bounds[0]);
+    let x_label_q1  = format!("{:.1}d", x_bounds[0] + x_range * 0.25);
+    let x_label_mid = format!("{:.1}d", x_bounds[0] + x_range * 0.5);
+    let x_label_q3  = format!("{:.1}d", x_bounds[0] + x_range * 0.75);
+    let x_label_hi  = if (x_bounds[1] - 7.0).abs() < 0.01 {
         "now".to_string()
     } else {
         format!("{:.1}d ago", 7.0 - x_bounds[1])
     };
-    let y_mid = (y_bounds[0] + y_bounds[1]) / 2.0;
-    let y_label_lo = format!("{:.0}%", y_bounds[0]);
-    let y_label_mid = format!("{:.0}%", y_mid);
-    let y_label_hi = format!("{:.0}%", y_bounds[1]);
+    let y_range = y_bounds[1] - y_bounds[0];
+    let y_label_lo  = format!("{:.0}%", y_bounds[0]);
+    let y_label_q1  = format!("{:.0}%", y_bounds[0] + y_range * 0.25);
+    let y_label_mid = format!("{:.0}%", y_bounds[0] + y_range * 0.5);
+    let y_label_q3  = format!("{:.0}%", y_bounds[0] + y_range * 0.75);
+    let y_label_hi  = format!("{:.0}%", y_bounds[1]);
     let chart = Chart::new(datasets)
         .x_axis(
             Axis::default()
                 .title("7d window")
                 .bounds(x_bounds)
-                .labels([x_label_lo.as_str(), x_label_mid.as_str(), x_label_hi.as_str()]),
+                .labels([x_label_lo.as_str(), x_label_q1.as_str(), x_label_mid.as_str(), x_label_q3.as_str(), x_label_hi.as_str()]),
         )
         .y_axis(
             Axis::default()
                 .title("usage%")
                 .bounds(y_bounds)
-                .labels([y_label_lo.as_str(), y_label_mid.as_str(), y_label_hi.as_str()]),
+                .labels([y_label_lo.as_str(), y_label_q1.as_str(), y_label_mid.as_str(), y_label_q3.as_str(), y_label_hi.as_str()]),
         );
     frame.render_widget(chart, area);
-    let graph_area = chart_graph_area(area, x_label_lo.as_str(), [y_label_lo.as_str(), y_label_mid.as_str(), y_label_hi.as_str()]);
+    let graph_area = chart_graph_area(area, x_label_lo.as_str(), [y_label_lo.as_str(), y_label_q1.as_str(), y_label_mid.as_str(), y_label_q3.as_str(), y_label_hi.as_str()]);
     let blocked_cells = apply_band_backgrounds(frame, graph_area, &band_rects, x_bounds, y_bounds);
     let occupied_cells = collect_occupied_plot_cells(frame, graph_area);
     render_end_labels(frame, graph_area, &visible_series, x_bounds, y_bounds, &occupied_cells, &blocked_cells);
 }
 
-fn chart_graph_area(area: Rect, first_x_label: &str, y_labels: [&str; 3]) -> Rect {
+fn chart_graph_area(area: Rect, first_x_label: &str, y_labels: [&str; 5]) -> Rect {
     let mut x = area.left();
     let mut y = area.bottom().saturating_sub(1);
     if y > area.top() {

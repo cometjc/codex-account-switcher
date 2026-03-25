@@ -649,6 +649,7 @@ impl App {
                         cs.rename_account(&current_name, &dialog.input)
                             .with_context(|| format!("rename Claude profile {current_name}"))?
                     }
+                    Some(ProfileKind::Copilot) => return Ok(()),
                     _ => {
                         let Some(store) = self.store.as_ref() else {
                             return Ok(());
@@ -741,6 +742,9 @@ impl App {
         let Some(profile) = self.selected_profile() else {
             return;
         };
+        if profile.kind == ProfileKind::Copilot {
+            return;
+        }
         let Some(saved_name) = profile.saved_name.clone() else {
             return;
         };
