@@ -435,6 +435,9 @@ impl App {
                     }
                 }
             }
+            InputAction::Character(' ') => {
+                self.toggle_selected_profile_hidden();
+            }
             InputAction::Backspace
             | InputAction::Character(_)
             | InputAction::Cancel
@@ -892,7 +895,7 @@ impl App {
 
         let footer_lines = if self.fullscreen {
             vec![
-                Line::from("p=profiles · a=refresh · q=quit"),
+                Line::from("p=profiles · Space=hide · a=refresh · q=quit"),
             ]
         } else {
             match self.pane_focus {
