@@ -1,0 +1,3 @@
+[workspace]
+members = ["rust/plot-viewer"]
+resolver = "2"

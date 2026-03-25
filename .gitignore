@@ -1,7 +1,7 @@
 dist
 node_modules
 .worktrees
-rust/plot-viewer/target/
+target/
 NLSDD/state/
 .nlsdd/
 .claude/

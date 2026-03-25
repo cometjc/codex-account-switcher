@@ -7,6 +7,7 @@ use crate::usage::UsageReadResult;
 pub enum ProfileKind {
     Codex,
     Claude,
+    Copilot,
 }
 
 #[derive(Debug, Clone)]

@@ -5,6 +5,7 @@ use agent_switch::paths::AppPaths;
 use agent_switch::store::{AccountStore, StorePlatform};
 use agent_switch::usage::UsageService;
 use agent_switch::claude::{ClaudePaths, ClaudeStore, ClaudeCredentials};
+use agent_switch::copilot::{CopilotCredentials, CopilotPaths};
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -41,7 +42,17 @@ fn main() -> Result<()> {
         (None, None)
     };
 
-    let mut app = App::load(store, usage, cron_status, claude_store, claude_usage_service)?;
+    // Copilot setup
+    let copilot_usage_service = CopilotCredentials::detect().map(|_| {
+        let paths = CopilotPaths::detect();
+        UsageService::new(
+            paths.limit_cache_path().to_path_buf(),
+            paths.usage_history_path().to_path_buf(),
+            300,
+        ).with_fetcher(agent_switch::copilot::fetch_copilot_usage)
+    });
+
+    let mut app = App::load(store, usage, cron_status, claude_store, claude_usage_service, copilot_usage_service)?;
     app.run()
 }
 
@@ -56,6 +67,7 @@ fn run_refresh_all() -> Result<()> {
     );
     let mut codex_errors = Vec::new();
     let mut claude_errors = Vec::new();
+    let mut copilot_errors = Vec::new();
 
     // Force-refresh usage for every saved profile
     let saved = store.list_saved_profiles()?;
@@ -123,16 +135,31 @@ fn run_refresh_all() -> Result<()> {
         }
     }
 
+    // Refresh Copilot usage
+    if let Some(creds) = CopilotCredentials::detect() {
+        let copilot_paths = CopilotPaths::detect();
+        let copilot_usage = UsageService::new(
+            copilot_paths.limit_cache_path().to_path_buf(),
+            copilot_paths.usage_history_path().to_path_buf(),
+            300,
+        ).with_fetcher(agent_switch::copilot::fetch_copilot_usage);
+        let account_id = creds.account_id();
+        if let Err(error) = refresh_usage_snapshot(&copilot_usage, Some(account_id.as_str()), Some(creds.oauth_token.as_str())) {
+            copilot_errors.push(format!("{error:#}"));
+        }
+    }
+
     let report = cron::CronRunReport {
         attempted_at: current_unix_seconds(),
         codex_error: summarize_client_errors("Codex", &codex_errors),
         claude_error: summarize_client_errors("Claude", &claude_errors),
+        copilot_error: summarize_client_errors("Copilot", &copilot_errors),
     };
     cron::write_run_report(paths.cron_status_path(), &report)?;
     if report.has_errors() {
         bail!(
             "{}",
-            [report.codex_error.as_deref(), report.claude_error.as_deref()]
+            [report.codex_error.as_deref(), report.claude_error.as_deref(), report.copilot_error.as_deref()]
                 .into_iter()
                 .flatten()
                 .collect::<Vec<_>>()

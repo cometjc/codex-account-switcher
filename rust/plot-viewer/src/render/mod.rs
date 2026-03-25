@@ -124,6 +124,8 @@ pub struct ChartState<'a> {
     pub x_lower: f64,          // X-axis left bound: 0.0=7d, 4.0=3d, 6.0=1d
     pub solo: bool,             // if true, only render selected series
     pub cursor_x: Option<f64>, // cursor X position (0..7), None = no cursor
+    pub focused: bool,          // true when Plot pane has keyboard focus
+    pub fullscreen: bool,       // true when fullscreen mode is active
 }
 
 pub trait RenderState {

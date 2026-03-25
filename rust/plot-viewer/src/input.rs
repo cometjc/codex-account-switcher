@@ -20,8 +20,11 @@ pub enum InputAction {
     RefreshSelected,
     RefreshAll,
     Rename,
+    ToggleFullscreen,
     Delete,
     Character(char),
+    MoveToStart,
+    MoveToEnd,
     Cancel,
 }
 
@@ -55,6 +58,8 @@ pub fn map_event(event: &Event, context: InputContext) -> Option<InputAction> {
             KeyCode::Esc => Some(InputAction::Cancel),
             KeyCode::Enter => Some(InputAction::Enter),
             KeyCode::Backspace | KeyCode::Delete => Some(InputAction::Backspace),
+            KeyCode::Home => Some(InputAction::MoveToStart),
+            KeyCode::End => Some(InputAction::MoveToEnd),
             KeyCode::Up => Some(InputAction::Up),
             KeyCode::Down => Some(InputAction::Down),
             KeyCode::Left => Some(InputAction::Left),
@@ -76,17 +81,16 @@ pub fn map_event(event: &Event, context: InputContext) -> Option<InputAction> {
         KeyCode::Backspace => Some(InputAction::Backspace),
         KeyCode::Tab => Some(InputAction::NextFocus),
         KeyCode::BackTab => Some(InputAction::PreviousFocus),
-        KeyCode::Char('+') | KeyCode::Char('=') => Some(InputAction::ZoomIn),
-        KeyCode::Char('-') => Some(InputAction::ZoomOut),
-        KeyCode::Char('r') => Some(InputAction::ResetZoom),
+        KeyCode::Char('z') => Some(InputAction::ResetZoom),
         KeyCode::Char('s') => Some(InputAction::ToggleSolo),
         KeyCode::Char('1') => Some(InputAction::XWindow(1)),
         KeyCode::Char('3') => Some(InputAction::XWindow(3)),
         KeyCode::Char('7') => Some(InputAction::XWindow(7)),
+        KeyCode::Char('f') => Some(InputAction::ToggleFullscreen),
         KeyCode::Char('/') => Some(InputAction::FilterEnter),
         KeyCode::Char('u') => Some(InputAction::RefreshSelected),
         KeyCode::Char('a') => Some(InputAction::RefreshAll),
-        KeyCode::Char('n') => Some(InputAction::Rename),
+        KeyCode::Char('r') => Some(InputAction::Rename),
         KeyCode::Delete | KeyCode::Char('d') => Some(InputAction::Delete),
         KeyCode::Char(ch) => Some(InputAction::Character(*ch)),
         _ => None,
@@ -104,8 +108,12 @@ mod tests {
     #[test]
     fn normal_context_keeps_global_hotkeys() {
         assert_eq!(
-            map_event(&key(KeyCode::Char('n')), InputContext::Normal),
+            map_event(&key(KeyCode::Char('r')), InputContext::Normal),
             Some(InputAction::Rename)
+        );
+        assert_eq!(
+            map_event(&key(KeyCode::Char('z')), InputContext::Normal),
+            Some(InputAction::ResetZoom)
         );
         assert_eq!(
             map_event(&key(KeyCode::Char('q')), InputContext::Normal),
@@ -138,6 +146,18 @@ mod tests {
         assert_eq!(
             map_event(&key(KeyCode::Char('/')), InputContext::TextEntry),
             Some(InputAction::Character('/'))
+        );
+    }
+
+    #[test]
+    fn text_entry_context_maps_home_and_end() {
+        assert_eq!(
+            map_event(&key(KeyCode::Home), InputContext::TextEntry),
+            Some(InputAction::MoveToStart)
+        );
+        assert_eq!(
+            map_event(&key(KeyCode::End), InputContext::TextEntry),
+            Some(InputAction::MoveToEnd)
         );
     }
 }

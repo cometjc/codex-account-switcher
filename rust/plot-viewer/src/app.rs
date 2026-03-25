@@ -49,6 +49,41 @@ enum DialogMode {
 struct DialogState {
     mode: DialogMode,
     input: String,
+    cursor: usize,
+}
+
+impl DialogState {
+    fn move_left(&mut self) {
+        self.cursor = self.cursor.saturating_sub(1);
+    }
+
+    fn move_right(&mut self) {
+        self.cursor = (self.cursor + 1).min(self.input.chars().count());
+    }
+
+    fn move_to_start(&mut self) {
+        self.cursor = 0;
+    }
+
+    fn move_to_end(&mut self) {
+        self.cursor = self.input.chars().count();
+    }
+
+    fn insert_char(&mut self, ch: char) {
+        let byte_index = char_to_byte_index(&self.input, self.cursor);
+        self.input.insert(byte_index, ch);
+        self.cursor += 1;
+    }
+
+    fn backspace(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let end = char_to_byte_index(&self.input, self.cursor);
+        let start = char_to_byte_index(&self.input, self.cursor - 1);
+        self.input.replace_range(start..end, "");
+        self.cursor -= 1;
+    }
 }
 
 pub struct App {
@@ -63,9 +98,11 @@ pub struct App {
     usage_service: Option<UsageService>,
     claude_store: Option<crate::claude::ClaudeStore>,
     claude_usage_service: Option<UsageService>,
+    copilot_usage_service: Option<UsageService>,
     cron_status: CronStatus,
     solo_mode: bool,
-    x_window_days: u8,
+    fullscreen: bool,
+    x_window_days: f64,
     cursor_x: Option<f64>,
     filter_input: Option<String>,
     last_auto_reload: Instant,
@@ -78,8 +115,10 @@ pub(crate) struct AppRenderState<'a> {
     selected_profile_index: usize,
     y_zoom_lower: f64,
     solo: bool,
-    x_window_days: u8,
+    x_window_days: f64,
     cursor_x: Option<f64>,
+    plot_focused: bool,
+    fullscreen: bool,
 }
 
 impl App {
@@ -89,8 +128,9 @@ impl App {
         cron_status: CronStatus,
         claude_store: Option<crate::claude::ClaudeStore>,
         claude_usage_service: Option<UsageService>,
+        copilot_usage_service: Option<UsageService>,
     ) -> Result<Self> {
-        let profiles = load_profiles(&store, &usage_service, false, None, claude_store.as_ref(), claude_usage_service.as_ref())?;
+        let profiles = load_profiles(&store, &usage_service, false, None, claude_store.as_ref(), claude_usage_service.as_ref(), copilot_usage_service.as_ref())?;
         Ok(Self {
             selected_profile_index: initial_selected_index(&profiles),
             y_zoom_lower: auto_y_lower(&profiles),
@@ -103,9 +143,11 @@ impl App {
             usage_service: Some(usage_service),
             claude_store,
             claude_usage_service,
+            copilot_usage_service,
             cron_status,
             solo_mode: false,
-            x_window_days: 7,
+            fullscreen: false,
+            x_window_days: 7.0,
             cursor_x: None,
             filter_input: None,
             last_auto_reload: Instant::now(),
@@ -146,9 +188,11 @@ impl App {
             usage_service: None,
             claude_store: None,
             claude_usage_service: None,
+            copilot_usage_service: None,
             cron_status: CronStatus::uninstalled(),
             solo_mode: false,
-            x_window_days: 7,
+            fullscreen: false,
+            x_window_days: 7.0,
             cursor_x: None,
             filter_input: None,
             last_auto_reload: Instant::now(),
@@ -201,21 +245,46 @@ impl App {
         match action {
             InputAction::Quit => self.should_quit = true,
             InputAction::Up | InputAction::Down => {
-                let delta = if matches!(action, InputAction::Up) { -1 } else { 1 };
-                self.step_profile(delta);
+                if self.pane_focus == PaneFocus::Plot {
+                    if matches!(action, InputAction::Up) {
+                        self.y_zoom_lower = (self.y_zoom_lower + 5.0).min(95.0);
+                    } else {
+                        self.y_zoom_lower = (self.y_zoom_lower - 5.0).max(0.0);
+                    }
+                    self.y_zoom_user_adjusted = true;
+                } else {
+                    let delta = if matches!(action, InputAction::Up) { -1 } else { 1 };
+                    self.step_profile(delta);
+                }
             }
             InputAction::Left => {
                 if self.pane_focus == PaneFocus::Plot {
-                    self.move_cursor(-1);
+                    if self.cursor_x.is_some() {
+                        self.move_cursor(-1);
+                    } else {
+                        self.x_window_days = (self.x_window_days + 0.5).min(7.0);
+                    }
                 }
             }
             InputAction::Right => {
                 if self.pane_focus == PaneFocus::Plot {
-                    self.move_cursor(1);
+                    if self.cursor_x.is_some() {
+                        self.move_cursor(1);
+                    } else {
+                        self.x_window_days = (self.x_window_days - 0.5).max(0.5);
+                    }
+                }
+            }
+            InputAction::ToggleFullscreen => {
+                self.fullscreen = !self.fullscreen;
+                if self.fullscreen {
+                    self.pane_focus = PaneFocus::Plot;
                 }
             }
             InputAction::NextFocus | InputAction::PreviousFocus => {
-                self.pane_focus = self.pane_focus.toggle();
+                if !self.fullscreen {
+                    self.pane_focus = self.pane_focus.toggle();
+                }
             }
             InputAction::ZoomIn => {
                 self.y_zoom_lower = (self.y_zoom_lower + 5.0).min(95.0);
@@ -228,6 +297,7 @@ impl App {
             InputAction::ResetZoom => {
                 self.y_zoom_lower = auto_y_lower(&self.profiles);
                 self.y_zoom_user_adjusted = false;
+                self.x_window_days = 7.0;
             }
             InputAction::ToggleSolo => {
                 if self.pane_focus == PaneFocus::Plot {
@@ -236,7 +306,7 @@ impl App {
             }
             InputAction::XWindow(days) => {
                 if self.pane_focus == PaneFocus::Plot {
-                    self.x_window_days = days;
+                    self.x_window_days = days as f64;
                     if let Some(cx) = self.cursor_x {
                         let new_lower = 7.0 - days as f64;
                         self.cursor_x = Some(cx.clamp(new_lower, 7.0));
@@ -297,7 +367,11 @@ impl App {
                     }
                 }
             }
-            InputAction::Backspace | InputAction::Character(_) | InputAction::Cancel => {}
+            InputAction::Backspace
+            | InputAction::Character(_)
+            | InputAction::Cancel
+            | InputAction::MoveToStart
+            | InputAction::MoveToEnd => {}
         }
 
         Ok(())
@@ -375,8 +449,8 @@ impl App {
     }
 
     fn move_cursor(&mut self, direction: isize) {
-        let x_lower = 7.0 - self.x_window_days as f64;
-        let step = self.x_window_days as f64 / 20.0;
+        let x_lower = 7.0 - self.x_window_days;
+        let step = self.x_window_days / 20.0;
         let current = self.cursor_x.unwrap_or(7.0);
         let next = (current + direction as f64 * step).clamp(x_lower, 7.0);
         self.cursor_x = Some(next);
@@ -389,12 +463,32 @@ impl App {
             }
             InputAction::Backspace => {
                 if let Some(dialog) = self.dialog.as_mut() {
-                    dialog.input.pop();
+                    dialog.backspace();
                 }
             }
             InputAction::Character(ch) => {
                 if let Some(dialog) = self.dialog.as_mut() {
-                    dialog.input.push(ch);
+                    dialog.insert_char(ch);
+                }
+            }
+            InputAction::Left => {
+                if let Some(dialog) = self.dialog.as_mut() {
+                    dialog.move_left();
+                }
+            }
+            InputAction::Right => {
+                if let Some(dialog) = self.dialog.as_mut() {
+                    dialog.move_right();
+                }
+            }
+            InputAction::MoveToStart => {
+                if let Some(dialog) = self.dialog.as_mut() {
+                    dialog.move_to_start();
+                }
+            }
+            InputAction::MoveToEnd => {
+                if let Some(dialog) = self.dialog.as_mut() {
+                    dialog.move_to_end();
                 }
             }
             InputAction::Enter => self.confirm_dialog()?,
@@ -428,6 +522,7 @@ impl App {
                         store.save_snapshot(&dialog.input, &profile.snapshot)
                             .with_context(|| format!("save snapshot {}", dialog.input))?
                     }
+                    ProfileKind::Copilot => return Ok(()),
                 };
                 self.status_message = Some(format!("Saved current profile as \"{name}\"."));
                 self.dialog = None;
@@ -499,9 +594,11 @@ impl App {
                         let _ = self.reload_profiles(false, profile.account_id.clone())?;
                     }
                 } else {
+                    let default_name = build_default_name(profile.usage_view.usage.as_ref(), &profile.snapshot);
                     self.dialog = Some(DialogState {
                         mode: DialogMode::SaveCurrent(ProfileKind::Claude),
-                        input: build_default_name(profile.usage_view.usage.as_ref(), &profile.snapshot),
+                        cursor: default_name.chars().count(),
+                        input: default_name,
                     });
                 }
             }
@@ -513,11 +610,16 @@ impl App {
                         let _ = self.reload_profiles(false, profile.account_id.clone())?;
                     }
                 } else {
+                    let default_name = build_default_name(profile.usage_view.usage.as_ref(), &profile.snapshot);
                     self.dialog = Some(DialogState {
                         mode: DialogMode::SaveCurrent(ProfileKind::Codex),
-                        input: build_default_name(profile.usage_view.usage.as_ref(), &profile.snapshot),
+                        cursor: default_name.chars().count(),
+                        input: default_name,
                     });
                 }
+            }
+            ProfileKind::Copilot => {
+                // Copilot is auto-detected from ~/.config/gh/hosts.yml; no switching needed.
             }
         }
         Ok(())
@@ -533,6 +635,7 @@ impl App {
         self.dialog = Some(DialogState {
             mode: DialogMode::RenameSaved(saved_name.clone()),
             input: saved_name,
+            cursor: profile.saved_name.as_ref().map(|name| name.chars().count()).unwrap_or(0),
         });
     }
 
@@ -546,6 +649,7 @@ impl App {
         self.dialog = Some(DialogState {
             mode: DialogMode::ConfirmDelete(saved_name),
             input: String::new(),
+            cursor: 0,
         });
     }
 
@@ -569,6 +673,7 @@ impl App {
             refresh_account_id.as_deref(),
             self.claude_store.as_ref(),
             self.claude_usage_service.as_ref(),
+            self.copilot_usage_service.as_ref(),
         )?;
         self.profiles = report.profiles;
         self.cron_status = crate::cron::read_status(store.paths().cron_status_path());
@@ -631,19 +736,24 @@ impl App {
 
     fn render(&self, frame: &mut Frame) {
         let area = frame.area();
+        let footer_height = if self.fullscreen || self.pane_focus == PaneFocus::Plot { 1 } else { 2 };
         let [body, cron_area, footer_area] =
             Layout::vertical([
                 Constraint::Min(0),
                 Constraint::Length(1),
-                Constraint::Length(2),
+                Constraint::Length(footer_height),
             ])
             .areas(area);
 
-        let left_width = self.left_pane_width(body.width);
-        let [left_area, right_area] =
-            Layout::horizontal([Constraint::Length(left_width), Constraint::Min(0)]).areas(body);
-
-        self.render_left_pane(frame, left_area);
+        let chart_area = if self.fullscreen {
+            body
+        } else {
+            let left_width = self.left_pane_width(body.width);
+            let [left_area, right_area] =
+                Layout::horizontal([Constraint::Length(left_width), Constraint::Min(0)]).areas(body);
+            self.render_left_pane(frame, left_area);
+            right_area
+        };
 
         let render_state = AppRenderState {
             profiles: &self.profiles,
@@ -652,28 +762,32 @@ impl App {
             solo: self.solo_mode,
             x_window_days: self.x_window_days,
             cursor_x: self.cursor_x,
+            plot_focused: self.pane_focus == PaneFocus::Plot,
+            fullscreen: self.fullscreen,
         };
-        render::render(frame, right_area, &render_state);
+        render::render(frame, chart_area, &render_state);
 
         let cron = Paragraph::new(Text::from(vec![render_cron_status_line(&self.cron_status)]))
             .wrap(Wrap { trim: true });
         frame.render_widget(cron, cron_area);
 
-        let footer_lines = match self.pane_focus {
-            PaneFocus::Accounts => vec![
-                Line::from("Enter=switch/save · n=rename · d=delete · u=refresh · a=all · q=quit"),
-                Line::from(format!(
-                    "Tab=plot · ↑↓=navigate · /=filter{}",
-                    if self.filter_input.is_some() { " (Esc=clear)" } else { "" }
-                )),
-            ],
-            PaneFocus::Plot => vec![
-                Line::from(format!(
-                    "1/3/7=window · s=solo{} · +/-=zoom · r=reset · a=refresh · q=quit",
-                    if self.solo_mode { "[ON]" } else { "" }
-                )),
-                Line::from("Tab=accounts · ↑↓=profile · ←→=cursor"),
-            ],
+        let footer_lines = if self.fullscreen {
+            vec![
+                Line::from("f=exit fullscreen · a=refresh · q=quit"),
+            ]
+        } else {
+            match self.pane_focus {
+                PaneFocus::Accounts => vec![
+                    Line::from("Enter=switch/save · r=rename · d=delete · u=refresh · a=all · q=quit"),
+                    Line::from(format!(
+                        "Tab=plot · f=fullscreen · ↑↓=navigate · /=filter{}",
+                        if self.filter_input.is_some() { " (Esc=clear)" } else { "" }
+                    )),
+                ],
+                PaneFocus::Plot => vec![
+                    Line::from("Tab=accounts · f=fullscreen · a=refresh · q=quit"),
+                ],
+            }
         };
         let footer = Paragraph::new(Text::from(footer_lines)).wrap(Wrap { trim: true });
         frame.render_widget(footer, footer_area);
@@ -705,6 +819,7 @@ impl App {
                 let service_tag = match profile.kind {
                     ProfileKind::Codex => "[codex]",
                     ProfileKind::Claude => "[claude]",
+                    ProfileKind::Copilot => "[copilot]",
                 };
                 let state_tag = if profile.saved_name.is_none() {
                     " [unsaved]"
@@ -726,8 +841,16 @@ impl App {
 
         let mut state = ListState::default();
         state.select(selected_pos_in_filtered);
+        let list_block = if self.pane_focus == PaneFocus::Accounts {
+            Block::default()
+                .title(profiles_title)
+                .borders(Borders::ALL)
+                .style(Style::default().bg(Color::Rgb(20, 20, 20)))
+        } else {
+            Block::default().title(profiles_title).borders(Borders::ALL)
+        };
         let list = List::new(items)
-            .block(Block::default().title(profiles_title).borders(Borders::ALL))
+            .block(list_block)
             .highlight_style(Style::default().bg(Color::DarkGray))
             .highlight_symbol("> ");
         frame.render_stateful_widget(list, list_area, &mut state);
@@ -770,6 +893,7 @@ impl App {
         .block(Block::default().title(title).borders(Borders::ALL))
         .wrap(Wrap { trim: true });
         frame.render_widget(dialog_widget, area);
+        frame.set_cursor_position(dialog_cursor_position(area, dialog));
     }
 
     fn render_confirm_prompt(&self, frame: &mut Frame, title: &str, prompt: &str) {
@@ -783,6 +907,9 @@ impl App {
         .block(Block::default().title(title).borders(Borders::ALL))
         .wrap(Wrap { trim: true });
         frame.render_widget(dialog_widget, area);
+        if let Some(dialog) = self.dialog.as_ref() {
+            frame.set_cursor_position(dialog_cursor_position(area, dialog));
+        }
     }
 }
 
@@ -809,6 +936,8 @@ impl render::RenderState for AppRenderState<'_> {
         state.x_lower = 7.0 - self.x_window_days as f64;
         state.solo = self.solo;
         state.cursor_x = self.cursor_x;
+        state.focused = self.plot_focused;
+        state.fullscreen = self.fullscreen;
         state
     }
 }
@@ -869,6 +998,7 @@ fn render_account_detail(
     let service_label = match profile.kind {
         ProfileKind::Codex => "Codex [codex]",
         ProfileKind::Claude => "Claude [claude]",
+        ProfileKind::Copilot => "GitHub Copilot [copilot]",
     };
 
     let mut lines = vec![
@@ -933,6 +1063,9 @@ fn render_cron_status_line(cron_status: &CronStatus) -> Line<'static> {
     }
     if let Some(error) = cron_status.claude_error.as_deref() {
         parts.push(format!("Claude issue: {error}"));
+    }
+    if let Some(error) = cron_status.copilot_error.as_deref() {
+        parts.push(format!("Copilot issue: {error}"));
     }
 
     Line::from(parts.join(" · "))
@@ -1151,6 +1284,8 @@ fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: u
         x_lower: 0.0,
         solo: false,
         cursor_x: None,
+        focused: false,
+        fullscreen: false,
     };
 
     if chart_state.series.is_empty() && chart_state.seven_day_points.is_empty() {
@@ -1169,11 +1304,28 @@ fn popup_area(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
     area
 }
 
+fn dialog_cursor_position(area: Rect, dialog: &DialogState) -> Position {
+    let input_x = area.x.saturating_add(1);
+    let input_y = area.y.saturating_add(3);
+    Position::new(
+        input_x.saturating_add(dialog.cursor as u16),
+        input_y,
+    )
+}
+
+fn char_to_byte_index(text: &str, char_index: usize) -> usize {
+    text.char_indices()
+        .nth(char_index)
+        .map(|(index, _)| index)
+        .unwrap_or_else(|| text.len())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::app_data::{OwnedFiveHourBandState, OwnedFiveHourSubframeState};
     use crate::render::ChartPoint;
     use super::*;
+    use ratatui::backend::Backend;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
@@ -1292,6 +1444,7 @@ mod tests {
             last_attempt: Some(1_700_000_300),
             codex_error: None,
             claude_error: Some("HTTP 429 Too Many Requests".to_string()),
+            copilot_error: None,
         };
 
         let buffer = render_buffer(&app, 100, 24);
@@ -1371,6 +1524,44 @@ mod tests {
         }];
 
         assert_eq!(auto_y_lower(&profiles), -5.0);
+    }
+
+    #[test]
+    fn rename_dialog_cursor_moves_with_home_end_and_arrows() {
+        let mut app = App::from_profile_names(vec!["Alpha".to_string()], 0);
+        app.open_rename_dialog();
+
+        app.handle_dialog_action(InputAction::MoveToStart).unwrap();
+        app.handle_dialog_action(InputAction::Right).unwrap();
+        app.handle_dialog_action(InputAction::Right).unwrap();
+        app.handle_dialog_action(InputAction::MoveToEnd).unwrap();
+        app.handle_dialog_action(InputAction::Left).unwrap();
+
+        let dialog = app.dialog.as_ref().expect("rename dialog should stay open");
+        assert_eq!(dialog.input, "alpha");
+        assert_eq!(dialog.cursor, 4);
+    }
+
+    #[test]
+    fn rename_dialog_sets_terminal_cursor_position() {
+        let mut app = App::from_profile_names(vec!["Alpha".to_string()], 0);
+        app.open_rename_dialog();
+        app.handle_dialog_action(InputAction::MoveToStart).unwrap();
+        app.handle_dialog_action(InputAction::Right).unwrap();
+        app.handle_dialog_action(InputAction::Right).unwrap();
+
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| app.render(frame)).unwrap();
+        let expected = dialog_cursor_position(
+            popup_area(Rect::new(0, 0, 100, 24), 70, 20),
+            app.dialog.as_ref().expect("rename dialog should still be open"),
+        );
+
+        assert_eq!(
+            terminal.backend_mut().get_cursor_position().unwrap(),
+            expected
+        );
     }
 }
 

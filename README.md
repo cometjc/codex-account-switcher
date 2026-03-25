@@ -47,12 +47,12 @@ agent-switch
 
 - `Up` / `Down` – Move between saved or current-unsaved profiles.
 - `Enter` – Save current unsaved profile, or switch to the selected saved profile.
-- `N` – Rename the selected saved profile.
+- `R` – Rename the selected saved profile.
 - `D` or `Del` – Delete the selected saved profile after confirmation.
 - `U` – Refresh usage for the selected profile.
 - `A` – Refresh usage for all visible profiles.
 - `P` or `B` – Toggle between the account list and the built-in plot view.
-- `Left` / `Right` in plot view – Cycle profiles without leaving the plot.
+- `Left` / `Right` in plot view – Move the chart cursor without leaving the plot.
 - `Tab` – Switch chart/panel focus inside plot view.
 - `Q` – Quit.
 

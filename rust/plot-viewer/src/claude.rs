@@ -309,8 +309,10 @@ pub fn map_claude_usage_response(raw: &Value, subscription_type: &str, now: i64)
     let seven_d_utilization = seven_day.get("utilization")?.as_f64()?;
     let seven_d_resets_at = seven_day.get("resets_at")?.as_str()?;
 
-    let five_h_reset_at = parse_rfc3339_unix(five_h_resets_at)?;
-    let seven_d_reset_at = parse_rfc3339_unix(seven_d_resets_at)?;
+    // Round to nearest minute so sub-second jitter in the server's resets_at field
+    // does not produce duplicate window entries across calls.
+    let five_h_reset_at = parse_rfc3339_unix(five_h_resets_at).map(|t| (t + 30) / 60 * 60)?;
+    let seven_d_reset_at = parse_rfc3339_unix(seven_d_resets_at).map(|t| (t + 30) / 60 * 60)?;
 
     Some(UsageResponse {
         email: None,

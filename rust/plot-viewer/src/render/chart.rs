@@ -23,38 +23,47 @@ const SERIES_BAND_COLORS: [Color; 8] = [
 
 pub fn render_chart<State: RenderState>(frame: &mut Frame, context: &RenderContext<'_, State>) {
     let chart_state = context.state.chart_state();
-    let block = Block::default()
-        .title("usage chart (align to 7d window)")
-        .borders(Borders::ALL);
-    let inner = block.inner(context.area);
-    frame.render_widget(block, context.area);
+    let inner = if chart_state.fullscreen {
+        context.area
+    } else {
+        let block = if chart_state.focused {
+            Block::default()
+                .title("usage chart (align to 7d window)")
+                .borders(Borders::ALL)
+                .style(Style::default().bg(Color::Rgb(20, 20, 20)))
+        } else {
+            Block::default()
+                .title("usage chart (align to 7d window)")
+                .borders(Borders::ALL)
+        };
+        let inner = block.inner(context.area);
+        frame.render_widget(block, context.area);
+        inner
+    };
 
     if inner.width == 0 || inner.height == 0 {
         return;
     }
 
     let [chart_area, band_area] =
-        Layout::vertical([Constraint::Min(6), Constraint::Length(3)]).areas(inner);
+        Layout::vertical([Constraint::Min(6), Constraint::Length(1)]).areas(inner);
 
     render_usage_chart(frame, chart_area, &chart_state);
 
-    let band_summary = Paragraph::new(Text::from(vec![
-        Line::from(format_five_hour_band_line(&chart_state)),
-        Line::from(format_five_hour_delta_line(&chart_state)),
-        Line::from(match chart_state.cursor_x {
-            Some(cx) => format!("Cursor: {:.1}d ago  (←→ move, ↑↓ profile)", 7.0 - cx),
-            None => {
-                let window_label = match (chart_state.x_lower * 10.0).round() as i32 {
-                    0 => "7d",
-                    40 => "3d",
-                    60 => "1d",
-                    _ => "?d",
-                };
-                format!("Window: {} · +/-=zoom · r=reset · 1/3/7=window", window_label)
-            }
-        }),
-    ]))
-    .wrap(Wrap { trim: true });
+    let hint_line = match chart_state.cursor_x {
+        Some(cx) => format!("Cursor: {:.1}d ago  (←→ move, ↑↓ profile)", 7.0 - cx),
+        None => {
+            let window_label = match (chart_state.x_lower * 10.0).round() as i32 {
+                0 => "7d",
+                40 => "3d",
+                60 => "1d",
+                _ => "?d",
+            };
+            format!("Window: {} · ←→ zoom · ↑↓=y · z=reset · 1/3/7=snap", window_label)
+        }
+    };
+    let band_summary = Paragraph::new(Text::from(vec![Line::from(hint_line)]))
+        .wrap(Wrap { trim: true });
     frame.render_widget(band_summary, band_area);
 }
 
@@ -326,39 +335,6 @@ fn format_unsigned_percent(value: Option<f64>) -> String {
         .unwrap_or("?%".to_string())
 }
 
-fn format_five_hour_band_line(chart_state: &ChartState<'_>) -> String {
-    if chart_state.five_hour_band.available {
-        match (
-            chart_state.five_hour_band.lower_y,
-            chart_state.five_hour_band.upper_y,
-        ) {
-            (Some(lower_y), Some(upper_y)) => {
-                format!("5h band: {:.1}%..{:.1}%", lower_y, upper_y)
-            }
-            _ => "5h band: available but bounds incomplete".to_string(),
-        }
-    } else {
-        let reason = chart_state
-            .five_hour_subframe
-            .reason
-            .unwrap_or("no 5h subframe data");
-        format!("5h frame: unavailable ({})", reason)
-    }
-}
-
-fn format_five_hour_delta_line(chart_state: &ChartState<'_>) -> String {
-    let delta_7d = chart_state
-        .five_hour_band
-        .delta_seven_day_percent
-        .map(|value| format!("{:+.1}%", value))
-        .unwrap_or("?".to_string());
-    let delta_5h = chart_state
-        .five_hour_band
-        .delta_five_hour_percent
-        .map(|value| format!("{:+.1}%", value))
-        .unwrap_or("?".to_string());
-    format!("Band drift: 7d {} | 5h {}", delta_7d, delta_5h)
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LabelAnchor {
@@ -637,14 +613,14 @@ mod tests {
                 x_lower: 0.0,
                 solo: false,
                 cursor_x: None,
+                focused: false,
+                fullscreen: false,
             },
         };
 
         let lines = render_lines(&state, 72, 18);
         let joined = lines.join("\n");
 
-        assert!(joined.contains("5h band: 20.0%..35.0%"));
-        assert!(joined.contains("Band drift: 7d +4.0% | 5h +1.5%"));
         assert!(joined.contains("usage chart (align to 7d window)"));
         assert!(joined.contains("Alpha (7d 76.0% 5h 40.0%)"));
         assert!(joined.contains("0.0d"));
@@ -732,13 +708,14 @@ mod tests {
                 x_lower: 0.0,
                 solo: false,
                 cursor_x: None,
+                focused: false,
+                fullscreen: false,
             },
         };
 
         let lines = render_lines(&state, 72, 18);
         let joined = lines.join("\n");
 
-        assert!(joined.contains("Band drift: 7d ? | 5h ?"));
         assert!(!joined.contains("pending Canvas plot"));
     }
 

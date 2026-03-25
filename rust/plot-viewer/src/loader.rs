@@ -23,6 +23,7 @@ pub fn load_profiles(
     refresh_account_id: Option<&str>,
     claude_store: Option<&crate::claude::ClaudeStore>,
     claude_usage_service: Option<&UsageService>,
+    copilot_usage_service: Option<&UsageService>,
 ) -> Result<Vec<ProfileEntry>> {
     Ok(load_profiles_with_report(
         store,
@@ -31,6 +32,7 @@ pub fn load_profiles(
         refresh_account_id,
         claude_store,
         claude_usage_service,
+        copilot_usage_service,
     )?
     .profiles)
 }
@@ -42,6 +44,7 @@ pub fn load_profiles_with_report(
     refresh_account_id: Option<&str>,
     claude_store: Option<&crate::claude::ClaudeStore>,
     claude_usage_service: Option<&UsageService>,
+    copilot_usage_service: Option<&UsageService>,
 ) -> Result<ProfileLoadReport> {
     let saved_profiles = store.list_saved_profiles()?;
     let current_snapshot = store.get_current_snapshot().ok();
@@ -111,6 +114,36 @@ pub fn load_profiles_with_report(
             load_claude_profiles(cs, cu, force_refresh, refresh_account_id)?;
         profiles.extend(claude_entries);
         refresh_errors.extend(claude_errors);
+    }
+
+    // --- Copilot entries ---
+    if let Some(cu) = copilot_usage_service {
+        if let Some(creds) = crate::copilot::CopilotCredentials::detect() {
+            let account_id = creds.account_id();
+            let force = force_refresh
+                || refresh_account_id.is_some_and(|id| id == account_id.as_str());
+            let (usage_view, error) = read_usage_for_profile(
+                "Copilot",
+                &creds.login,
+                cu,
+                Some(account_id.as_str()),
+                Some(creds.oauth_token.as_str()),
+                force,
+            )?;
+            push_refresh_error(&mut refresh_errors, error);
+            cu.record_usage_snapshot(Some(account_id.as_str()), usage_view.usage.as_ref())?;
+            let chart_data = build_profile_chart_data(Some(account_id.as_str()), usage_view.usage.as_ref(), cu)?;
+            profiles.push(ProfileEntry {
+                kind: ProfileKind::Copilot,
+                saved_name: Some(creds.login.clone()),
+                profile_name: creds.login.clone(),
+                account_id: Some(account_id),
+                is_current: false,
+                snapshot: serde_json::json!({}),
+                usage_view,
+                chart_data,
+            });
+        }
     }
 
     profiles.sort_by(|left, right| left.profile_name.cmp(&right.profile_name));
@@ -314,8 +347,13 @@ fn build_profile_chart_data(
         .map(project_history_points)
         .unwrap_or_default();
     let five_hour_band = build_five_hour_band(weekly_window, five_hour_window);
-    let five_hour_subframe =
-        build_five_hour_subframe(weekly_window, five_hour_window, weekly_history);
+    let five_hour_subframe = build_five_hour_subframe(
+        weekly_window,
+        five_hour_window,
+        weekly_history,
+        &history.five_hour_windows,
+        &history.weekly_windows,
+    );
 
     Ok(ProfileChartData {
         seven_day_points,
@@ -355,6 +393,8 @@ fn build_five_hour_subframe(
     weekly_window: Option<&UsageWindow>,
     five_hour_window: Option<&UsageWindow>,
     weekly_history: Option<&UsageWindowHistory>,
+    all_five_hour_windows: &[UsageWindowHistory],
+    all_weekly_windows: &[UsageWindowHistory],
 ) -> OwnedFiveHourSubframeState {
     let Some(weekly_window) = weekly_window else {
         return OwnedFiveHourSubframeState {
@@ -397,14 +437,26 @@ fn build_five_hour_subframe(
         })
         .unwrap_or_else(|| (current_7d - five_hour_used).max(0.0));
 
-    // upper_y: project 5h usage to 100% using the observed 7d growth rate
-    // Formula: lower_y + (7d_delta / 5h_used%) * 100
+    // upper_y: project the max observed 7d/5h rate across all windows (current + historical)
+    // to 100% 5h usage. Using the maximum ensures the band covers the worst-case observed ratio.
+    // When five_hour_used is 0, fall back to the historical max rate (thin line, min 1%).
     let seven_day_delta = (current_7d - lower_y).max(0.0);
+    const MIN_BAND_HEIGHT: f64 = 1.0;
     let upper_y = if five_hour_used > 0.0 {
-        (lower_y + (seven_day_delta / five_hour_used) * 100.0).clamp(lower_y, 100.0)
+        let current_rate = seven_day_delta / five_hour_used;
+        let rate = compute_max_historical_rate(all_five_hour_windows, all_weekly_windows)
+            .map(|hist_max| hist_max.max(current_rate))
+            .unwrap_or(current_rate);
+        (lower_y + rate * 100.0).clamp(lower_y, 100.0)
     } else {
-        (lower_y + 100.0).clamp(lower_y, 100.0)
+        let fallback_band = compute_max_historical_rate(all_five_hour_windows, all_weekly_windows)
+            .map(|r| (r * 10.0).max(MIN_BAND_HEIGHT))
+            .unwrap_or(MIN_BAND_HEIGHT);
+        (lower_y + fallback_band).clamp(lower_y, 100.0)
     };
+    // Invariant: upper_y >= current_7d. The current 7d value was already reached within
+    // this 5h window, so the projected ceiling must not fall below the observed fact.
+    let upper_y = upper_y.max(current_7d);
 
     OwnedFiveHourSubframeState {
         available: true,
@@ -414,6 +466,91 @@ fn build_five_hour_subframe(
         upper_y: Some(upper_y),
         reason: None,
     }
+}
+
+/// Returns the maximum `7d_delta / 5h_delta` rate across past 5h windows with usage > 0.
+/// Returns None if no valid windows found.
+fn compute_max_historical_rate(
+    five_hour_windows: &[UsageWindowHistory],
+    weekly_windows: &[UsageWindowHistory],
+) -> Option<f64> {
+    five_hour_windows
+        .iter()
+        .filter_map(|fh_win| {
+            let five_hour_delta = fh_win.observations.last()?.used_percent;
+            if five_hour_delta <= 0.0 {
+                return None;
+            }
+            let seven_day_delta = seven_day_delta_for_window(fh_win, weekly_windows);
+            if seven_day_delta < 0.0 {
+                return None;
+            }
+            Some(seven_day_delta / five_hour_delta)
+        })
+        .reduce(f64::max)
+}
+
+/// Computes 7d usage growth during a 5h window's time span.
+/// Handles the case where the 7d window resets to 0 mid-span.
+/// Returns -1.0 if the required weekly observations are not available.
+fn seven_day_delta_for_window(
+    fh_win: &UsageWindowHistory,
+    weekly_windows: &[UsageWindowHistory],
+) -> f64 {
+    let t_start = fh_win.start_at;
+    let t_end = fh_win.end_at;
+
+    // Prefer the window with the most observations when multiple windows overlap the same
+    // timestamp — duplicate windows with ±1s jitter are common and the denser one is more accurate.
+    let win_at_start = weekly_windows
+        .iter()
+        .filter(|w| w.start_at <= t_start && t_start < w.end_at)
+        .max_by_key(|w| w.observations.len());
+    let win_at_end = weekly_windows
+        .iter()
+        .filter(|w| w.start_at <= t_end && t_end <= w.end_at)
+        .max_by_key(|w| w.observations.len());
+
+    match (win_at_start, win_at_end) {
+        (Some(w1), Some(w2)) if std::ptr::eq(w1, w2) => {
+            // Same 7d cycle: simple interpolated delta
+            let y_start = interp_weekly_at(w1, t_start);
+            let y_end = interp_weekly_at(w1, t_end);
+            (y_end - y_start).max(0.0)
+        }
+        (Some(w1), Some(w2)) => {
+            // 7d window reset during this 5h window: sum growth before and after reset
+            let y_start = interp_weekly_at(w1, t_start);
+            let y_before_reset = w1.observations.last().map_or(0.0, |o| o.used_percent);
+            let delta_before = (y_before_reset - y_start).max(0.0);
+            let y_after_reset = interp_weekly_at(w2, t_end);
+            delta_before + y_after_reset
+        }
+        _ => -1.0,
+    }
+}
+
+/// Linearly interpolates `used_percent` at timestamp `t` within a window's observations.
+fn interp_weekly_at(win: &UsageWindowHistory, t: i64) -> f64 {
+    let obs = &win.observations;
+    if obs.is_empty() {
+        return 0.0;
+    }
+    let pos = obs.partition_point(|o| o.observed_at <= t);
+    if pos == 0 {
+        return obs[0].used_percent;
+    }
+    if pos >= obs.len() {
+        return obs.last().unwrap().used_percent;
+    }
+    let before = &obs[pos - 1];
+    let after = &obs[pos];
+    let span = (after.observed_at - before.observed_at) as f64;
+    if span <= 0.0 {
+        return before.used_percent;
+    }
+    let ratio = (t - before.observed_at) as f64 / span;
+    before.used_percent + (after.used_percent - before.used_percent) * ratio
 }
 
 fn find_matching_window<'a>(
@@ -571,7 +708,7 @@ mod tests {
                 },
             ],
         };
-        let subframe = build_five_hour_subframe(Some(&weekly), Some(&five_hour), Some(&history));
+        let subframe = build_five_hour_subframe(Some(&weekly), Some(&five_hour), Some(&history), &[], &[]);
         assert!(subframe.available);
         assert!(subframe.start_x.unwrap() < subframe.end_x.unwrap());
         assert!(subframe.end_x.unwrap() <= 7.0);
@@ -579,7 +716,7 @@ mod tests {
         assert_eq!(subframe.upper_y, Some(95.0));
 
         // Without history: fallback to weekly_used - 5h_used = 30, upper = 30 + (30/30)*100 = 130 -> 100
-        let subframe_no_hist = build_five_hour_subframe(Some(&weekly), Some(&five_hour), None);
+        let subframe_no_hist = build_five_hour_subframe(Some(&weekly), Some(&five_hour), None, &[], &[]);
         assert_eq!(subframe_no_hist.lower_y, Some(30.0));
         assert_eq!(subframe_no_hist.upper_y, Some(100.0));
     }
@@ -719,6 +856,7 @@ mod tests {
             None,
             Some(&claude_store),
             Some(&claude_usage),
+            None,
         )
         .unwrap();
 

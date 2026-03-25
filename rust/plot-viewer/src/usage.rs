@@ -293,7 +293,12 @@ impl UsageService {
                     observations: vec![observation],
                 });
             }
-            trim_history_windows(target_windows);
+            let max_count = match window.limit_window_seconds {
+                604_800 => 3,
+                18_000 => 34,
+                _ => 6,
+            };
+            trim_history_windows(target_windows, max_count);
         }
 
         self.write_history_cache(&history)
@@ -352,9 +357,9 @@ impl UsageService {
     }
 }
 
-fn trim_history_windows(windows: &mut Vec<UsageWindowHistory>) {
+fn trim_history_windows(windows: &mut Vec<UsageWindowHistory>, max_count: usize) {
     windows.sort_by_key(|window| (window.start_at, window.end_at));
-    while windows.len() > 6 {
+    while windows.len() > max_count {
         windows.remove(0);
     }
     for window in windows {

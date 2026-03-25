@@ -12,6 +12,7 @@ pub struct CronStatus {
     pub last_attempt: Option<i64>,
     pub codex_error: Option<String>,
     pub claude_error: Option<String>,
+    pub copilot_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,6 +25,8 @@ struct CronStatusFile {
     codex_error: Option<String>,
     #[serde(default)]
     claude_error: Option<String>,
+    #[serde(default)]
+    copilot_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +34,7 @@ pub struct CronRunReport {
     pub attempted_at: i64,
     pub codex_error: Option<String>,
     pub claude_error: Option<String>,
+    pub copilot_error: Option<String>,
 }
 
 impl CronStatus {
@@ -41,6 +45,7 @@ impl CronStatus {
             last_attempt: None,
             codex_error: None,
             claude_error: None,
+            copilot_error: None,
         }
     }
 }
@@ -51,11 +56,12 @@ impl CronRunReport {
             attempted_at: now_unix_seconds(),
             codex_error: None,
             claude_error: None,
+            copilot_error: None,
         }
     }
 
     pub fn has_errors(&self) -> bool {
-        self.codex_error.is_some() || self.claude_error.is_some()
+        self.codex_error.is_some() || self.claude_error.is_some() || self.copilot_error.is_some()
     }
 }
 
@@ -71,6 +77,7 @@ pub fn read_status(path: &Path) -> CronStatus {
         last_attempt: parsed.as_ref().and_then(|status| status.last_attempt),
         codex_error: parsed.as_ref().and_then(|status| status.codex_error.clone()),
         claude_error: parsed.as_ref().and_then(|status| status.claude_error.clone()),
+        copilot_error: parsed.as_ref().and_then(|status| status.copilot_error.clone()),
     }
 }
 
@@ -95,6 +102,7 @@ pub fn write_run_report(path: &Path, report: &CronRunReport) -> Result<()> {
         },
         codex_error: report.codex_error.clone(),
         claude_error: report.claude_error.clone(),
+        copilot_error: report.copilot_error.clone(),
     };
     std::fs::write(path, serde_json::to_vec_pretty(&status)?)?;
     Ok(())
@@ -105,7 +113,7 @@ pub fn is_installed() -> bool {
     Command::new("crontab")
         .args(["-l"])
         .output()
-        .map(|out| String::from_utf8_lossy(&out.stdout).contains("agent-switch") || String::from_utf8_lossy(&out.stdout).contains("codex-auth"))
+        .map(|out| String::from_utf8_lossy(&out.stdout).contains("agent-switch"))
         .unwrap_or(false)
 }
 
@@ -151,6 +159,7 @@ fn parse_status_file(raw: &str) -> Option<CronStatusFile> {
             last_success: Some(timestamp),
             codex_error: None,
             claude_error: None,
+            copilot_error: None,
         });
     }
     serde_json::from_str(trimmed).ok()

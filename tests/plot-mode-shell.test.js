@@ -22,7 +22,7 @@ test('plot mode is rendered from Rust app state, not Node shell wiring', () => {
   assert.match(appRs, /x_window_days: 7/);
 
   assert.match(chartRs, /usage chart \(align to 7d window\)/);
-  assert.match(chartRs, /Window: \{\} · \+\/-=zoom · r=reset · 1\/3\/7=window/);
+  assert.match(chartRs, /Window: \{\} · \+\/-=zoom · z=reset · 1\/3\/7=window/);
   assert.match(chartRs, /Band drift: 7d/);
   assert.match(chartRs, /5h frame: /);
   assert.match(chartRs, /5h band: /);

@@ -12,3 +12,7 @@ plan[1..n] -> split to lanes[1..m] -> 4a nlsdd flow
 - 將 plan 切分為獨立 lanes
 - 以 4a nlsdd flow 執行各 lane
 - 不可跳過 lane 拆分直接實作
+
+## Build Rule
+
+Always use `cargo test` instead of `cargo build` to verify Rust changes — it compiles and runs all tests in one step.
