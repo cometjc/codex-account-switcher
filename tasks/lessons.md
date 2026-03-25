@@ -40,3 +40,4 @@
 - `nlsdd-go` 不是只做一次 truth scan；它語意上包含「補齊 truth 後繼續推進」。除非遇到需要使用者選路的分岔，否則不該停在 active lanes 已存在但尚未繼續執行的中間態。
 - `nlsdd-go` 的終點不能只看當前 execution 是否 no-op；要看相關 plan 是否真的跑完。若 execution 沒 lane 可跑但 plan 還有未完成項，應繼續 replan / reopen truthful work，而不是把「execution 暫時空了」誤報成整輪完成。
 - 當使用者糾正回覆語言時，要立刻切換到指定語言，並把這個偏好上升成明確本地規則寫進 `AGENTS.md`，避免後續回覆再漂回預設語言。
+- 當使用者明確點名某條 NLSDD lane 要「繼續推進」並要求在指定 worktree 內工作時，main agent 應只在那個 worktree 收斂、驗證與提交，不要把變更回寫到主線工作樹。
