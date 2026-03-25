@@ -823,7 +823,7 @@ impl App {
 
     fn left_pane_width(&self, total_width: u16) -> u16 {
         // Width needed for profile list items:
-        // "  " highlight_symbol + "▶ {name}{unsaved_tag} {badge}" + 2 border cols
+        // "  " highlight_symbol + "▶~{name}{unsaved_tag} {badge}" + 2 border cols
         let max_list = self
             .profiles
             .iter()
@@ -938,7 +938,9 @@ impl App {
                 let profile = &self.profiles[i];
                 let color = render::SERIES_COLORS[i % render::SERIES_COLORS.len()];
                 let is_hidden = self.hidden_profiles.contains(&App::profile_hidden_key(profile));
-                let prefix = if profile.is_current { "▶ " } else if is_hidden { "~ " } else { "  " };
+                let current_sym = if profile.is_current { '▶' } else { ' ' };
+                let hidden_sym  = if is_hidden            { '~' } else { ' ' };
+                let prefix = format!("{current_sym}{hidden_sym}");
                 let service_tag = match profile.kind {
                     ProfileKind::Codex => "[codex]",
                     ProfileKind::Claude => "[claude]",
@@ -1662,6 +1664,21 @@ mod tests {
 
         assert!(joined.contains("[codex] Alpha"));
         assert!(!joined.contains("[saved]"));
+    }
+
+    #[test]
+    fn profile_list_shows_both_current_and_hidden_symbols_simultaneously() {
+        let mut app = App::from_profile_names(vec!["Alpha".to_string(), "Beta".to_string()], 0);
+        app.fullscreen = false;
+        // Hide the current profile (index 0 = Alpha)
+        app.toggle_selected_profile_hidden();
+        let buffer = render_buffer(&app, 100, 24);
+        let joined = (0..24)
+            .map(|y| buffer_row_text(&buffer, y, 100))
+            .collect::<Vec<_>>()
+            .join("\n");
+        // Alpha is both current (▶) and hidden (~) — both symbols must appear together
+        assert!(joined.contains("▶~"), "expected '▶~' for current+hidden profile, got:\n{joined}");
     }
 
     #[test]
