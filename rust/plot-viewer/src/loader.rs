@@ -138,7 +138,7 @@ pub fn load_profiles_with_report(
                 saved_name: Some(creds.login.clone()),
                 profile_name: creds.login.clone(),
                 account_id: Some(account_id),
-                is_current: false,
+                is_current: true,  // single detected account is always the active one
                 snapshot: serde_json::json!({}),
                 usage_view,
                 chart_data,
