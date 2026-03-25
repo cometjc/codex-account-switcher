@@ -56,10 +56,14 @@ pub fn render_chart<State: RenderState>(frame: &mut Frame, context: &RenderConte
         60 => "1d",
         _ => "?d",
     };
+    let view_prefix = match chart_state.tab_zoom_label {
+        Some(label) => format!("[{}] · ", label),
+        None => String::new(),
+    };
     let hint_line = if chart_state.fullscreen {
-        format!("Window: {} · ←→ zoom · ↑↓=y · z=reset · 1/3/7=snap · {}", window_label, env!("BUILD_VER"))
+        format!("{}Window: {} · Tab · ←→ zoom · ↑↓=y · z=reset · 1/3/7=snap · {}", view_prefix, window_label, env!("BUILD_VER"))
     } else {
-        format!("Window: {} · ←→ zoom · ↑↓=y · z=reset · 1/3/7=snap", window_label)
+        format!("{}Window: {} · Tab · ←→ zoom · ↑↓=y · z=reset · 1/3/7=snap", view_prefix, window_label)
     };
     let band_summary = Paragraph::new(Text::from(vec![Line::from(hint_line)]))
         .wrap(Wrap { trim: true });
@@ -74,11 +78,12 @@ fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_stat
     let x_bounds = [chart_state.x_lower, 7.0_f64];
     let y_bounds = [chart_state.y_lower, chart_state.y_upper];
 
-    let visible_series: Vec<&super::ChartSeries<'_>> = if chart_state.solo {
-        chart_state.series.iter().filter(|s| s.style.is_selected).collect()
-    } else {
-        chart_state.series.iter().collect()
-    };
+    let visible_series: Vec<&super::ChartSeries<'_>> = chart_state
+        .series
+        .iter()
+        .filter(|s| !s.style.hidden)
+        .filter(|s| !chart_state.solo || s.style.is_selected)
+        .collect();
 
     // Pre-compute 7d line points for each series.
     let series_points = visible_series
@@ -503,6 +508,7 @@ mod tests {
                 color_slot: 0,
                 is_selected: true,
                 is_current: true,
+                hidden: false,
             },
             points: vec![ChartPoint { x: 7.0, y: 76.0 }],
             last_seven_day_percent: Some(76.0),
@@ -549,6 +555,7 @@ mod tests {
                         color_slot: 0,
                         is_selected: true,
                         is_current: false,
+                        hidden: false,
                     },
                     points: vec![
                         ChartPoint { x: 0.0, y: 8.0 },
@@ -597,6 +604,7 @@ mod tests {
                 y_upper: 100.0,
                 x_lower: 0.0,
                 solo: false,
+                tab_zoom_label: None,
                 focused: false,
                 fullscreen: false,
             },
@@ -650,6 +658,7 @@ mod tests {
                         color_slot: 0,
                         is_selected: true,
                         is_current: true,
+                        hidden: false,
                     },
                     points: vec![
                         ChartPoint { x: 0.0, y: 12.0 },
@@ -694,6 +703,7 @@ mod tests {
                 y_upper: 100.0,
                 x_lower: 0.0,
                 solo: false,
+                tab_zoom_label: None,
                 focused: false,
                 fullscreen: false,
             },

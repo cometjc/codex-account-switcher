@@ -80,6 +80,7 @@ pub struct ChartSeriesStyle {
     pub color_slot: usize,
     pub is_selected: bool,
     pub is_current: bool,
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -124,6 +125,7 @@ pub struct ChartState<'a> {
     pub y_upper: f64,
     pub x_lower: f64,          // X-axis left bound: 0.0=7d, 4.0=3d, 6.0=1d
     pub solo: bool,             // if true, only render selected series
+    pub tab_zoom_label: Option<&'a str>, // Some(name) = tab-zoomed to this profile
     pub focused: bool,          // true when Plot pane has keyboard focus
     pub fullscreen: bool,       // true when fullscreen mode is active
 }

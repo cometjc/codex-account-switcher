@@ -1,10 +1,18 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::paths::AppPaths;
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UiState {
+    #[serde(default)]
+    pub hidden_profiles: HashSet<String>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StorePlatform {
@@ -42,6 +50,21 @@ impl AccountStore {
 
     pub fn paths(&self) -> &AppPaths {
         &self.paths
+    }
+
+    pub fn read_ui_state(&self) -> UiState {
+        let Ok(text) = fs::read_to_string(self.paths.ui_state_path()) else {
+            return UiState::default();
+        };
+        serde_json::from_str(&text).unwrap_or_default()
+    }
+
+    pub fn write_ui_state(&self, state: &UiState) -> Result<()> {
+        fs::write(
+            self.paths.ui_state_path(),
+            serde_json::to_string_pretty(state)?,
+        )
+        .with_context(|| format!("write {}", self.paths.ui_state_path().display()))
     }
 
     pub fn list_account_names(&self) -> Result<Vec<String>> {

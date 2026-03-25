@@ -109,9 +109,11 @@ pub struct App {
     y_zoom_user_adjusted: bool,
     binary_path: String,
     binary_mtime: Option<std::time::SystemTime>,
+    tab_zoom_index: Option<usize>,
+    hidden_profiles: std::collections::HashSet<String>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub(crate) struct AppRenderState<'a> {
     profiles: &'a [ProfileEntry],
     selected_profile_index: usize,
@@ -120,6 +122,8 @@ pub(crate) struct AppRenderState<'a> {
     x_window_days: f64,
     plot_focused: bool,
     fullscreen: bool,
+    tab_zoom_index: Option<usize>,
+    hidden_profiles: &'a std::collections::HashSet<String>,
 }
 
 impl App {
@@ -137,6 +141,7 @@ impl App {
             .to_string_lossy()
             .into_owned();
         let binary_mtime = binary_mtime(&binary_path);
+        let hidden_profiles = store.read_ui_state().hidden_profiles;
         Ok(Self {
             selected_profile_index: initial_selected_index(&profiles),
             y_zoom_lower: auto_y_lower(&profiles),
@@ -160,6 +165,8 @@ impl App {
             y_zoom_user_adjusted: false,
             binary_path,
             binary_mtime,
+            tab_zoom_index: None,
+            hidden_profiles,
         })
     }
 
@@ -207,6 +214,8 @@ impl App {
             y_zoom_user_adjusted: false,
             binary_path: String::new(),
             binary_mtime: None,
+            tab_zoom_index: None,
+            hidden_profiles: std::collections::HashSet::new(),
         }
     }
 
@@ -299,9 +308,18 @@ impl App {
                     PaneFocus::Accounts
                 };
             }
-            InputAction::NextFocus | InputAction::PreviousFocus => {
-                if !self.fullscreen {
-                    self.pane_focus = self.pane_focus.toggle();
+            InputAction::NextFocus => {
+                if self.pane_focus == PaneFocus::Plot {
+                    self.advance_tab_zoom(1);
+                } else {
+                    self.toggle_selected_profile_hidden();
+                }
+            }
+            InputAction::PreviousFocus => {
+                if self.pane_focus == PaneFocus::Plot {
+                    self.advance_tab_zoom(-1);
+                } else if !self.fullscreen {
+                    self.pane_focus = PaneFocus::Plot;
                 }
             }
             InputAction::ZoomIn => {
@@ -316,6 +334,7 @@ impl App {
                 self.y_zoom_lower = auto_y_lower(&self.profiles);
                 self.y_zoom_user_adjusted = false;
                 self.x_window_days = 7.0;
+                self.tab_zoom_index = None;
             }
             InputAction::ToggleSolo => {
                 if self.pane_focus == PaneFocus::Plot {
@@ -460,6 +479,58 @@ impl App {
         let len = indices.len() as isize;
         let next_pos = (pos as isize + delta).rem_euclid(len) as usize;
         self.selected_profile_index = indices[next_pos];
+    }
+
+    fn profile_hidden_key(profile: &ProfileEntry) -> String {
+        format!("{}|{}", profile.kind.as_str(), profile.profile_name)
+    }
+
+    fn is_profile_hidden(&self, index: usize) -> bool {
+        self.profiles
+            .get(index)
+            .map(|p| self.hidden_profiles.contains(&Self::profile_hidden_key(p)))
+            .unwrap_or(false)
+    }
+
+    fn toggle_selected_profile_hidden(&mut self) {
+        let key = match self.profiles.get(self.selected_profile_index) {
+            Some(p) => Self::profile_hidden_key(p),
+            None => return,
+        };
+        if self.hidden_profiles.contains(&key) {
+            self.hidden_profiles.remove(&key);
+        } else {
+            self.hidden_profiles.insert(key);
+        }
+        if let Some(store) = &self.store {
+            let ui_state = crate::store::UiState {
+                hidden_profiles: self.hidden_profiles.clone(),
+            };
+            let _ = store.write_ui_state(&ui_state);
+        }
+    }
+
+    fn advance_tab_zoom(&mut self, direction: isize) {
+        let visible: Vec<usize> = (0..self.profiles.len())
+            .filter(|&i| !self.is_profile_hidden(i))
+            .collect();
+        if visible.is_empty() {
+            self.tab_zoom_index = None;
+            return;
+        }
+        self.tab_zoom_index = match self.tab_zoom_index {
+            None if direction > 0 => visible.first().copied(),
+            None => visible.last().copied(),
+            Some(current) => {
+                let pos = visible.iter().position(|&i| i == current);
+                let next = pos.map(|p| p as isize + direction).unwrap_or(0);
+                if next < 0 || next >= visible.len() as isize {
+                    None
+                } else {
+                    visible.get(next as usize).copied()
+                }
+            }
+        };
     }
 
     fn handle_dialog_action(&mut self, action: InputAction) -> Result<()> {
@@ -769,6 +840,8 @@ impl App {
             x_window_days: self.x_window_days,
             plot_focused: self.pane_focus == PaneFocus::Plot,
             fullscreen: self.fullscreen,
+            tab_zoom_index: self.tab_zoom_index,
+            hidden_profiles: &self.hidden_profiles,
         };
         render::render(frame, chart_area, &render_state);
 
@@ -785,7 +858,7 @@ impl App {
                 PaneFocus::Accounts => vec![
                     Line::from("Enter=switch/save · r=rename · d=delete · u=refresh · a=all · q=quit"),
                     Line::from(format!(
-                        "Tab=plot · p=profiles · ↑↓=navigate · /=filter{}",
+                        "Tab=hide · p=profiles · ↑↓=navigate · /=filter{}",
                         if self.filter_input.is_some() { " (Esc=clear)" } else { "" }
                     )),
                 ],
@@ -820,7 +893,8 @@ impl App {
             .map(|&i| {
                 let profile = &self.profiles[i];
                 let color = render::SERIES_COLORS[i % render::SERIES_COLORS.len()];
-                let prefix = if profile.is_current { "▶ " } else { "  " };
+                let is_hidden = self.hidden_profiles.contains(&App::profile_hidden_key(profile));
+                let prefix = if profile.is_current { "▶ " } else if is_hidden { "~ " } else { "  " };
                 let service_tag = match profile.kind {
                     ProfileKind::Codex => "[codex]",
                     ProfileKind::Claude => "[claude]",
@@ -937,11 +1011,44 @@ impl render::RenderState for AppRenderState<'_> {
     }
 
     fn chart_state(&self) -> ChartState<'_> {
-        let mut state = build_chart_state(self.profiles, self.selected_profile_index);
-        state.y_lower = self.y_zoom_lower;
-        state.y_upper = 100.0;
+        let effective_selected = self.tab_zoom_index.unwrap_or(self.selected_profile_index);
+        let mut state = build_chart_state(self.profiles, effective_selected);
+
+        // Mark hidden profiles
+        for (i, series) in state.series.iter_mut().enumerate() {
+            let key = format!(
+                "{}|{}",
+                self.profiles.get(i).map(|p| p.kind.as_str()).unwrap_or(""),
+                self.profiles.get(i).map(|p| p.profile_name.as_str()).unwrap_or(""),
+            );
+            series.style.hidden = self.hidden_profiles.contains(&key);
+        }
+
+        if let Some(idx) = self.tab_zoom_index {
+            if let Some(profile) = self.profiles.get(idx) {
+                // Auto y-bounds: fit this profile's data + 5h band
+                let mut all_ys: Vec<f64> =
+                    profile.chart_data.seven_day_points.iter().map(|p| p.y).collect();
+                if let Some(y) = profile.chart_data.five_hour_band.lower_y { all_ys.push(y); }
+                if let Some(y) = profile.chart_data.five_hour_band.upper_y { all_ys.push(y); }
+                if !all_ys.is_empty() {
+                    let min_y = all_ys.iter().cloned().fold(f64::INFINITY, f64::min);
+                    let max_y = all_ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                    let margin = ((max_y - min_y) * 0.15).max(5.0);
+                    state.y_lower = (min_y - margin).max(0.0);
+                    state.y_upper = (max_y + margin).min(100.0);
+                }
+                state.solo = true;
+                state.tab_zoom_label = Some(profile.profile_name.as_str());
+            }
+        } else {
+            state.y_lower = self.y_zoom_lower;
+            state.y_upper = 100.0;
+            state.solo = self.solo;
+            state.tab_zoom_label = None;
+        }
+
         state.x_lower = 7.0 - self.x_window_days as f64;
-        state.solo = self.solo;
         state.focused = self.plot_focused;
         state.fullscreen = self.fullscreen;
         state
@@ -1277,6 +1384,7 @@ fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: u
                 color_slot: index,
                 is_selected: index == selected_profile_index,
                 is_current: profile.is_current,
+                hidden: false,
             },
             points: profile.chart_data.seven_day_points.clone(),
             last_seven_day_percent: profile.chart_data.seven_day_points.last().map(|point| point.y),
@@ -1303,6 +1411,7 @@ fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: u
         y_upper: 100.0,
         x_lower: 0.0,
         solo: false,
+        tab_zoom_label: None,
         focused: false,
         fullscreen: false,
     };
