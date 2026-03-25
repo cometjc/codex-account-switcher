@@ -123,7 +123,8 @@ pub struct ChartState<'a> {
     pub total_points: usize,
     pub y_lower: f64,
     pub y_upper: f64,
-    pub x_lower: f64,          // X-axis left bound: 0.0=7d, 4.0=3d, 6.0=1d
+    pub x_lower: f64,          // X-axis left bound (days ago from origin)
+    pub x_upper: f64,          // X-axis right bound: 7.0=now, less when panned into past
     pub solo: bool,             // if true, only render selected series
     pub tab_zoom_label: Option<&'a str>, // Some(name) = tab-zoomed to this profile
     pub focused: bool,          // true when Plot pane has keyboard focus

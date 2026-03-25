@@ -50,20 +50,27 @@ pub fn render_chart<State: RenderState>(frame: &mut Frame, context: &RenderConte
 
     render_usage_chart(frame, chart_area, &chart_state);
 
-    let window_label = match (chart_state.x_lower * 10.0).round() as i32 {
-        0 => "7d",
-        40 => "3d",
-        60 => "1d",
-        _ => "?d",
+    let window_days = chart_state.x_upper - chart_state.x_lower;
+    let offset_days = 7.0 - chart_state.x_upper;
+    let window_label = if offset_days > 0.01 {
+        format!("{:.1}d @{:.1}d", window_days, offset_days)
+    } else {
+        let window_days_i = (window_days * 10.0).round() as i32;
+        match window_days_i {
+            70 => "7d".to_string(),
+            30 => "3d".to_string(),
+            10 => "1d".to_string(),
+            _ => format!("{:.1}d", window_days),
+        }
     };
     let view_prefix = match chart_state.tab_zoom_label {
         Some(label) => format!("[{}] · ", label),
         None => String::new(),
     };
     let hint_line = if chart_state.fullscreen {
-        format!("{}Window: {} · Tab · ←→ zoom · ↑↓=y · z=reset · 1/3/7=snap · {}", view_prefix, window_label, env!("BUILD_VER"))
+        format!("{}W:{} · ←→=pan · =/- zoom-x · ↑↓=pan-y · [/]=zoom-y · z=reset · 1/3/7=snap · {}", view_prefix, window_label, env!("BUILD_VER"))
     } else {
-        format!("{}Window: {} · Tab · ←→ zoom · ↑↓=y · z=reset · 1/3/7=snap", view_prefix, window_label)
+        format!("{}W:{} · ←→=pan · =/- zoom-x · ↑↓=pan-y · [/]=zoom-y · z=reset · 1/3/7=snap", view_prefix, window_label)
     };
     let band_summary = Paragraph::new(Text::from(vec![Line::from(hint_line)]))
         .wrap(Wrap { trim: true });
@@ -75,7 +82,7 @@ fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_stat
         return;
     }
 
-    let x_bounds = [chart_state.x_lower, 7.0_f64];
+    let x_bounds = [chart_state.x_lower, chart_state.x_upper];
     let y_bounds = [chart_state.y_lower, chart_state.y_upper];
 
     let visible_series: Vec<&super::ChartSeries<'_>> = chart_state
@@ -139,9 +146,14 @@ fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_stat
         .collect::<Vec<_>>();
 
 
-    let x_mid = (x_bounds[0] + 7.0) / 2.0;
+    let x_mid = (x_bounds[0] + x_bounds[1]) / 2.0;
     let x_label_lo = format!("{:.1}d", x_bounds[0]);
     let x_label_mid = format!("{:.1}d", x_mid);
+    let x_label_hi = if (x_bounds[1] - 7.0).abs() < 0.01 {
+        "now".to_string()
+    } else {
+        format!("{:.1}d ago", 7.0 - x_bounds[1])
+    };
     let y_mid = (y_bounds[0] + y_bounds[1]) / 2.0;
     let y_label_lo = format!("{:.0}%", y_bounds[0]);
     let y_label_mid = format!("{:.0}%", y_mid);
@@ -151,7 +163,7 @@ fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_stat
             Axis::default()
                 .title("7d window")
                 .bounds(x_bounds)
-                .labels([x_label_lo.as_str(), x_label_mid.as_str(), "now"]),
+                .labels([x_label_lo.as_str(), x_label_mid.as_str(), x_label_hi.as_str()]),
         )
         .y_axis(
             Axis::default()
@@ -603,6 +615,7 @@ mod tests {
                 y_lower: 0.0,
                 y_upper: 100.0,
                 x_lower: 0.0,
+                x_upper: 7.0,
                 solo: false,
                 tab_zoom_label: None,
                 focused: false,
@@ -702,6 +715,7 @@ mod tests {
                 y_lower: 0.0,
                 y_upper: 100.0,
                 x_lower: 0.0,
+                x_upper: 7.0,
                 solo: false,
                 tab_zoom_label: None,
                 focused: false,

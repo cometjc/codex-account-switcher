@@ -104,6 +104,8 @@ pub struct App {
     solo_mode: bool,
     fullscreen: bool,
     x_window_days: f64,
+    x_offset_days: f64,
+    y_zoom_upper: f64,
     filter_input: Option<String>,
     last_auto_reload: Instant,
     y_zoom_user_adjusted: bool,
@@ -118,8 +120,10 @@ pub(crate) struct AppRenderState<'a> {
     profiles: &'a [ProfileEntry],
     selected_profile_index: usize,
     y_zoom_lower: f64,
+    y_zoom_upper: f64,
     solo: bool,
     x_window_days: f64,
+    x_offset_days: f64,
     plot_focused: bool,
     fullscreen: bool,
     tab_zoom_index: Option<usize>,
@@ -160,6 +164,8 @@ impl App {
             solo_mode: false,
             fullscreen: true,
             x_window_days: 7.0,
+            x_offset_days: 0.0,
+            y_zoom_upper: 100.0,
             filter_input: None,
             last_auto_reload: Instant::now(),
             y_zoom_user_adjusted: false,
@@ -209,6 +215,8 @@ impl App {
             solo_mode: false,
             fullscreen: true,
             x_window_days: 7.0,
+            x_offset_days: 0.0,
+            y_zoom_upper: 100.0,
             filter_input: None,
             last_auto_reload: Instant::now(),
             y_zoom_user_adjusted: false,
@@ -279,11 +287,11 @@ impl App {
             InputAction::Quit => self.should_quit = true,
             InputAction::Up | InputAction::Down => {
                 if self.pane_focus == PaneFocus::Plot {
-                    if matches!(action, InputAction::Up) {
-                        self.y_zoom_lower = (self.y_zoom_lower + 5.0).min(95.0);
-                    } else {
-                        self.y_zoom_lower = (self.y_zoom_lower - 5.0).max(0.0);
-                    }
+                    let shift = if matches!(action, InputAction::Up) { 5.0_f64 } else { -5.0_f64 };
+                    let new_upper = (self.y_zoom_upper + shift).clamp(self.y_zoom_lower + 5.0, 100.0);
+                    let actual = new_upper - self.y_zoom_upper;
+                    self.y_zoom_upper = new_upper;
+                    self.y_zoom_lower = (self.y_zoom_lower + actual).clamp(0.0, self.y_zoom_upper - 5.0);
                     self.y_zoom_user_adjusted = true;
                 } else {
                     let delta = if matches!(action, InputAction::Up) { -1 } else { 1 };
@@ -292,12 +300,13 @@ impl App {
             }
             InputAction::Left => {
                 if self.pane_focus == PaneFocus::Plot {
-                    self.x_window_days = (self.x_window_days + 0.5).min(7.0);
+                    let max_offset = (7.0 - self.x_window_days).max(0.0);
+                    self.x_offset_days = (self.x_offset_days + 0.5).min(max_offset);
                 }
             }
             InputAction::Right => {
                 if self.pane_focus == PaneFocus::Plot {
-                    self.x_window_days = (self.x_window_days - 0.5).max(0.5);
+                    self.x_offset_days = (self.x_offset_days - 0.5).max(0.0);
                 }
             }
             InputAction::ToggleProfiles => {
@@ -323,17 +332,42 @@ impl App {
                 }
             }
             InputAction::ZoomIn => {
-                self.y_zoom_lower = (self.y_zoom_lower + 5.0).min(95.0);
-                self.y_zoom_user_adjusted = true;
+                if self.pane_focus == PaneFocus::Plot {
+                    self.x_window_days = (self.x_window_days - 0.5).max(0.5);
+                    let max_offset = (7.0 - self.x_window_days).max(0.0);
+                    self.x_offset_days = self.x_offset_days.min(max_offset);
+                }
             }
             InputAction::ZoomOut => {
-                self.y_zoom_lower = (self.y_zoom_lower - 5.0).max(0.0);
-                self.y_zoom_user_adjusted = true;
+                if self.pane_focus == PaneFocus::Plot {
+                    self.x_window_days = (self.x_window_days + 0.5).min(7.0);
+                    let max_offset = (7.0 - self.x_window_days).max(0.0);
+                    self.x_offset_days = self.x_offset_days.min(max_offset);
+                }
+            }
+            InputAction::YZoomIn => {
+                if self.pane_focus == PaneFocus::Plot {
+                    let gap = self.y_zoom_upper - self.y_zoom_lower;
+                    if gap > 10.0 {
+                        self.y_zoom_lower = (self.y_zoom_lower + 5.0).min(self.y_zoom_upper - 10.0);
+                        self.y_zoom_upper = (self.y_zoom_upper - 5.0).max(self.y_zoom_lower + 10.0);
+                        self.y_zoom_user_adjusted = true;
+                    }
+                }
+            }
+            InputAction::YZoomOut => {
+                if self.pane_focus == PaneFocus::Plot {
+                    self.y_zoom_lower = (self.y_zoom_lower - 5.0).max(0.0);
+                    self.y_zoom_upper = (self.y_zoom_upper + 5.0).min(100.0);
+                    self.y_zoom_user_adjusted = true;
+                }
             }
             InputAction::ResetZoom => {
                 self.y_zoom_lower = auto_y_lower(&self.profiles);
+                self.y_zoom_upper = 100.0;
                 self.y_zoom_user_adjusted = false;
                 self.x_window_days = 7.0;
+                self.x_offset_days = 0.0;
                 self.tab_zoom_index = None;
             }
             InputAction::ToggleSolo => {
@@ -344,6 +378,7 @@ impl App {
             InputAction::XWindow(days) => {
                 if self.pane_focus == PaneFocus::Plot {
                     self.x_window_days = days as f64;
+                    self.x_offset_days = 0.0;
                 }
             }
             InputAction::FilterEnter => {
@@ -836,8 +871,10 @@ impl App {
             profiles: &self.profiles,
             selected_profile_index: self.selected_profile_index,
             y_zoom_lower: self.y_zoom_lower,
+            y_zoom_upper: self.y_zoom_upper,
             solo: self.solo_mode,
             x_window_days: self.x_window_days,
+            x_offset_days: self.x_offset_days,
             plot_focused: self.pane_focus == PaneFocus::Plot,
             fullscreen: self.fullscreen,
             tab_zoom_index: self.tab_zoom_index,
@@ -1043,12 +1080,13 @@ impl render::RenderState for AppRenderState<'_> {
             }
         } else {
             state.y_lower = self.y_zoom_lower;
-            state.y_upper = 100.0;
+            state.y_upper = self.y_zoom_upper;
             state.solo = self.solo;
             state.tab_zoom_label = None;
         }
 
-        state.x_lower = 7.0 - self.x_window_days as f64;
+        state.x_lower = 7.0 - self.x_window_days - self.x_offset_days;
+        state.x_upper = 7.0 - self.x_offset_days;
         state.focused = self.plot_focused;
         state.fullscreen = self.fullscreen;
         state
@@ -1410,6 +1448,7 @@ fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: u
         y_lower: 0.0,
         y_upper: 100.0,
         x_lower: 0.0,
+        x_upper: 7.0,
         solo: false,
         tab_zoom_label: None,
         focused: false,
