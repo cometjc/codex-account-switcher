@@ -195,7 +195,9 @@ struct CopilotQuotas {
 
 #[derive(Debug, serde::Deserialize)]
 pub(crate) struct CopilotQuotaEntry {
+    #[allow(dead_code)]
     pub(crate) entitlement: u64,
+    #[allow(dead_code)]
     pub(crate) remaining: u64,
     pub(crate) percent_remaining: f64,
     pub(crate) unlimited: bool,
