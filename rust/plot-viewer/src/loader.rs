@@ -50,6 +50,8 @@ pub fn load_profiles_with_report(
     let current_snapshot = store.get_current_snapshot().ok();
     let current_account_id = current_snapshot.as_ref().and_then(read_account_id);
     let current_access_token = current_snapshot.as_ref().and_then(read_access_token);
+    // Name-based fallback: survives broken symlinks and renames (current file is updated by rename_account)
+    let current_codex_name = store.get_current_account_name().ok().flatten();
     let mut refresh_errors = Vec::new();
 
     let mut profiles = saved_profiles
@@ -58,6 +60,7 @@ pub fn load_profiles_with_report(
             build_saved_entry(
                 profile,
                 &current_account_id,
+                &current_codex_name,
                 usage_service,
                 force_refresh,
                 refresh_account_id,
@@ -316,6 +319,7 @@ fn load_claude_profiles(
 fn build_saved_entry(
     profile: SavedProfile,
     current_account_id: &Option<String>,
+    current_name: &Option<String>,
     usage_service: &UsageService,
     force_refresh: bool,
     refresh_account_id: Option<&str>,
@@ -338,6 +342,14 @@ fn build_saved_entry(
     let chart_data =
         build_profile_chart_data(account_id.as_deref(), usage_view.usage.as_ref(), usage_service)?;
 
+    // Match by account_id (from auth.json content) OR by name (from ~/.codex/current file).
+    // Name-based match survives broken symlinks and renames; account_id match handles the
+    // case where the current file is absent but auth.json is readable.
+    let matches_id   = current_account_id.is_some()
+        && current_account_id.as_deref() == account_id.as_deref();
+    let matches_name = current_name.as_deref()
+        .is_some_and(|n| n == profile.name.as_str());
+
     Ok(ProfileEntry {
         kind: ProfileKind::Codex,
         saved_name: Some(profile.name.clone()),
@@ -345,7 +357,7 @@ fn build_saved_entry(
         snapshot: profile.snapshot,
         usage_view,
         account_id: account_id.clone(),
-        is_current: current_account_id.as_deref() == account_id.as_deref(),
+        is_current: matches_id || matches_name,
         chart_data,
     })
 }
