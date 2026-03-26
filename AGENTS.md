@@ -60,15 +60,6 @@
 
 ---
 
-### 7. Shared baseline review and merge
-- 當使用者明確要求審閱、合併或同步「組織維護的共同治理 baseline」（與本 repo 分開、以 `AGENTS.md` 為索引的版本化規則庫）時，主控 agent 必須依該 baseline 倉庫所索引的 adoption workflow 章節執行完整同步迴圈；**不得**在本文件寫入該倉庫的絕對路徑。
-- 盤點方式：若該倉庫已存在追蹤本專案的 `adopted/<專案代號>` 分支，使用 `git diff adopted/<專案代號>..HEAD -- AGENTS.md ai-rules/` 與 `git log --oneline adopted/<專案代號>..HEAD`；若尚未建立該分支，或分支已建立但尚未完成首次本地採納，則全量閱讀該倉庫的 `AGENTS.md` 及其索引的正式章節。
-- 先將變更收斂成採納條目；**每一條**至少提出四種策略選項（例如更本地化、更通用、更積極、保守或略過）並附建議，再映射回本 repo 的 `AGENTS.md`、skills、runbook 或既有文件落點，避免平行新增語意重疊的檔案。
-- **禁止**在僅完成討論、尚未於本 repo 落地並 commit 前就更新 baseline 倉庫的 `adopted/<專案代號>`；僅在本地採納決策已落盤後，才將該分支快轉至 baseline 的當前 `HEAD`。
-- 收斂時須在回報中列出差異條目、採納決策與暫緩項目，作為可驗證的完成證據。
-
----
-
 ## Task Management
 1. **Plan First**: Write plan to `tasks/todo.md` with checkable items
 2. **Verify Plan**: Check in before starting implementation
