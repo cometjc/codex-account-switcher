@@ -1,3 +1,10 @@
+# Governance
+
+- 本 `AGENTS.md` 為本 repo 的治理權威入口。
+- 與組織 shared baseline 對齊之正式章節見下方 [共同 baseline 章節](#共同-baseline-章節)（`ai-rules/*.md`）；後續同步請依該目錄內之 adoption workflow 執行。
+
+---
+
 ### 0. Response Language
 - 預設以繁體中文（zhtw）回覆使用者。
 - 若使用者在當前對話中明確指定其他語言，才針對該次請求改用指定語言。
@@ -73,6 +80,18 @@
 ## Core Principles
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards
+
+## 共同 baseline 章節
+
+以下檔案由組織 shared baseline 採納至本 repo；與上游的採納錨點由 baseline 倉庫之 `adopted/agent-switch` 分支標示（由維護者在每次完成同步後更新）。
+
+- [ai-rules/adoption-workflow.md](ai-rules/adoption-workflow.md)
+- [ai-rules/shared-baseline-sync-and-local-adoption.md](ai-rules/shared-baseline-sync-and-local-adoption.md)
+- [ai-rules/commit-each-minimum-viable-change.md](ai-rules/commit-each-minimum-viable-change.md)
+- [ai-rules/choose-agents-skill-script-or-runbook.md](ai-rules/choose-agents-skill-script-or-runbook.md)
+- [ai-rules/verify-third-party-module-interface-before-integration.md](ai-rules/verify-third-party-module-interface-before-integration.md)
+- [ai-rules/distinguish-rule-suggestions-from-established-process-state.md](ai-rules/distinguish-rule-suggestions-from-established-process-state.md)
+- [ai-rules/surface-stale-untracked-governance-files-at-stop.md](ai-rules/surface-stale-untracked-governance-files-at-stop.md)
 
 # Repository Guidelines
 

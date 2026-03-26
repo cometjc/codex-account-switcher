@@ -1,0 +1,18 @@
+---
+title: agent-switch project rules
+description: Governance index + shared baseline chapters for this repo
+---
+
+@[file](../../AGENTS.md)
+@[file](../../ai-rules/adoption-workflow.md)
+@[file](../../ai-rules/shared-baseline-sync-and-local-adoption.md)
+@[file](../../ai-rules/commit-each-minimum-viable-change.md)
+@[file](../../ai-rules/choose-agents-skill-script-or-runbook.md)
+@[file](../../ai-rules/verify-third-party-module-interface-before-integration.md)
+@[file](../../ai-rules/distinguish-rule-suggestions-from-established-process-state.md)
+@[file](../../ai-rules/surface-stale-untracked-governance-files-at-stop.md)
+
+### Cursor-specific notes
+
+- TypeScript CLI：`npm run build`；Rust 元件：依 `CLAUDE.md` 與 `AGENTS.md` 之專案區段執行驗證。
+- 新增或重命名 `ai-rules/` 內檔案時，應同步更新根目錄 `AGENTS.md` 的索引區段。
