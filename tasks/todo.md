@@ -10,6 +10,16 @@
 - `AGENTS.md`、`CLAUDE.md`、`.cursor/rules/project-rules.mdc` 與 `.github/copilot-instructions.md` 已同步移除舊章節索引，避免 `ai-rules/` 與 skill 形成雙重權威來源。
 - `new-rule` skill 已明寫：shared-baseline adoption item 必須逐條進 ask-style 互動、提供至少四種採納選項並記錄使用者選擇。
 
+# 2026-03-26 baseline adoption diff uses explicit two-ref form
+
+- [x] 將 `new-rule` skill 的 baseline adoption diff 改為雙 ref 形式 `git diff adopted/<project> main -- . ':(exclude)skills/*'`
+- [x] 將這次 diff 邊界與命令形式修正寫進 `tasks/lessons.md`
+
+## Review
+
+- `common-dev-rules/skills/new-rule/SKILL.md` 現在要求：已有 adopted baseline 時，用雙 ref diff 比較正式規則面，並預設排除 `skills/*`。
+- 只有任務本身明確是更新 workflow skill 時，才把 `skills/` 納入 baseline adoption review 的比較集合。
+
 # 2026-03-22 rust-chart-overlap-cleanup execution truth
 
 - [x] 以 central executor 建立 `rust-chart-overlap-cleanup` execution，將 Rust chart/history、Node cleanup、tests migration 與 final docs 收口拆成 5 條 lanes
