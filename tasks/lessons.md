@@ -1,5 +1,6 @@
 # Lessons
 
+- 當使用者指出 shared-baseline 的推送/同步更新流程不是一般開發治理規則時，不要再把它放進 `ai-rules/`；這類帶 trigger/decision/exit 的流程應集中到 shared repo 的對應 `skills/*.md`，並同步移除索引中的舊章節，避免 skill 與 `ai-rules/` 雙重權威來源。
 - 當使用者要求「使用 nlsdd 完成剩下全部計畫」時，不能只在本地直接做一大塊修改；要先把剩餘 scope 全部寫進 central executor 的 execution / plan / lanes，再沿 lane truth 推進與收斂。
 - 當使用者直接指出介面文案或欄位語意要修正時，要同步檢查欄位命名與資訊分工是否清楚，不要把時間與使用量剩餘混在同一欄。
 - 表格式 CLI UI 的欄位名要放在 header，不要把 `Time to reset`、`Usage Left`、`Drift` 這種欄位名稱重複印進每一列資料內容。

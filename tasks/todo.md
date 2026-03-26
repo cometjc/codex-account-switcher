@@ -1,3 +1,15 @@
+# 2026-03-26 common-dev-rules adoption workflow relocation
+
+- [x] 確認 shared baseline adoption/sync 流程應從 `ai-rules/` 收斂回 `skills/new-rule/SKILL.md`
+- [x] 更新 `common-dev-rules` 索引與 adapter，移除 `ai-rules/adoption-workflow.md` 的正式章節地位
+- [x] 將這次使用者修正寫進 `tasks/lessons.md`
+
+## Review
+
+- `common-dev-rules` 已刪除 `ai-rules/adoption-workflow.md`，並把 shared-baseline push/sync/adoption workflow 收斂回 `skills/new-rule/SKILL.md`。
+- `AGENTS.md`、`CLAUDE.md`、`.cursor/rules/project-rules.mdc` 與 `.github/copilot-instructions.md` 已同步移除舊章節索引，避免 `ai-rules/` 與 skill 形成雙重權威來源。
+- `new-rule` skill 已明寫：shared-baseline adoption item 必須逐條進 ask-style 互動、提供至少四種採納選項並記錄使用者選擇。
+
 # 2026-03-22 rust-chart-overlap-cleanup execution truth
 
 - [x] 以 central executor 建立 `rust-chart-overlap-cleanup` execution，將 Rust chart/history、Node cleanup、tests migration 與 final docs 收口拆成 5 條 lanes
