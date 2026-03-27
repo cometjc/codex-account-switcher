@@ -413,7 +413,7 @@ where
 {
     match usage_fetch(account_id, access_token) {
         Ok(usage) => Ok(usage),
-        Err(error) if is_usage_rate_limited(&error) => {
+        Err(error) if is_usage_refreshable_error(&error) => {
             let rotated_access_token =
                 refresh_current_claude_credentials(paths, access_token, &mut refresh_tokens)?;
             usage_fetch(account_id, rotated_access_token.as_str())
@@ -555,9 +555,13 @@ fn parse_refreshed_claude_tokens(raw: &Value, now: i64) -> anyhow::Result<Refres
     })
 }
 
-fn is_usage_rate_limited(error: &anyhow::Error) -> bool {
+fn is_usage_refreshable_error(error: &anyhow::Error) -> bool {
     let message = format!("{error:#}").to_ascii_lowercase();
-    message.contains("429") || message.contains("rate limited")
+    message.contains("429")
+        || message.contains("rate limited")
+        || message.contains("401")
+        || message.contains("unauthorized")
+        || message.contains("invalid access token")
 }
 
 fn current_unix_seconds() -> i64 {
@@ -661,6 +665,65 @@ mod tests {
                     "sk-ant-oat01-aaa" => Err(anyhow::anyhow!(
                         "Claude usage request failed: HTTP 429 Too Many Requests"
                     )),
+                    "sk-ant-oat01-new" => Ok(UsageResponse {
+                        email: None,
+                        plan_type: Some("pro".to_string()),
+                        rate_limit: Some(UsageRateLimit {
+                            primary_window: Some(UsageWindow {
+                                used_percent: 12.0,
+                                limit_window_seconds: 18_000,
+                                reset_at: 1_730_010_000,
+                                reset_after_seconds: 600,
+                            }),
+                            secondary_window: Some(UsageWindow {
+                                used_percent: 34.0,
+                                limit_window_seconds: 604_800,
+                                reset_at: 1_730_100_000,
+                                reset_after_seconds: 9_000,
+                            }),
+                        }),
+                    }),
+                    other => Err(anyhow::anyhow!("unexpected token {other}")),
+                }
+            },
+            |_refresh_token: &str| {
+                Ok(RefreshedClaudeTokens {
+                    access_token: "sk-ant-oat01-new".to_string(),
+                    refresh_token: "sk-ant-ort01-new".to_string(),
+                    expires_at: 1_730_200_000,
+                })
+            },
+        )
+        .unwrap();
+
+        let persisted = read_credentials(paths.credentials_path()).unwrap();
+        assert_eq!(usage.plan_type.as_deref(), Some("pro"));
+        assert_eq!(
+            seen_tokens,
+            vec!["sk-ant-oat01-aaa".to_string(), "sk-ant-oat01-new".to_string()]
+        );
+        assert_eq!(persisted.access_token(), "sk-ant-oat01-new");
+        assert_eq!(persisted.claude_ai_oauth.refresh_token, "sk-ant-ort01-new");
+        assert_eq!(persisted.claude_ai_oauth.expires_at, 1_730_200_000);
+    }
+
+    #[test]
+    fn usage_401_refreshes_current_token_once_and_persists_rotated_credentials() {
+        let (claude_dir, _base) = temp_dir_pair();
+        let paths = ClaudePaths::from_claude_dir(claude_dir.clone());
+        fs::write(paths.credentials_path(), sample_creds_json()).unwrap();
+
+        let mut seen_tokens = Vec::new();
+        let usage = fetch_claude_usage_with_auto_refresh(
+            &paths,
+            "claude-bbb|pro",
+            "sk-ant-oat01-aaa",
+            |_, token: &str| {
+                seen_tokens.push(token.to_string());
+                match token {
+                    "sk-ant-oat01-aaa" => {
+                        Err(anyhow::anyhow!("Claude usage request failed: HTTP 401 Unauthorized"))
+                    }
                     "sk-ant-oat01-new" => Ok(UsageResponse {
                         email: None,
                         plan_type: Some("pro".to_string()),

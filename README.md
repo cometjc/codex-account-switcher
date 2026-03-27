@@ -79,6 +79,6 @@ The script will:
 
 Notes:
 
-- If Claude usage returns HTTP `429`, `agent-switch` does **not** retry with the same access token. It refreshes the current Claude OAuth credentials in `~/.claude/.credentials.json`, then makes one follow-up usage request with the rotated token.
+- If Claude usage returns HTTP `429` or `401`, `agent-switch` does **not** retry with the same access token. It refreshes the current Claude OAuth credentials in `~/.claude/.credentials.json`, then makes one follow-up usage request with the rotated token.
 - Works on macOS/Linux with symlink switching and on Windows with file copy switching.
 - Node remains in the repo for executor automation and NLSDD tooling, not as the primary auth runtime.

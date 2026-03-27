@@ -1,3 +1,16 @@
+# 2026-03-26 Claude 401 usage refresh bug
+
+- [x] 釐清 Claude usage 401 與目前 auto-refresh 條件的落差
+- [x] 先補測試鎖住 401 應觸發 token refresh 的行為
+- [x] 修正 Claude usage refresh 條件與必要文件說明
+- [x] 驗證相關 Rust 測試通過
+
+## Review
+
+- 根因是 `fetch_claude_usage_with_auto_refresh()` 原本只把 `429` 視為可透過 refresh 解決的 usage 錯誤；`401 Unauthorized` 會直接往外丟，所以 status line 會顯示 `Claude issue: Claude usage request failed: HTTP status client error (401 ...)`。
+- 已先補 regression test，確認 `401` 會在修正前穩定失敗；修正後 `401` 與 `429` 都會觸發一次 Claude OAuth token refresh，再用旋轉後的 token 重試一次 usage request。
+- `cargo test --manifest-path rust/plot-viewer/Cargo.toml` 全綠（43 + 1 + 3 tests），README 的 Claude live verification 說明也已同步更新為 `429` / `401`。
+
 # 2026-03-26 common-dev-rules adoption workflow relocation
 
 - [x] 確認 shared baseline adoption/sync 流程應從 `ai-rules/` 收斂回 `skills/new-rule/SKILL.md`
