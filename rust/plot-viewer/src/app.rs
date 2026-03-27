@@ -1,3 +1,4 @@
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -22,6 +23,20 @@ use crate::usage::{
     pick_five_hour_window, pick_weekly_window, UsageReadResult, UsageResponse, UsageService, UsageSource,
 };
 use crate::app_data::{ProfileChartData, ProfileEntry, ProfileKind};
+
+const BACKGROUND_REFRESH_STALE_SECONDS: i64 = 600;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BackgroundRefreshState {
+    Idle,
+    Running { queued_profiles: usize },
+}
+
+#[derive(Debug)]
+struct BackgroundRefreshReport {
+    refreshed_profiles: usize,
+    refresh_errors: Vec<String>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PaneFocus {
@@ -113,6 +128,8 @@ pub struct App {
     binary_mtime: Option<std::time::SystemTime>,
     tab_zoom_index: Option<usize>,
     hidden_profiles: std::collections::HashSet<String>,
+    background_refresh_state: BackgroundRefreshState,
+    background_refresh_receiver: Option<Receiver<BackgroundRefreshReport>>,
 }
 
 #[derive(Debug)]
@@ -139,14 +156,23 @@ impl App {
         claude_usage_service: Option<UsageService>,
         copilot_usage_service: Option<UsageService>,
     ) -> Result<Self> {
-        let profiles = load_profiles(&store, &usage_service, false, None, claude_store.as_ref(), claude_usage_service.as_ref(), copilot_usage_service.as_ref())?;
+        let profiles = load_profiles(
+            &store,
+            &usage_service,
+            false,
+            None,
+            true,
+            claude_store.as_ref(),
+            claude_usage_service.as_ref(),
+            copilot_usage_service.as_ref(),
+        )?;
         let binary_path = std::env::current_exe()
             .unwrap_or_default()
             .to_string_lossy()
             .into_owned();
         let binary_mtime = binary_mtime(&binary_path);
         let hidden_profiles = store.read_ui_state().hidden_profiles;
-        Ok(Self {
+        let mut app = Self {
             selected_profile_index: initial_selected_index(&profiles),
             y_zoom_lower: auto_y_lower(&profiles),
             profiles,
@@ -173,7 +199,11 @@ impl App {
             binary_mtime,
             tab_zoom_index: None,
             hidden_profiles,
-        })
+            background_refresh_state: BackgroundRefreshState::Idle,
+            background_refresh_receiver: None,
+        };
+        app.ensure_background_refresh_task();
+        Ok(app)
     }
 
     pub fn from_profile_names(profile_names: Vec<String>, selected_profile_index: usize) -> Self {
@@ -224,6 +254,8 @@ impl App {
             binary_mtime: None,
             tab_zoom_index: None,
             hidden_profiles: std::collections::HashSet::new(),
+            background_refresh_state: BackgroundRefreshState::Idle,
+            background_refresh_receiver: None,
         }
     }
 
@@ -253,6 +285,7 @@ impl App {
 
     fn run_loop(&mut self, terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
         while !self.should_quit && !self.should_exec {
+            self.poll_background_refresh();
             terminal.draw(|frame| self.render(frame))?;
 
             if event::poll(Duration::from_millis(150))? {
@@ -790,6 +823,7 @@ impl App {
             usage_service,
             force_refresh,
             refresh_account_id.as_deref(),
+            !force_refresh || refresh_account_id.is_some(),
             self.claude_store.as_ref(),
             self.claude_usage_service.as_ref(),
             self.copilot_usage_service.as_ref(),
@@ -802,7 +836,101 @@ impl App {
         if !self.y_zoom_user_adjusted {
             self.y_zoom_lower = auto_y_lower(&self.profiles);
         }
+        self.ensure_background_refresh_task();
         Ok(report.refresh_errors)
+    }
+
+    fn ensure_background_refresh_task(&mut self) {
+        if self.background_refresh_receiver.is_some() {
+            return;
+        }
+        let Some(store) = self.store.clone() else {
+            return;
+        };
+        let Some(usage_service) = self.usage_service.clone() else {
+            return;
+        };
+
+        let stale_account_ids = stale_background_refresh_account_ids(
+            &self.profiles,
+            now_unix_seconds(),
+            BACKGROUND_REFRESH_STALE_SECONDS,
+        );
+        if stale_account_ids.is_empty() {
+            self.background_refresh_state = BackgroundRefreshState::Idle;
+            return;
+        }
+
+        let claude_store = self.claude_store.clone();
+        let claude_usage_service = self.claude_usage_service.clone();
+        let copilot_usage_service = self.copilot_usage_service.clone();
+        let queued_profiles = stale_account_ids.len();
+        let (tx, rx) = mpsc::channel();
+        self.background_refresh_state = BackgroundRefreshState::Running { queued_profiles };
+        self.background_refresh_receiver = Some(rx);
+
+        std::thread::spawn(move || {
+            let mut refreshed_profiles = 0;
+            let mut refresh_errors = Vec::new();
+
+            for account_id in stale_account_ids {
+                match crate::loader::load_profiles_with_report(
+                    &store,
+                    &usage_service,
+                    true,
+                    Some(account_id.as_str()),
+                    true,
+                    claude_store.as_ref(),
+                    claude_usage_service.as_ref(),
+                    copilot_usage_service.as_ref(),
+                ) {
+                    Ok(report) => {
+                        refreshed_profiles += 1;
+                        refresh_errors.extend(report.refresh_errors);
+                    }
+                    Err(error) => {
+                        refresh_errors.push(format!("{account_id}: {error:#}"));
+                    }
+                }
+            }
+
+            let _ = tx.send(BackgroundRefreshReport {
+                refreshed_profiles,
+                refresh_errors,
+            });
+        });
+    }
+
+    fn poll_background_refresh(&mut self) {
+        let outcome = match self.background_refresh_receiver.as_ref() {
+            Some(receiver) => receiver.try_recv(),
+            None => return,
+        };
+
+        match outcome {
+            Ok(report) => {
+                self.background_refresh_receiver = None;
+                self.background_refresh_state = BackgroundRefreshState::Idle;
+                let reload_result = self.reload_profiles(false, None);
+                self.status_message = Some(match (report.refreshed_profiles, report.refresh_errors.is_empty()) {
+                    (count, true) => format!("Background refresh updated {count} profiles"),
+                    (count, false) if count > 0 => format!(
+                        "Background refresh updated {count} profiles with errors: {}",
+                        report.refresh_errors.join(" | ")
+                    ),
+                    _ => format!("Background refresh failed: {}", report.refresh_errors.join(" | ")),
+                });
+                if let Err(error) = reload_result {
+                    self.status_message = Some(format!("Background refresh reload failed: {error:#}"));
+                }
+            }
+            Err(TryRecvError::Empty) => {}
+            Err(TryRecvError::Disconnected) => {
+                self.background_refresh_receiver = None;
+                self.background_refresh_state = BackgroundRefreshState::Idle;
+                self.status_message = Some("Background refresh worker disconnected".to_string());
+            }
+        }
     }
 
     fn selected_profile(&self) -> Option<&ProfileEntry> {
@@ -847,7 +975,17 @@ impl App {
             .max()
             .unwrap_or(0) + 2; // +2 for "Details" block borders
 
-        let max_content = max_list.max(max_detail) as u16;
+        let max_refresh = render_refresh_tasks(
+            &self.cron_status,
+            self.status_message.as_deref(),
+            &self.background_refresh_state,
+        )
+        .into_iter()
+        .map(|line| line.width())
+        .max()
+        .unwrap_or(0) + 2; // +2 for "Refresh tasks" block borders
+
+        let max_content = max_list.max(max_detail).max(max_refresh) as u16;
         // Give the chart at least 40 columns; always at least 20 for the left pane.
         let max_allowed = total_width.saturating_sub(40).max(20);
         max_content.min(max_allowed)
@@ -856,13 +994,8 @@ impl App {
     fn render(&self, frame: &mut Frame) {
         let area = frame.area();
         let footer_height = if self.fullscreen || self.pane_focus == PaneFocus::Plot { 1 } else { 2 };
-        let [body, cron_area, footer_area] =
-            Layout::vertical([
-                Constraint::Min(0),
-                Constraint::Length(1),
-                Constraint::Length(footer_height),
-            ])
-            .areas(area);
+        let [body, footer_area] =
+            Layout::vertical([Constraint::Min(0), Constraint::Length(footer_height)]).areas(area);
 
         let chart_area = if self.fullscreen {
             body
@@ -888,10 +1021,6 @@ impl App {
             hidden_profiles: &self.hidden_profiles,
         };
         render::render(frame, chart_area, &render_state);
-
-        let cron = Paragraph::new(Text::from(vec![render_cron_status_line(&self.cron_status)]))
-            .wrap(Wrap { trim: true });
-        frame.render_widget(cron, cron_area);
 
         let footer_lines = if self.fullscreen {
             vec![
@@ -922,9 +1051,20 @@ impl App {
     fn render_left_pane(&self, frame: &mut Frame, area: Rect) {
         let indices = self.filtered_profile_indices();
         let list_lines = (indices.len().max(3).min(10) + 2) as u16;
+        let refresh_lines = render_refresh_tasks(
+            &self.cron_status,
+            self.status_message.as_deref(),
+            &self.background_refresh_state,
+        );
+        let refresh_height = ((refresh_lines.len() as u16) + 4).clamp(6, 12);
 
-        let [list_area, detail_area] =
+        let [list_area, lower_area] =
             Layout::vertical([Constraint::Length(list_lines), Constraint::Min(0)]).areas(area);
+        let [detail_area, refresh_area] = Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(refresh_height),
+        ])
+        .areas(lower_area);
 
         let profiles_title = match &self.filter_input {
             Some(f) => format!("Profiles [/{}]", f),
@@ -986,6 +1126,11 @@ impl App {
             .block(Block::default().title("Details").borders(Borders::ALL))
             .wrap(Wrap { trim: true });
         frame.render_widget(details, detail_area);
+
+        let refresh = Paragraph::new(Text::from(refresh_lines))
+            .block(Block::default().title("Refresh tasks").borders(Borders::ALL))
+            .wrap(Wrap { trim: true });
+        frame.render_widget(refresh, refresh_area);
     }
 
     fn render_dialog(&self, frame: &mut Frame) {
@@ -1144,7 +1289,7 @@ fn initial_selected_index(profiles: &[ProfileEntry]) -> usize {
 
 fn render_account_detail(
     profile: Option<&ProfileEntry>,
-    status_message: Option<&str>,
+    _status_message: Option<&str>,
 ) -> Vec<Line<'static>> {
     let Some(profile) = profile else {
         return vec![
@@ -1196,11 +1341,27 @@ fn render_account_detail(
         }
     }
 
+    lines
+}
+
+fn render_refresh_tasks(
+    cron_status: &CronStatus,
+    status_message: Option<&str>,
+    background_refresh_state: &BackgroundRefreshState,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from(match background_refresh_state {
+        BackgroundRefreshState::Idle => "Background: idle".to_string(),
+        BackgroundRefreshState::Running { queued_profiles } => {
+            format!("Background: refreshing {queued_profiles} stale profiles")
+        }
+    })];
+
     if let Some(message) = status_message {
-        lines.push(Line::from(""));
         lines.push(Line::from(message.to_string()));
     }
 
+    lines.push(Line::from(""));
+    lines.push(render_cron_status_line(cron_status));
     lines
 }
 
@@ -1248,10 +1409,7 @@ fn format_age(fetched_at: Option<i64>, stale: bool) -> String {
     let Some(ts) = fetched_at else {
         return "never".to_string();
     };
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64;
+    let now = now_unix_seconds();
     let age_secs = now.saturating_sub(ts).max(0) as u64;
     let age_str = if age_secs < 60 {
         format!("{}s ago", age_secs)
@@ -1267,6 +1425,41 @@ fn format_age(fetched_at: Option<i64>, stale: bool) -> String {
     } else {
         age_str
     }
+}
+
+fn now_unix_seconds() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
+fn stale_background_refresh_account_ids(
+    profiles: &[ProfileEntry],
+    now_seconds: i64,
+    stale_after_seconds: i64,
+) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut account_ids = Vec::new();
+
+    for profile in profiles {
+        let Some(account_id) = profile.account_id.as_ref() else {
+            continue;
+        };
+        let age = profile
+            .usage_view
+            .fetched_at
+            .map(|fetched_at| now_seconds.saturating_sub(fetched_at))
+            .unwrap_or(i64::MAX);
+        if age < stale_after_seconds {
+            continue;
+        }
+        if seen.insert(account_id.clone()) {
+            account_ids.push(account_id.clone());
+        }
+    }
+
+    account_ids
 }
 
 /// Format a duration in seconds as "3d 9h", "9h 38m", "45m", etc.
@@ -1565,6 +1758,31 @@ mod tests {
     }
 
     #[test]
+    fn refresh_tasks_panel_renders_cron_and_background_status() {
+        let cron_status = CronStatus {
+            installed: true,
+            last_run: Some(1_700_000_000),
+            last_attempt: Some(1_700_000_300),
+            codex_error: None,
+            claude_error: Some("HTTP 429 Too Many Requests".to_string()),
+            copilot_error: None,
+        };
+
+        let lines = render_refresh_tasks(
+            &cron_status,
+            Some("Background refresh updated 3 profiles"),
+            &BackgroundRefreshState::Running { queued_profiles: 3 },
+        );
+
+        let joined = lines.iter().map(Line::to_string).collect::<Vec<_>>().join("\n");
+        assert!(joined.contains("Background: refreshing 3 stale profiles"));
+        assert!(joined.contains("Background refresh updated 3 profiles"));
+        assert!(joined.contains("Cron: installed"));
+        assert!(joined.contains("Claude issue:"));
+        assert!(joined.contains("429 Too Many Requests"));
+    }
+
+    #[test]
     fn account_detail_shows_last_cron_failure_summary() {
         let profile = ProfileEntry {
             kind: ProfileKind::Claude,
@@ -1612,7 +1830,7 @@ mod tests {
     }
 
     #[test]
-    fn cron_status_renders_in_global_status_line_above_actions() {
+    fn refresh_tasks_panel_renders_in_left_pane_instead_of_global_status_line() {
         let mut app = App::from_profile_names(vec!["Alpha".to_string()], 0);
         app.fullscreen = false;
         app.pane_focus = PaneFocus::Accounts;
@@ -1624,13 +1842,22 @@ mod tests {
             claude_error: Some("HTTP 429 Too Many Requests".to_string()),
             copilot_error: None,
         };
+        app.status_message = Some("Background refresh updated 3 profiles".to_string());
+        app.background_refresh_state = BackgroundRefreshState::Running { queued_profiles: 3 };
 
         let buffer = render_buffer(&app, 100, 24);
-        let status_line = buffer_row_text(&buffer, 21, 100);
         let actions_line = buffer_row_text(&buffer, 22, 100);
+        let joined = (0..24)
+            .map(|y| buffer_row_text(&buffer, y, 100))
+            .collect::<Vec<_>>()
+            .join("\n");
 
-        assert!(status_line.contains("Cron:"));
-        assert!(status_line.contains("Claude issue:"));
+        assert!(joined.contains("Refresh tasks"));
+        assert!(joined.contains("Background refresh updated 3 profiles"));
+        assert!(joined.contains("Cron: installed"));
+        assert!(joined.contains("Claude issue:"));
+        assert!(joined.contains("429 Too Many Requests"));
+        assert!(!actions_line.contains("Cron:"));
         assert!(actions_line.contains("Enter=switch/save"));
     }
 

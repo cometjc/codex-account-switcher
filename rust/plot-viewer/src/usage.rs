@@ -196,12 +196,20 @@ impl UsageService {
 
         if !force_refresh {
             if let Some(record) = cached.as_ref() {
-                if cache_only || age <= self.ttl_seconds {
+                if age <= self.ttl_seconds {
                     return Ok(UsageReadResult {
                         usage: Some(record.usage.clone()),
                         source: UsageSource::Cache,
                         fetched_at: Some(record.fetched_at),
                         stale: false,
+                    });
+                }
+                if cache_only {
+                    return Ok(UsageReadResult {
+                        usage: Some(record.usage.clone()),
+                        source: UsageSource::Cache,
+                        fetched_at: Some(record.fetched_at),
+                        stale: true,
                     });
                 }
             }
@@ -288,12 +296,20 @@ impl UsageService {
 
         if !force_refresh {
             if let Some(record) = cached.as_ref() {
-                if cache_only || age <= self.ttl_seconds {
+                if age <= self.ttl_seconds {
                     return Ok(UsageReadResult {
                         usage: Some(record.usage.clone()),
                         source: UsageSource::Cache,
                         fetched_at: Some(record.fetched_at),
                         stale: false,
+                    });
+                }
+                if cache_only {
+                    return Ok(UsageReadResult {
+                        usage: Some(record.usage.clone()),
+                        source: UsageSource::Cache,
+                        fetched_at: Some(record.fetched_at),
+                        stale: true,
                     });
                 }
             }

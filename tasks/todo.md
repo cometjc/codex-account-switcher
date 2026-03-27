@@ -1,3 +1,24 @@
+# 2026-03-28 startup cache-only loading and refresh tasks panel
+
+- [x] 釐清 app 啟動變慢的根因，將啟動路徑改成只讀 cache / stale cache，不在 UI 載入前同步打 usage API
+- [x] 先補 Rust regression tests，鎖住啟動只吃 cache、僅對超過 10 分鐘未更新的 profiles 排入背景 refresh
+- [x] 實作背景 refresh task 狀態，並把 cron/status 與背景更新訊息移到左側 Details 下方的新 `Refresh tasks` 區塊
+- [x] 執行 `cargo test --manifest-path rust/plot-viewer/Cargo.toml` 驗證
+
+## Review
+
+- 根因初查已確認：`App::load()` 啟動時會走 `load_profiles(..., force_refresh=false)`，但 `UsageService::read_usage()` / `read_codex_usage()` 在 cache 缺失或 TTL（目前 300 秒）過期時，仍會同步打 API，所以 profile 一多、或 cache 超過 5 分鐘，啟動就會明顯變慢。
+- 這次目標是把啟動策略切成三層 truth：
+  - app 啟動與一般 reload 預設只讀 cache / stale cache，不阻塞 UI
+  - 真正的同步更新只留給手動 refresh 與 cron
+  - 若 profile 超過 10 分鐘未更新，啟動後再以背景 task 方式補刷新，完成後更新畫面與 task 區塊
+- 已落地：
+  - `loader.rs` 現在支援 `cache_only` 載入模式；一般 app 啟動與非手動 refresh reload 只讀 cache/stale cache，不再因 TTL 過期直接同步打 API。
+  - `usage.rs` 修正了舊行為中 `cache_only=true` 卻把過期 cache 標成 `stale=false` 的 bug，現在 stale cache 會誠實標記。
+  - `app.rs` 新增背景 refresh worker：若 profile 超過 10 分鐘未更新，會在 UI 啟動後背景逐筆 refresh，完成後用 `Background refresh updated N profiles` 回寫狀態。
+  - 原本底部 global cron/status line 已移除；左側 `Details` 下方新增 `Refresh tasks` 區塊，承接背景 refresh 狀態、背景完成訊息與 cron 錯誤摘要。
+- 驗證：`cargo test --manifest-path rust/plot-viewer/Cargo.toml` 全綠（55 + 1 + 3 tests）。
+
 # 2026-03-26 Claude history alias merge
 
 - [x] 釐清 Claude 歷史 key 漂移的整合點，避免每次 reauth 都開新 bucket

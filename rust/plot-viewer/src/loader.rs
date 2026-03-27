@@ -23,6 +23,7 @@ pub fn load_profiles(
     usage_service: &UsageService,
     force_refresh: bool,
     refresh_account_id: Option<&str>,
+    cache_only: bool,
     claude_store: Option<&crate::claude::ClaudeStore>,
     claude_usage_service: Option<&UsageService>,
     copilot_usage_service: Option<&UsageService>,
@@ -32,6 +33,7 @@ pub fn load_profiles(
         usage_service,
         force_refresh,
         refresh_account_id,
+        cache_only,
         claude_store,
         claude_usage_service,
         copilot_usage_service,
@@ -44,6 +46,7 @@ pub fn load_profiles_with_report(
     usage_service: &UsageService,
     force_refresh: bool,
     refresh_account_id: Option<&str>,
+    cache_only: bool,
     claude_store: Option<&crate::claude::ClaudeStore>,
     claude_usage_service: Option<&UsageService>,
     copilot_usage_service: Option<&UsageService>,
@@ -67,6 +70,7 @@ pub fn load_profiles_with_report(
                 usage_service,
                 force_refresh,
                 refresh_account_id,
+                cache_only,
                 &mut refresh_errors,
             )
         })
@@ -93,6 +97,7 @@ pub fn load_profiles_with_report(
                 current_account_id.as_deref(),
                 current_access_token.as_deref(),
                 force_current,
+                cache_only,
             )?;
             push_refresh_error(&mut refresh_errors, error);
             usage_service
@@ -121,7 +126,7 @@ pub fn load_profiles_with_report(
     // --- Claude entries ---
     if let (Some(cs), Some(cu)) = (claude_store, claude_usage_service) {
         let (claude_entries, claude_errors) =
-            load_claude_profiles(cs, cu, force_refresh, refresh_account_id)?;
+            load_claude_profiles(cs, cu, force_refresh, refresh_account_id, cache_only)?;
         profiles.extend(claude_entries);
         refresh_errors.extend(claude_errors);
     }
@@ -140,6 +145,7 @@ pub fn load_profiles_with_report(
                 Some(account_id.as_str()),
                 Some(creds.oauth_token.as_str()),
                 force,
+                cache_only,
             )?;
             push_refresh_error(&mut refresh_errors, error);
             cu.record_usage_snapshot(Some(account_id.as_str()), usage_view.usage.as_ref())?;
@@ -172,6 +178,7 @@ fn load_claude_profiles(
     usage_service: &UsageService,
     force_refresh: bool,
     refresh_account_id: Option<&str>,
+    cache_only: bool,
 ) -> Result<(Vec<ProfileEntry>, Vec<String>)> {
     let saved = store.list_saved_profiles()?;
     let current_creds = store.get_current_credentials().ok();
@@ -231,6 +238,7 @@ fn load_claude_profiles(
                 effective_comp_id.as_deref(),
                 effective_access_tok.as_deref(),
                 force_this,
+                cache_only,
             )?;
             push_refresh_error(&mut refresh_errors, error);
             if use_current_credentials {
@@ -327,6 +335,7 @@ fn load_claude_profiles(
                 Some(&comp_id),
                 Some(access_tok.as_str()),
                 force_current,
+                cache_only,
             )?;
             push_refresh_error(&mut refresh_errors, error);
             usage_service.record_usage_snapshot(Some(&comp_id), usage_view.usage.as_ref())?;
@@ -359,6 +368,7 @@ fn build_saved_entry(
     usage_service: &UsageService,
     force_refresh: bool,
     refresh_account_id: Option<&str>,
+    cache_only: bool,
     refresh_errors: &mut Vec<String>,
 ) -> Result<ProfileEntry> {
     let saved_account_id = read_account_id(&profile.snapshot);
@@ -387,6 +397,7 @@ fn build_saved_entry(
         effective_account_id.as_deref(),
         access_token.as_deref(),
         force_this_profile,
+        cache_only,
     )?;
     push_refresh_error(refresh_errors, error);
     if use_current_auth {
@@ -426,11 +437,12 @@ fn read_usage_for_profile(
     account_id: Option<&str>,
     access_token: Option<&str>,
     force_refresh: bool,
+    cache_only: bool,
 ) -> Result<(UsageReadResult, Option<String>)> {
     if service_label == "Codex" {
         let auth_path = codex_auth_path.context("missing Codex auth path")?;
         if !force_refresh {
-            return Ok((usage_service.read_codex_usage(auth_path, false, false)?, None));
+            return Ok((usage_service.read_codex_usage(auth_path, false, cache_only)?, None));
         }
 
         return match usage_service.read_codex_usage(auth_path, true, false) {
@@ -444,7 +456,7 @@ fn read_usage_for_profile(
 
     if !force_refresh {
         return Ok((
-            usage_service.read_usage(account_id, access_token, false, false)?,
+            usage_service.read_usage(account_id, access_token, false, cache_only)?,
             None,
         ));
     }
@@ -773,7 +785,7 @@ mod tests {
     use crate::claude::{ClaudePaths, ClaudeStore};
     use crate::paths::AppPaths;
     use crate::store::{AccountStore, StorePlatform};
-    use crate::usage::{ProfileUsageHistory, UsageCache, UsageHistoryCache, UsageObservation, UsageRateLimit, UsageWindowHistory};
+    use crate::usage::{ProfileUsageHistory, UsageCache, UsageHistoryCache, UsageObservation, UsageRateLimit, UsageSource, UsageWindowHistory};
     use std::fs;
     use std::path::PathBuf;
 
@@ -988,7 +1000,7 @@ mod tests {
             codex_paths.usage_history_path().to_path_buf(),
             300,
         );
-        let report = load_profiles_with_report(&store, &usage, false, None, None, None, None).unwrap();
+        let report = load_profiles_with_report(&store, &usage, false, None, true, None, None, None).unwrap();
 
         let codex_profile = report
             .profiles
@@ -1010,6 +1022,62 @@ mod tests {
         let saved_raw = fs::read_to_string(codex_paths.accounts_dir().join("team.json")).unwrap();
         let saved: serde_json::Value = serde_json::from_str(&saved_raw).unwrap();
         assert_eq!(saved, current);
+    }
+
+    #[test]
+    fn cache_only_load_uses_stale_cache_without_fetching() {
+        let base = unique_temp_dir("loader-cache-only");
+        let codex_paths = AppPaths::from_codex_dir(base.join("codex"));
+        let store = AccountStore::new(codex_paths.clone(), StorePlatform::Copy);
+        fs::create_dir_all(codex_paths.codex_dir()).unwrap();
+
+        let snapshot = serde_json::json!({
+            "auth_mode": "chatgpt",
+            "tokens": {
+                "account_id": "acct-cache-only",
+                "access_token": "token-cache-only",
+                "refresh_token": "refresh-cache-only"
+            },
+            "last_refresh": "2026-03-01T00:00:00Z"
+        });
+        store.save_snapshot("cache-only", &snapshot).unwrap();
+        fs::write(
+            codex_paths.auth_path(),
+            serde_json::to_vec_pretty(&snapshot).unwrap(),
+        )
+        .unwrap();
+        fs::write(codex_paths.current_name_path(), "cache-only\n").unwrap();
+
+        let stale_usage = sample_usage("team");
+        let stale_cache = UsageCache::from_entries([(
+            "acct-cache-only".to_string(),
+            100,
+            stale_usage.clone(),
+        )]);
+        fs::write(
+            codex_paths.limit_cache_path(),
+            format!("{}\n", serde_json::to_string_pretty(&stale_cache).unwrap()),
+        )
+        .unwrap();
+
+        let usage = UsageService::new(
+            codex_paths.limit_cache_path().to_path_buf(),
+            codex_paths.usage_history_path().to_path_buf(),
+            300,
+        )
+        .with_now_seconds(1_000)
+        .with_fetcher(|_, _| panic!("cache-only load should not fetch from API"));
+
+        let report = load_profiles_with_report(&store, &usage, false, None, true, None, None, None).unwrap();
+        let codex_profile = report
+            .profiles
+            .iter()
+            .find(|profile| profile.kind == ProfileKind::Codex)
+            .expect("codex profile");
+
+        assert_eq!(codex_profile.usage_view.source, UsageSource::Cache);
+        assert!(codex_profile.usage_view.stale);
+        assert_eq!(codex_profile.usage_view.usage.as_ref(), Some(&stale_usage));
     }
 
     #[test]
@@ -1060,6 +1128,7 @@ mod tests {
             &UsageService::new(base.join("noop-cache.json"), base.join("noop-history.json"), 300),
             false,
             None,
+            true,
             Some(&claude_store),
             Some(&claude_usage),
             None,
@@ -1174,6 +1243,7 @@ mod tests {
             &UsageService::new(base.join("noop-cache.json"), base.join("noop-history.json"), 300),
             false,
             None,
+            true,
             Some(&claude_store),
             Some(&claude_usage),
             None,
@@ -1257,6 +1327,7 @@ mod tests {
             &codex_usage,
             true,
             None,
+            false,
             Some(&claude_store),
             Some(&claude_usage),
             None,

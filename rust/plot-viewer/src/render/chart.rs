@@ -28,12 +28,12 @@ pub fn render_chart<State: RenderState>(frame: &mut Frame, context: &RenderConte
     } else {
         let block = if chart_state.focused {
             Block::default()
-                .title("usage chart (align to 7d window)")
+                .title("Usage chart (align to 7d window)")
                 .borders(Borders::ALL)
                 .style(Style::default().bg(Color::Rgb(20, 20, 20)))
         } else {
             Block::default()
-                .title("usage chart (align to 7d window)")
+                .title("Usage chart (align to 7d window)")
                 .borders(Borders::ALL)
         };
         let inner = block.inner(context.area);
@@ -630,7 +630,7 @@ mod tests {
         let lines = render_lines(&state, 72, 18);
         let joined = lines.join("\n");
 
-        assert!(joined.contains("usage chart (align to 7d window)"));
+        assert!(joined.contains("Usage chart (align to 7d window)"));
         assert!(joined.contains("[codex] Alpha 76%/40%"));
         assert!(joined.contains("0.0d"));
         assert!(joined.contains("3.5d"));
