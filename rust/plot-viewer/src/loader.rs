@@ -215,6 +215,12 @@ fn load_claude_profiles(
             } else {
                 comp_id.clone()
             };
+            if use_current_credentials {
+                usage_service.merge_profile_history_aliases(
+                    effective_comp_id.as_deref(),
+                    comp_id.as_deref().into_iter(),
+                )?;
+            }
             let force_this = force_refresh
                 || refresh_account_id.is_some_and(|t| effective_acct_id.as_deref() == Some(t));
             let (usage_view, error) = read_usage_for_profile(
@@ -293,6 +299,13 @@ fn load_claude_profiles(
             let _ = store.set_current_name(matched_name);
             for p in profiles.iter_mut() {
                 if p.saved_name.as_deref() == Some(matched_name.as_str()) {
+                    let old_comp_id = serde_json::from_value::<crate::claude::ClaudeCredentials>(p.snapshot.clone())
+                        .ok()
+                        .map(|c| composite_id(&c));
+                    let _ = usage_service.merge_profile_history_aliases(
+                        Some(&comp_id),
+                        old_comp_id.as_deref().into_iter(),
+                    );
                     p.is_current = true;
                     p.account_id = Some(acct_id.clone());
                 }
@@ -760,7 +773,7 @@ mod tests {
     use crate::claude::{ClaudePaths, ClaudeStore};
     use crate::paths::AppPaths;
     use crate::store::{AccountStore, StorePlatform};
-    use crate::usage::{UsageCache, UsageRateLimit};
+    use crate::usage::{ProfileUsageHistory, UsageCache, UsageHistoryCache, UsageObservation, UsageRateLimit, UsageWindowHistory};
     use std::fs;
     use std::path::PathBuf;
 
@@ -1077,6 +1090,119 @@ mod tests {
         let saved_raw = fs::read_to_string(claude_paths.accounts_dir().join("claude-one.json")).unwrap();
         let saved: serde_json::Value = serde_json::from_str(&saved_raw).unwrap();
         assert_eq!(saved, current);
+    }
+
+    #[test]
+    fn claude_saved_profile_merges_old_history_into_current_key() {
+        let base = unique_temp_dir("loader-claude-history-merge");
+        let codex_paths = AppPaths::from_codex_dir(base.join("codex"));
+        let store = AccountStore::new(codex_paths, StorePlatform::Copy);
+        let claude_paths = ClaudePaths::from_claude_dir(base.join("claude"));
+        fs::create_dir_all(claude_paths.claude_dir()).unwrap();
+
+        let stale_saved = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "token-stale",
+                "refreshToken": "sk-ant-ort01-stale-token",
+                "expiresAt": 1700000000,
+                "subscriptionType": "team"
+            }
+        });
+        let current = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "token-current",
+                "refreshToken": "sk-ant-ort01-current-token",
+                "expiresAt": 1700000000,
+                "subscriptionType": "team"
+            }
+        });
+        let claude_store = ClaudeStore::new(claude_paths.clone());
+        claude_store.save_snapshot("claude-team", &stale_saved).unwrap();
+        fs::write(
+            claude_paths.credentials_path(),
+            serde_json::to_vec_pretty(&current).unwrap(),
+        )
+        .unwrap();
+        fs::write(claude_paths.current_name_path(), "claude-team\n").unwrap();
+
+        let stale_creds: crate::claude::ClaudeCredentials =
+            serde_json::from_value(stale_saved.clone()).unwrap();
+        let current_creds: crate::claude::ClaudeCredentials =
+            serde_json::from_value(current.clone()).unwrap();
+        let stale_comp_id = format!("{}|{}", stale_creds.account_id(), stale_creds.subscription_type());
+        let current_comp_id =
+            format!("{}|{}", current_creds.account_id(), current_creds.subscription_type());
+
+        let claude_usage = UsageService::new(
+            claude_paths.limit_cache_path().to_path_buf(),
+            claude_paths.usage_history_path().to_path_buf(),
+            300,
+        )
+        .with_fetcher(|_, _| Ok(sample_usage("team")));
+        let mut history = UsageHistoryCache::default();
+        history.by_account_id.insert(
+            stale_comp_id.clone(),
+            ProfileUsageHistory {
+                weekly_windows: vec![UsageWindowHistory {
+                    limit_window_seconds: 604_800,
+                    start_at: 0,
+                    end_at: 604_800,
+                    observations: vec![UsageObservation {
+                        observed_at: 123,
+                        used_percent: 45.0,
+                    }],
+                }],
+                five_hour_windows: vec![UsageWindowHistory {
+                    limit_window_seconds: 18_000,
+                    start_at: 10,
+                    end_at: 20,
+                    observations: vec![UsageObservation {
+                        observed_at: 15,
+                        used_percent: 55.0,
+                    }],
+                }],
+            },
+        );
+        fs::write(
+            claude_paths.usage_history_path(),
+            format!("{}\n", serde_json::to_string_pretty(&history).unwrap()),
+        )
+        .unwrap();
+
+        let _ = load_profiles_with_report(
+            &store,
+            &UsageService::new(base.join("noop-cache.json"), base.join("noop-history.json"), 300),
+            false,
+            None,
+            Some(&claude_store),
+            Some(&claude_usage),
+            None,
+        )
+        .unwrap();
+
+        let merged_history: UsageHistoryCache = serde_json::from_str(
+            &fs::read_to_string(claude_paths.usage_history_path()).unwrap(),
+        )
+        .unwrap();
+        let current_entry = merged_history
+            .by_account_id
+            .get(&current_comp_id)
+            .expect("current history entry");
+        assert!(
+            current_entry
+                .weekly_windows
+                .iter()
+                .flat_map(|window| window.observations.iter())
+                .any(|observation| observation.observed_at == 123 && (observation.used_percent - 45.0).abs() < f64::EPSILON)
+        );
+        assert!(
+            current_entry
+                .five_hour_windows
+                .iter()
+                .flat_map(|window| window.observations.iter())
+                .any(|observation| observation.observed_at == 15 && (observation.used_percent - 55.0).abs() < f64::EPSILON)
+        );
+        assert!(!merged_history.by_account_id.contains_key(&stale_comp_id));
     }
 
     #[test]

@@ -1,3 +1,22 @@
+# 2026-03-26 Claude history alias merge
+
+- [x] 釐清 Claude 歷史 key 漂移的整合點，避免每次 reauth 都開新 bucket
+- [x] 先補 regression test，鎖住 current Claude profile 會把舊 pseudo-id history 併到新 key
+- [x] 在 usage/history 層新增 merge helper，並接回 Claude current-first / fallback matching 流程
+- [x] 執行 `cargo test --manifest-path rust/plot-viewer/Cargo.toml` 驗證
+
+## Review
+
+- 根因是 Claude history 目前以 `refreshToken` 派生出的 pseudo `account_id` 當 key；只要 full reauth 讓 refresh token 換掉，之後的 snapshots 就會寫進新 key，舊歷史不會消失，但會碎成多個 bucket。
+- 這次在 `UsageService` 新增 `merge_profile_history_aliases()`，將 alias key 的 weekly/5h windows 併進 canonical key，按 window 邊界合併 observation、去重排序後，移除舊 alias key。
+- `loader.rs` 的 Claude current-first 路徑現在在兩個時機會自動 merge：
+  - current name / pseudo-id 命中 saved profile 時
+  - `subscription_type` 唯一匹配 fallback 將 current 對回某個 saved profile 時
+- 新增 regression：
+  - `merge_profile_history_aliases_moves_alias_history_into_canonical_key`
+  - `claude_saved_profile_merges_old_history_into_current_key`
+- 驗證：`cargo test --manifest-path rust/plot-viewer/Cargo.toml` 全綠（53 + 1 + 3 tests）。
+
 # 2026-03-26 usage history keeps full weekly observations
 
 - [x] 釐清目前 usage history 被截短的真正邊界，分清楚 observation cap 與 window retention

@@ -430,6 +430,39 @@ impl UsageService {
             .unwrap_or_default())
     }
 
+    pub fn merge_profile_history_aliases<'a>(
+        &self,
+        canonical_account_id: Option<&str>,
+        alias_account_ids: impl IntoIterator<Item = &'a str>,
+    ) -> Result<()> {
+        let Some(canonical_account_id) =
+            canonical_account_id.filter(|value| !value.trim().is_empty())
+        else {
+            return Ok(());
+        };
+        let mut history = self.read_history_cache()?;
+        let mut changed = false;
+        for alias_account_id in alias_account_ids
+            .into_iter()
+            .map(str::trim)
+            .filter(|value| !value.is_empty() && *value != canonical_account_id)
+        {
+            let Some(alias_history) = history.by_account_id.remove(alias_account_id) else {
+                continue;
+            };
+            let canonical_history = history
+                .by_account_id
+                .entry(canonical_account_id.to_string())
+                .or_default();
+            merge_profile_usage_history(canonical_history, alias_history);
+            changed = true;
+        }
+        if changed {
+            self.write_history_cache(&history)?;
+        }
+        Ok(())
+    }
+
     fn read_cache(&self) -> Result<UsageCache> {
         match fs::read_to_string(&self.cache_path) {
             Ok(raw) => serde_json::from_str(&raw).or(Ok(UsageCache::default())),
@@ -482,6 +515,40 @@ fn trim_history_windows(windows: &mut Vec<UsageWindowHistory>, max_count: usize)
             .observations
             .retain(|observation| observation.observed_at >= window.start_at && observation.observed_at <= window.end_at);
     }
+}
+
+fn merge_profile_usage_history(target: &mut ProfileUsageHistory, source: ProfileUsageHistory) {
+    merge_usage_window_histories(&mut target.weekly_windows, source.weekly_windows, 3);
+    merge_usage_window_histories(&mut target.five_hour_windows, source.five_hour_windows, 34);
+}
+
+fn merge_usage_window_histories(
+    target: &mut Vec<UsageWindowHistory>,
+    source: Vec<UsageWindowHistory>,
+    max_count: usize,
+) {
+    for mut source_window in source {
+        if let Some(existing) = target.iter_mut().find(|candidate| {
+            candidate.limit_window_seconds == source_window.limit_window_seconds
+                && candidate.start_at == source_window.start_at
+                && candidate.end_at == source_window.end_at
+        }) {
+            existing.observations.append(&mut source_window.observations);
+            dedupe_observations(&mut existing.observations);
+        } else {
+            dedupe_observations(&mut source_window.observations);
+            target.push(source_window);
+        }
+    }
+    trim_history_windows(target, max_count);
+}
+
+fn dedupe_observations(observations: &mut Vec<UsageObservation>) {
+    observations.sort_by_key(|observation| observation.observed_at);
+    observations.dedup_by(|right, left| {
+        right.observed_at == left.observed_at
+            && (right.used_percent - left.used_percent).abs() < f64::EPSILON
+    });
 }
 
 fn fetch_usage_from_api(account_id: &str, access_token: &str) -> Result<UsageResponse> {
@@ -945,6 +1012,71 @@ mod tests {
 
         assert_eq!(windows[0].observations.len(), 1);
         assert_eq!(windows[0].observations[0].observed_at, 150);
+    }
+
+    #[test]
+    fn merge_profile_history_aliases_moves_alias_history_into_canonical_key() {
+        let cache_path = temp_file("merge-history-cache.json");
+        let history_path = temp_file("merge-history.json");
+        let service = UsageService::new(cache_path, history_path, 300);
+        let mut history = UsageHistoryCache::default();
+        history.by_account_id.insert(
+            "canonical".to_string(),
+            ProfileUsageHistory {
+                weekly_windows: vec![UsageWindowHistory {
+                    limit_window_seconds: 604_800,
+                    start_at: 0,
+                    end_at: 604_800,
+                    observations: vec![UsageObservation {
+                        observed_at: 100,
+                        used_percent: 10.0,
+                    }],
+                }],
+                five_hour_windows: vec![],
+            },
+        );
+        history.by_account_id.insert(
+            "alias".to_string(),
+            ProfileUsageHistory {
+                weekly_windows: vec![UsageWindowHistory {
+                    limit_window_seconds: 604_800,
+                    start_at: 0,
+                    end_at: 604_800,
+                    observations: vec![
+                        UsageObservation {
+                            observed_at: 100,
+                            used_percent: 10.0,
+                        },
+                        UsageObservation {
+                            observed_at: 200,
+                            used_percent: 20.0,
+                        },
+                    ],
+                }],
+                five_hour_windows: vec![UsageWindowHistory {
+                    limit_window_seconds: 18_000,
+                    start_at: 10,
+                    end_at: 20,
+                    observations: vec![UsageObservation {
+                        observed_at: 15,
+                        used_percent: 30.0,
+                    }],
+                }],
+            },
+        );
+        service.write_history_cache(&history).unwrap();
+
+        service
+            .merge_profile_history_aliases(Some("canonical"), ["alias"])
+            .unwrap();
+
+        let canonical = service.profile_history(Some("canonical")).unwrap();
+        let alias = service.profile_history(Some("alias")).unwrap();
+        assert_eq!(canonical.weekly_windows.len(), 1);
+        assert_eq!(canonical.weekly_windows[0].observations.len(), 2);
+        assert_eq!(canonical.five_hour_windows.len(), 1);
+        assert!(alias.weekly_windows.is_empty());
+        assert!(alias.five_hour_windows.is_empty());
     }
 
     #[test]
