@@ -68,7 +68,7 @@ pub fn render_chart<State: RenderState>(frame: &mut Frame, context: &RenderConte
         None => String::new(),
     };
     let hint_line = if chart_state.fullscreen {
-        format!("{}W:{} · ←→=pan · =/- zoom-x · ↑↓=pan-y · [/]=zoom-y · z=reset · 1/3/7=snap · {}", view_prefix, window_label, env!("BUILD_VER"))
+        format!("{}W:{} · ←→=pan · =/- zoom-x · ↑↓=pan-y · [/]=zoom-y · z=reset · 1/3/7=snap", view_prefix, window_label)
     } else {
         format!("{}W:{} · ←→=pan · =/- zoom-x · ↑↓=pan-y · [/]=zoom-y · z=reset · 1/3/7=snap", view_prefix, window_label)
     };

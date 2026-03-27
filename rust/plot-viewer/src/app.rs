@@ -1042,6 +1042,16 @@ impl App {
         };
         let footer = Paragraph::new(Text::from(footer_lines)).wrap(Wrap { trim: true });
         frame.render_widget(footer, footer_area);
+        let version_area = Rect {
+            x: footer_area.x,
+            y: footer_area.y + footer_area.height.saturating_sub(1),
+            width: footer_area.width,
+            height: 1,
+        };
+        let version = Paragraph::new(Text::from(vec![Line::from(env!("BUILD_VER"))]))
+            .alignment(Alignment::Right)
+            .wrap(Wrap { trim: true });
+        frame.render_widget(version, version_area);
 
         if self.dialog.is_some() {
             self.render_dialog(frame);
@@ -1357,23 +1367,12 @@ fn render_refresh_tasks(
     })];
 
     if let Some(message) = status_message {
-        lines.push(Line::from(message.to_string()));
+        lines.push(Line::from(format!("Last result: {message}")));
     }
 
-    lines.push(Line::from(""));
-    lines.push(render_cron_status_line(cron_status));
-    lines
-}
-
-fn render_cron_status_line(cron_status: &CronStatus) -> Line<'static> {
-    let version_tag = env!("BUILD_VER").to_string();
-
     if !cron_status.installed {
-        return Line::from(if version_tag.is_empty() {
-            "Cron: not installed".to_string()
-        } else {
-            format!("Cron: not installed · {version_tag}")
-        });
+        lines.push(Line::from("Cron: not installed"));
+        return lines;
     }
 
     let attempt_age = cron_status
@@ -1381,28 +1380,24 @@ fn render_cron_status_line(cron_status: &CronStatus) -> Line<'static> {
         .or(cron_status.last_run)
         .map(|ts| format_age(Some(ts), false))
         .unwrap_or_else(|| "never".to_string());
-    let mut parts = vec![format!("Cron: installed · last attempt {attempt_age}")];
+    lines.push(Line::from(format!("Cron: installed · last attempt {attempt_age}")));
 
     if let Some(last_success) = cron_status.last_run {
-        parts.push(format!(
-            "last success {}",
+        lines.push(Line::from(format!(
+            "Last success: {}",
             format_age(Some(last_success), false)
-        ));
+        )));
     }
     if let Some(error) = cron_status.codex_error.as_deref() {
-        parts.push(format!("Codex issue: {error}"));
+        lines.push(Line::from(format!("Codex issue: {error}")));
     }
     if let Some(error) = cron_status.claude_error.as_deref() {
-        parts.push(format!("Claude issue: {error}"));
+        lines.push(Line::from(format!("Claude issue: {error}")));
     }
     if let Some(error) = cron_status.copilot_error.as_deref() {
-        parts.push(format!("Copilot issue: {error}"));
+        lines.push(Line::from(format!("Copilot issue: {error}")));
     }
-    if !version_tag.is_empty() {
-        parts.push(version_tag);
-    }
-
-    Line::from(parts.join(" · "))
+    lines
 }
 
 fn format_age(fetched_at: Option<i64>, stale: bool) -> String {
@@ -1774,12 +1769,12 @@ mod tests {
             &BackgroundRefreshState::Running { queued_profiles: 3 },
         );
 
-        let joined = lines.iter().map(Line::to_string).collect::<Vec<_>>().join("\n");
-        assert!(joined.contains("Background: refreshing 3 stale profiles"));
-        assert!(joined.contains("Background refresh updated 3 profiles"));
-        assert!(joined.contains("Cron: installed"));
-        assert!(joined.contains("Claude issue:"));
-        assert!(joined.contains("429 Too Many Requests"));
+        let rendered = lines.iter().map(Line::to_string).collect::<Vec<_>>();
+        assert!(rendered.iter().any(|line| line == "Background: refreshing 3 stale profiles"));
+        assert!(rendered.iter().any(|line| line == "Last result: Background refresh updated 3 profiles"));
+        assert!(rendered.iter().any(|line| line.starts_with("Cron: installed")));
+        assert!(rendered.iter().any(|line| line.starts_with("Last success:")));
+        assert!(rendered.iter().any(|line| line == "Claude issue: HTTP 429 Too Many Requests"));
     }
 
     #[test]
@@ -1847,17 +1842,19 @@ mod tests {
 
         let buffer = render_buffer(&app, 100, 24);
         let actions_line = buffer_row_text(&buffer, 22, 100);
+        let bottom_line = buffer_row_text(&buffer, 23, 100);
         let joined = (0..24)
             .map(|y| buffer_row_text(&buffer, y, 100))
             .collect::<Vec<_>>()
             .join("\n");
 
         assert!(joined.contains("Refresh tasks"));
-        assert!(joined.contains("Background refresh updated 3 profiles"));
+        assert!(joined.contains("Last result: Background refresh updated 3 profiles"));
         assert!(joined.contains("Cron: installed"));
         assert!(joined.contains("Claude issue:"));
         assert!(joined.contains("429 Too Many Requests"));
         assert!(!actions_line.contains("Cron:"));
+        assert!(bottom_line.contains(env!("BUILD_VER")));
         assert!(actions_line.contains("Enter=switch/save"));
     }
 
