@@ -169,6 +169,16 @@ impl AccountStore {
         Ok(name)
     }
 
+    /// Overwrite a saved profile with the current auth snapshot (e.g. after token rotation).
+    pub fn update_account(&self, raw_name: &str) -> Result<String> {
+        let name = normalize_account_name(raw_name)?;
+        self.ensure_auth_file_exists()?;
+        self.ensure_accounts_dir()?;
+        fs::copy(self.paths.auth_path(), self.account_file_path(&name))
+            .with_context(|| format!("update saved profile {}", name))?;
+        Ok(name)
+    }
+
     pub fn use_account(&self, raw_name: &str) -> Result<String> {
         let name = normalize_account_name(raw_name)?;
         let source = self.account_file_path(&name);

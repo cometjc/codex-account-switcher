@@ -1,3 +1,35 @@
+# 2026-03-26 current-first saved profile reconcile for Codex and Claude
+
+- [x] 將 Codex/Claude 的 saved refresh 流程改成 current-first：若 saved profile 對應 current，就先更新 current，再回寫 saved
+- [x] 補上 current-name/account matching 規則，避免 reauth 後 current 被誤判成 unsaved duplicate
+- [x] 讓 app 載入與 cron refresh 共用同一條 reconcile truth
+- [x] 補 Rust regression tests，鎖住 Codex 與 Claude 的 current-first sync-back 行為
+- [x] 執行 `cargo test --manifest-path rust/plot-viewer/Cargo.toml` 驗證
+
+## Review
+
+- `Codex` 現在在 app 載入 saved profile 與 `--refresh-all` cron 路徑都會先判斷：該 saved profile 是否等於 current（`account_id` 相同，或 `~/.codex/current` 名稱命中）。若是，就直接用 current `auth.json` 做 stale check / refresh / 401 retry，成功後再用 `AccountStore::update_account()` 覆蓋回 saved snapshot。
+- `Claude` 也改成同一個 current-first 流程，但 matching 比 `Codex` 稍寬：優先吃 `current name`，再吃目前 repo 既有的 pseudo `account_id()`。這樣 full reauth 導致 refresh-token-derived id 改變時，仍能靠 current name 對回同一個 saved profile。
+- `loader.rs` 也補了 current-name 對 saved 的 truth，避免 current reauth 後因 `account_id` 變動，被 UI 再額外顯示成一筆 `[UNSAVED]` duplicate profile。
+- 新增 regression：
+  - `codex_saved_profile_uses_current_snapshot_and_syncs_saved_file`
+  - `claude_saved_profile_uses_current_snapshot_when_name_matches`
+- 驗證：`cargo test --manifest-path rust/plot-viewer/Cargo.toml` 全綠（49 + 1 + 3 tests）。
+
+# 2026-03-26 Codex usage 401 refresh recovery
+
+- [x] 釐清 Codex `wham/usage` 401 的根因與本 repo 目前 token lifecycle 缺口
+- [x] 先補 Rust 測試，鎖住 Codex usage `401` 會觸發 refresh + retry，並把新 token 寫回 auth snapshot
+- [x] 實作 Codex token refresh / persisted auth 更新，避免 saved profile 因過期 token 永久 401
+- [x] 執行 `cargo test --manifest-path rust/plot-viewer/Cargo.toml` 驗證
+
+## Review
+
+- 根因不是 `wham/usage` 端點本身改掉，而是本 repo 的 Codex 路徑一直只拿 snapshot 裡的 `tokens.access_token` 直接打 usage API，完全沒有跟上官方 Codex client 的 token lifecycle：`last_refresh` 超過約 8 天要先 refresh，且 `401` 要 refresh-and-retry。
+- 實際檢查本機 `~/.codex/accounts/t5-team.json` 可見 `last_refresh=2026-03-17...`，已超過 stale 門檻；這解釋了為什麼 saved `t5-team` 會在 usage refresh 時先撞 `401 Unauthorized`。
+- `rust/plot-viewer/src/usage.rs` 現在新增 Codex auth snapshot 解析、OAuth refresh、`last_refresh` 寫回、stale pre-refresh 與 `401` retry；`loader.rs` 與 `main.rs` 也改成對 Codex profile 傳入實際 auth snapshot path（current `auth.json` 或 saved account file），讓 rotated token 會寫回正確檔案，而不是只修到 current profile。
+- 驗證：`cargo test --manifest-path rust/plot-viewer/Cargo.toml` 全綠（47 + 1 + 3 tests）。
+
 # 2026-03-26 Claude 401 usage refresh bug
 
 - [x] 釐清 Claude usage 401 與目前 auto-refresh 條件的落差

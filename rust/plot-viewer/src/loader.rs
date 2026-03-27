@@ -1,4 +1,6 @@
-use anyhow::Result;
+use std::path::Path;
+
+use anyhow::{Context, Result};
 use serde_json::Value;
 
 use crate::app_data::{
@@ -58,6 +60,7 @@ pub fn load_profiles_with_report(
         .into_iter()
         .map(|profile| {
             build_saved_entry(
+                store,
                 profile,
                 &current_account_id,
                 &current_codex_name,
@@ -70,10 +73,13 @@ pub fn load_profiles_with_report(
         .collect::<Result<Vec<_>>>()?;
 
     if let Some(snapshot) = current_snapshot {
-        let current_saved = current_account_id.as_ref().is_some_and(|account_id| {
-            profiles
-                .iter()
-                .any(|profile| profile.account_id.as_deref() == Some(account_id.as_str()))
+        let current_saved = profiles.iter().any(|profile| {
+            current_account_id
+                .as_deref()
+                .is_some_and(|account_id| profile.account_id.as_deref() == Some(account_id))
+                || current_codex_name
+                    .as_deref()
+                    .is_some_and(|name| profile.saved_name.as_deref() == Some(name))
         });
         if !current_saved {
             let force_current = refresh_account_id
@@ -83,6 +89,7 @@ pub fn load_profiles_with_report(
                 "Codex",
                 "current",
                 usage_service,
+                Some(store.paths().auth_path()),
                 current_account_id.as_deref(),
                 current_access_token.as_deref(),
                 force_current,
@@ -129,6 +136,7 @@ pub fn load_profiles_with_report(
                 "Copilot",
                 &creds.login,
                 cu,
+                None,
                 Some(account_id.as_str()),
                 Some(creds.oauth_token.as_str()),
                 force,
@@ -190,52 +198,65 @@ fn load_claude_profiles(
                 ),
                 None => (None, None, None),
             };
+            let use_current_credentials = current_name.as_deref() == Some(saved_profile.name.as_str())
+                || (current_account_id.is_some() && current_account_id.as_deref() == acct_id.as_deref());
+            let effective_acct_id = if use_current_credentials {
+                current_creds.as_ref().map(|creds| creds.account_id())
+            } else {
+                acct_id.clone()
+            };
+            let effective_access_tok = if use_current_credentials {
+                current_creds.as_ref().map(|creds| creds.access_token().to_string())
+            } else {
+                access_tok.clone()
+            };
+            let effective_comp_id = if use_current_credentials {
+                current_creds.as_ref().map(composite_id)
+            } else {
+                comp_id.clone()
+            };
             let force_this = force_refresh
-                || refresh_account_id.is_some_and(|t| acct_id.as_deref() == Some(t));
+                || refresh_account_id.is_some_and(|t| effective_acct_id.as_deref() == Some(t));
             let (usage_view, error) = read_usage_for_profile(
                 "Claude",
                 &saved_profile.name,
                 usage_service,
-                comp_id.as_deref(),
-                access_tok.as_deref(),
+                None,
+                effective_comp_id.as_deref(),
+                effective_access_tok.as_deref(),
                 force_this,
             )?;
             push_refresh_error(&mut refresh_errors, error);
+            if use_current_credentials {
+                let _ = store.update_account(&saved_profile.name);
+            }
             usage_service
-                .record_usage_snapshot(comp_id.as_deref(), usage_view.usage.as_ref())?;
+                .record_usage_snapshot(effective_comp_id.as_deref(), usage_view.usage.as_ref())?;
             let chart_data = build_profile_chart_data(
-                comp_id.as_deref(),
+                effective_comp_id.as_deref(),
                 usage_view.usage.as_ref(),
                 usage_service,
             )?;
-            let is_current = current_account_id.as_deref() == acct_id.as_deref()
-                || current_name.as_deref() == Some(saved_profile.name.as_str());
+            let effective_snapshot = if use_current_credentials {
+                store
+                    .get_current_snapshot()
+                    .unwrap_or_else(|_| saved_profile.snapshot.clone())
+            } else {
+                saved_profile.snapshot.clone()
+            };
+            let is_current = use_current_credentials;
             Ok(ProfileEntry {
                 kind: ProfileKind::Claude,
                 saved_name: Some(saved_profile.name.clone()),
                 profile_name: saved_profile.name,
-                snapshot: saved_profile.snapshot,
+                snapshot: effective_snapshot,
                 usage_view,
-                account_id: acct_id.clone(),
+                account_id: effective_acct_id.clone(),
                 is_current,
                 chart_data,
             })
         })
         .collect::<Result<Vec<_>>>()?;
-
-    // When Claude Code rotates tokens, the saved profile's account_id becomes stale.
-    // If current_name matches a saved profile by name but has a different account_id,
-    // update the saved file on disk with the fresh credentials so future loads match correctly.
-    if let (Some(creds), Some(ref name)) = (&current_creds, &current_name) {
-        let new_acct_id = creds.account_id();
-        let stale = profiles.iter().any(|p| {
-            p.saved_name.as_deref() == Some(name.as_str())
-                && p.account_id.as_deref() != Some(new_acct_id.as_str())
-        });
-        if stale {
-            let _ = store.update_account(name);
-        }
-    }
 
     // Add unsaved current Claude profile if not already in saved list
     if let Some(creds) = &current_creds {
@@ -289,6 +310,7 @@ fn load_claude_profiles(
                 "Claude",
                 "current",
                 usage_service,
+                None,
                 Some(&comp_id),
                 Some(access_tok.as_str()),
                 force_current,
@@ -317,6 +339,7 @@ fn load_claude_profiles(
 }
 
 fn build_saved_entry(
+    store: &AccountStore,
     profile: SavedProfile,
     current_account_id: &Option<String>,
     current_name: &Option<String>,
@@ -325,38 +348,58 @@ fn build_saved_entry(
     refresh_account_id: Option<&str>,
     refresh_errors: &mut Vec<String>,
 ) -> Result<ProfileEntry> {
-    let account_id = read_account_id(&profile.snapshot);
+    let saved_account_id = read_account_id(&profile.snapshot);
     let access_token = read_access_token(&profile.snapshot);
+    let matches_id = current_account_id.is_some()
+        && current_account_id.as_deref() == saved_account_id.as_deref();
+    let matches_name = current_name.as_deref()
+        .is_some_and(|n| n == profile.name.as_str());
+    let use_current_auth = matches_id || matches_name;
+    let effective_account_id = if use_current_auth {
+        current_account_id.clone().or_else(|| saved_account_id.clone())
+    } else {
+        saved_account_id.clone()
+    };
     let force_this_profile = force_refresh
-        || refresh_account_id.is_some_and(|target| account_id.as_deref() == Some(target));
+        || refresh_account_id.is_some_and(|target| effective_account_id.as_deref() == Some(target));
     let (usage_view, error) = read_usage_for_profile(
         "Codex",
         &profile.name,
         usage_service,
-        account_id.as_deref(),
+        Some(if use_current_auth {
+            store.paths().auth_path()
+        } else {
+            profile.file_path.as_path()
+        }),
+        effective_account_id.as_deref(),
         access_token.as_deref(),
         force_this_profile,
     )?;
     push_refresh_error(refresh_errors, error);
-    usage_service.record_usage_snapshot(account_id.as_deref(), usage_view.usage.as_ref())?;
+    if use_current_auth {
+        let _ = store.update_account(&profile.name);
+    }
+    let snapshot = if use_current_auth {
+        store
+            .get_current_snapshot()
+            .unwrap_or_else(|_| profile.snapshot.clone())
+    } else {
+        profile.snapshot.clone()
+    };
+    usage_service.record_usage_snapshot(effective_account_id.as_deref(), usage_view.usage.as_ref())?;
     let chart_data =
-        build_profile_chart_data(account_id.as_deref(), usage_view.usage.as_ref(), usage_service)?;
+        build_profile_chart_data(effective_account_id.as_deref(), usage_view.usage.as_ref(), usage_service)?;
 
     // Match by account_id (from auth.json content) OR by name (from ~/.codex/current file).
     // Name-based match survives broken symlinks and renames; account_id match handles the
     // case where the current file is absent but auth.json is readable.
-    let matches_id   = current_account_id.is_some()
-        && current_account_id.as_deref() == account_id.as_deref();
-    let matches_name = current_name.as_deref()
-        .is_some_and(|n| n == profile.name.as_str());
-
     Ok(ProfileEntry {
         kind: ProfileKind::Codex,
         saved_name: Some(profile.name.clone()),
         profile_name: profile.name,
-        snapshot: profile.snapshot,
+        snapshot,
         usage_view,
-        account_id: account_id.clone(),
+        account_id: effective_account_id,
         is_current: matches_id || matches_name,
         chart_data,
     })
@@ -366,10 +409,26 @@ fn read_usage_for_profile(
     service_label: &str,
     profile_label: &str,
     usage_service: &UsageService,
+    codex_auth_path: Option<&Path>,
     account_id: Option<&str>,
     access_token: Option<&str>,
     force_refresh: bool,
 ) -> Result<(UsageReadResult, Option<String>)> {
+    if service_label == "Codex" {
+        let auth_path = codex_auth_path.context("missing Codex auth path")?;
+        if !force_refresh {
+            return Ok((usage_service.read_codex_usage(auth_path, false, false)?, None));
+        }
+
+        return match usage_service.read_codex_usage(auth_path, true, false) {
+            Ok(view) => Ok((view, None)),
+            Err(error) => Ok((
+                usage_service.read_codex_usage(auth_path, false, false)?,
+                Some(format!("{service_label} {profile_label}: {error:#}")),
+            )),
+        };
+    }
+
     if !force_refresh {
         return Ok((
             usage_service.read_usage(account_id, access_token, false, false)?,
@@ -701,7 +760,7 @@ mod tests {
     use crate::claude::{ClaudePaths, ClaudeStore};
     use crate::paths::AppPaths;
     use crate::store::{AccountStore, StorePlatform};
-    use crate::usage::UsageRateLimit;
+    use crate::usage::{UsageCache, UsageRateLimit};
     use std::fs;
     use std::path::PathBuf;
 
@@ -866,6 +925,158 @@ mod tests {
                 }),
             }),
         }
+    }
+
+    fn write_usage_cache(path: &std::path::Path, account_id: &str, usage: UsageResponse) {
+        let cache = UsageCache::from_entries([(account_id.to_string(), 1_700_000_000, usage)]);
+        fs::write(path, format!("{}\n", serde_json::to_string_pretty(&cache).unwrap())).unwrap();
+    }
+
+    #[test]
+    fn codex_saved_profile_uses_current_snapshot_and_syncs_saved_file() {
+        let base = unique_temp_dir("loader-codex-current-sync");
+        let codex_paths = AppPaths::from_codex_dir(base.join("codex"));
+        let store = AccountStore::new(codex_paths.clone(), StorePlatform::Copy);
+        fs::create_dir_all(codex_paths.codex_dir()).unwrap();
+
+        let stale_saved = serde_json::json!({
+            "auth_mode": "chatgpt",
+            "tokens": {
+                "account_id": "acct-stale",
+                "access_token": "token-stale",
+                "refresh_token": "refresh-stale"
+            },
+            "last_refresh": "2026-03-01T00:00:00Z"
+        });
+        let current = serde_json::json!({
+            "auth_mode": "chatgpt",
+            "tokens": {
+                "account_id": "acct-current",
+                "access_token": "token-current",
+                "refresh_token": "refresh-current"
+            },
+            "last_refresh": "2026-03-26T00:00:00Z"
+        });
+        store.save_snapshot("team", &stale_saved).unwrap();
+        fs::write(
+            codex_paths.auth_path(),
+            serde_json::to_vec_pretty(&current).unwrap(),
+        )
+        .unwrap();
+        fs::write(codex_paths.current_name_path(), "team\n").unwrap();
+        write_usage_cache(
+            codex_paths.limit_cache_path(),
+            "acct-current",
+            sample_usage("team"),
+        );
+
+        let usage = UsageService::new(
+            codex_paths.limit_cache_path().to_path_buf(),
+            codex_paths.usage_history_path().to_path_buf(),
+            300,
+        );
+        let report = load_profiles_with_report(&store, &usage, false, None, None, None, None).unwrap();
+
+        let codex_profile = report
+            .profiles
+            .iter()
+            .find(|profile| profile.kind == ProfileKind::Codex)
+            .expect("codex profile");
+        assert_eq!(codex_profile.saved_name.as_deref(), Some("team"));
+        assert_eq!(codex_profile.account_id.as_deref(), Some("acct-current"));
+        assert!(codex_profile.is_current);
+        assert_eq!(
+            codex_profile
+                .snapshot
+                .get("tokens")
+                .and_then(|tokens| tokens.get("account_id"))
+                .and_then(|value| value.as_str()),
+            Some("acct-current")
+        );
+
+        let saved_raw = fs::read_to_string(codex_paths.accounts_dir().join("team.json")).unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&saved_raw).unwrap();
+        assert_eq!(saved, current);
+    }
+
+    #[test]
+    fn claude_saved_profile_uses_current_snapshot_when_name_matches() {
+        let base = unique_temp_dir("loader-claude-current-sync");
+        let codex_paths = AppPaths::from_codex_dir(base.join("codex"));
+        let store = AccountStore::new(codex_paths, StorePlatform::Copy);
+        let claude_paths = ClaudePaths::from_claude_dir(base.join("claude"));
+        fs::create_dir_all(claude_paths.claude_dir()).unwrap();
+
+        let stale_saved = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "token-stale",
+                "refreshToken": "sk-ant-ort01-stale-token",
+                "expiresAt": 1700000000,
+                "subscriptionType": "pro"
+            }
+        });
+        let current = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "token-current",
+                "refreshToken": "sk-ant-ort01-current-token",
+                "expiresAt": 1700000000,
+                "subscriptionType": "pro"
+            }
+        });
+        let claude_store = ClaudeStore::new(claude_paths.clone());
+        claude_store.save_snapshot("claude-one", &stale_saved).unwrap();
+        fs::write(
+            claude_paths.credentials_path(),
+            serde_json::to_vec_pretty(&current).unwrap(),
+        )
+        .unwrap();
+        fs::write(claude_paths.current_name_path(), "claude-one\n").unwrap();
+
+        let claude_usage = UsageService::new(
+            claude_paths.limit_cache_path().to_path_buf(),
+            claude_paths.usage_history_path().to_path_buf(),
+            300,
+        )
+        .with_fetcher(|_, access_token| {
+            assert_eq!(access_token, "token-current");
+            Ok(sample_usage("pro"))
+        });
+
+        let report = load_profiles_with_report(
+            &store,
+            &UsageService::new(base.join("noop-cache.json"), base.join("noop-history.json"), 300),
+            false,
+            None,
+            Some(&claude_store),
+            Some(&claude_usage),
+            None,
+        )
+        .unwrap();
+
+        let claude_profile = report
+            .profiles
+            .iter()
+            .find(|profile| profile.kind == ProfileKind::Claude)
+            .expect("claude profile");
+        let current_creds: crate::claude::ClaudeCredentials =
+            serde_json::from_value(current.clone()).unwrap();
+        assert_eq!(
+            claude_profile.account_id.as_deref(),
+            Some(current_creds.account_id().as_str())
+        );
+        assert!(claude_profile.is_current);
+        assert_eq!(
+            claude_profile
+                .snapshot
+                .get("claudeAiOauth")
+                .and_then(|oauth| oauth.get("accessToken"))
+                .and_then(|value| value.as_str()),
+            Some("token-current")
+        );
+
+        let saved_raw = fs::read_to_string(claude_paths.accounts_dir().join("claude-one.json")).unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&saved_raw).unwrap();
+        assert_eq!(saved, current);
     }
 
     #[test]

@@ -314,7 +314,7 @@ impl App {
                 self.pane_focus = if self.fullscreen {
                     PaneFocus::Plot
                 } else {
-                    PaneFocus::Accounts
+                    self.pane_focus.toggle()
                 };
             }
             InputAction::NextFocus => {

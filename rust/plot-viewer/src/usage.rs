@@ -1,11 +1,14 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct UsageWindow {
@@ -102,6 +105,25 @@ pub struct UsageReadResult {
     pub source: UsageSource,
     pub fetched_at: Option<i64>,
     pub stale: bool,
+}
+
+const CODEX_OAUTH_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
+const CODEX_OAUTH_REFRESH_URL: &str = "https://auth.openai.com/oauth/token";
+const CODEX_REFRESH_INTERVAL_DAYS: i64 = 8;
+
+#[derive(Debug, Clone, PartialEq)]
+struct CodexAuthTokens {
+    account_id: String,
+    access_token: String,
+    refresh_token: Option<String>,
+    last_refresh: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct RefreshedCodexTokens {
+    id_token: Option<String>,
+    access_token: String,
+    refresh_token: String,
 }
 
 type Fetcher = dyn Fn(&str, &str) -> Result<UsageResponse> + Send + Sync;
@@ -202,6 +224,98 @@ impl UsageService {
         }
 
         match (self.fetcher)(account_id, access_token) {
+            Ok(usage) => {
+                let fetched_at = now_seconds;
+                cache.by_account_id.insert(
+                    account_id.to_string(),
+                    UsageCacheRecord {
+                        fetched_at,
+                        usage: usage.clone(),
+                    },
+                );
+                self.write_cache(&cache)?;
+                Ok(UsageReadResult {
+                    usage: Some(usage),
+                    source: UsageSource::Api,
+                    fetched_at: Some(fetched_at),
+                    stale: false,
+                })
+            }
+            Err(error) => {
+                if force_refresh {
+                    return Err(error);
+                }
+                Ok(cached
+                    .map(|record| UsageReadResult {
+                        usage: Some(record.usage),
+                        source: UsageSource::Cache,
+                        fetched_at: Some(record.fetched_at),
+                        stale: true,
+                    })
+                    .unwrap_or(UsageReadResult {
+                        usage: None,
+                        source: UsageSource::None,
+                        fetched_at: None,
+                        stale: false,
+                    }))
+            }
+        }
+    }
+
+    pub fn read_codex_usage(
+        &self,
+        auth_path: &Path,
+        force_refresh: bool,
+        cache_only: bool,
+    ) -> Result<UsageReadResult> {
+        let now_seconds = (self.clock)();
+        let Some(tokens) = read_codex_auth_tokens(auth_path)? else {
+            return Ok(UsageReadResult {
+                usage: None,
+                source: UsageSource::None,
+                fetched_at: None,
+                stale: false,
+            });
+        };
+
+        let account_id = tokens.account_id.as_str();
+        let mut cache = self.read_cache()?;
+        let cached = cache.by_account_id.get(account_id).cloned();
+        let age = cached
+            .as_ref()
+            .map(|record| now_seconds - record.fetched_at)
+            .unwrap_or(i64::MAX);
+
+        if !force_refresh {
+            if let Some(record) = cached.as_ref() {
+                if cache_only || age <= self.ttl_seconds {
+                    return Ok(UsageReadResult {
+                        usage: Some(record.usage.clone()),
+                        source: UsageSource::Cache,
+                        fetched_at: Some(record.fetched_at),
+                        stale: false,
+                    });
+                }
+            }
+        }
+
+        if cache_only {
+            return Ok(cached
+                .map(|record| UsageReadResult {
+                    usage: Some(record.usage),
+                    source: UsageSource::Cache,
+                    fetched_at: Some(record.fetched_at),
+                    stale: age > self.ttl_seconds,
+                })
+                .unwrap_or(UsageReadResult {
+                    usage: None,
+                    source: UsageSource::None,
+                    fetched_at: None,
+                    stale: false,
+                }));
+        }
+
+        match fetch_codex_usage_from_auth(auth_path, &tokens) {
             Ok(usage) => {
                 let fetched_at = now_seconds;
                 cache.by_account_id.insert(
@@ -372,6 +486,49 @@ fn trim_history_windows(windows: &mut Vec<UsageWindowHistory>, max_count: usize)
 }
 
 fn fetch_usage_from_api(account_id: &str, access_token: &str) -> Result<UsageResponse> {
+    fetch_usage_from_api_once(account_id, access_token)
+}
+
+fn fetch_codex_usage_from_auth(auth_path: &Path, initial_tokens: &CodexAuthTokens) -> Result<UsageResponse> {
+    fetch_codex_usage_with_auto_refresh(
+        auth_path,
+        initial_tokens,
+        fetch_usage_from_api_once,
+        refresh_codex_oauth_tokens,
+    )
+}
+
+fn fetch_codex_usage_with_auto_refresh<FUsage, FRefresh>(
+    auth_path: &Path,
+    initial_tokens: &CodexAuthTokens,
+    mut usage_fetch: FUsage,
+    mut refresh_tokens: FRefresh,
+) -> Result<UsageResponse>
+where
+    FUsage: FnMut(&str, &str) -> Result<UsageResponse>,
+    FRefresh: FnMut(&str) -> Result<RefreshedCodexTokens>,
+{
+    let mut active_tokens = initial_tokens.clone();
+    if should_refresh_codex_auth(&active_tokens) {
+        active_tokens =
+            refresh_current_codex_auth(auth_path, Some(active_tokens.access_token.as_str()), &mut refresh_tokens)?;
+    }
+
+    match usage_fetch(&active_tokens.account_id, &active_tokens.access_token) {
+        Ok(usage) => Ok(usage),
+        Err(error) if is_codex_usage_refreshable_error(&error) => {
+            let refreshed_tokens = refresh_current_codex_auth(
+                auth_path,
+                Some(active_tokens.access_token.as_str()),
+                &mut refresh_tokens,
+            )?;
+            usage_fetch(&refreshed_tokens.account_id, &refreshed_tokens.access_token)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn fetch_usage_from_api_once(account_id: &str, access_token: &str) -> Result<UsageResponse> {
     let client = Client::builder().build().context("build reqwest client")?;
     let response = client
         .get("https://chatgpt.com/backend-api/wham/usage")
@@ -383,6 +540,166 @@ fn fetch_usage_from_api(account_id: &str, access_token: &str) -> Result<UsageRes
         .error_for_status()
         .context("usage request failed")?;
     response.json().context("parse usage response JSON")
+}
+
+fn read_codex_auth_tokens(auth_path: &Path) -> Result<Option<CodexAuthTokens>> {
+    let raw = match fs::read_to_string(auth_path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error).with_context(|| format!("read {}", auth_path.display())),
+    };
+    let snapshot: Value =
+        serde_json::from_str(&raw).with_context(|| format!("parse {}", auth_path.display()))?;
+    Ok(extract_codex_auth_tokens(&snapshot))
+}
+
+fn extract_codex_auth_tokens(snapshot: &Value) -> Option<CodexAuthTokens> {
+    let tokens = snapshot.get("tokens")?;
+    let account_id = tokens.get("account_id")?.as_str()?.trim();
+    let access_token = tokens.get("access_token")?.as_str()?.trim();
+    if account_id.is_empty() || access_token.is_empty() {
+        return None;
+    }
+    let refresh_token = tokens
+        .get("refresh_token")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let last_refresh = snapshot
+        .get("last_refresh")
+        .and_then(Value::as_str)
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.with_timezone(&Utc));
+    Some(CodexAuthTokens {
+        account_id: account_id.to_string(),
+        access_token: access_token.to_string(),
+        refresh_token,
+        last_refresh,
+    })
+}
+
+fn refresh_current_codex_auth<FRefresh>(
+    auth_path: &Path,
+    current_access_token: Option<&str>,
+    refresh_tokens: &mut FRefresh,
+) -> Result<CodexAuthTokens>
+where
+    FRefresh: FnMut(&str) -> Result<RefreshedCodexTokens>,
+{
+    let raw = fs::read_to_string(auth_path)
+        .with_context(|| format!("read {}", auth_path.display()))?;
+    let mut snapshot: Value =
+        serde_json::from_str(&raw).with_context(|| format!("parse {}", auth_path.display()))?;
+    let stored_tokens = extract_codex_auth_tokens(&snapshot)
+        .with_context(|| format!("parse Codex auth tokens from {}", auth_path.display()))?;
+    if current_access_token.is_some_and(|token| token != stored_tokens.access_token) {
+        return Ok(stored_tokens);
+    }
+
+    let refresh_token = stored_tokens
+        .refresh_token
+        .as_deref()
+        .context("Codex auth snapshot missing refresh_token")?;
+    let rotated = refresh_tokens(refresh_token)?;
+    let tokens = snapshot
+        .get_mut("tokens")
+        .and_then(Value::as_object_mut)
+        .context("parse Codex auth token payload")?;
+    tokens.insert(
+        "access_token".to_string(),
+        Value::String(rotated.access_token.clone()),
+    );
+    tokens.insert(
+        "refresh_token".to_string(),
+        Value::String(rotated.refresh_token.clone()),
+    );
+    if let Some(id_token) = rotated.id_token.clone() {
+        tokens.insert("id_token".to_string(), Value::String(id_token));
+    }
+    let refreshed_at = Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true);
+    snapshot["last_refresh"] = Value::String(refreshed_at);
+    write_json(auth_path, &snapshot)?;
+    extract_codex_auth_tokens(&snapshot)
+        .with_context(|| format!("parse refreshed Codex auth tokens from {}", auth_path.display()))
+}
+
+fn refresh_codex_oauth_tokens(refresh_token: &str) -> Result<RefreshedCodexTokens> {
+    let client = Client::builder().build().context("build reqwest client")?;
+    let response = client
+        .post(CODEX_OAUTH_REFRESH_URL)
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({
+            "client_id": CODEX_OAUTH_CLIENT_ID,
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        }))
+        .send()
+        .context("send Codex token refresh request")?;
+    let status = response.status();
+    let raw: Value = response
+        .json()
+        .with_context(|| format!("parse Codex token refresh JSON ({status})"))?;
+    if !status.is_success() {
+        let message = raw
+            .get("error_description")
+            .or_else(|| raw.get("error"))
+            .and_then(Value::as_str)
+            .unwrap_or("unknown Codex token refresh failure");
+        anyhow::bail!("Codex token refresh failed: HTTP {status} {message}");
+    }
+    parse_refreshed_codex_tokens(&raw)
+}
+
+fn parse_refreshed_codex_tokens(raw: &Value) -> Result<RefreshedCodexTokens> {
+    let access_token = raw
+        .get("access_token")
+        .and_then(Value::as_str)
+        .context("Codex token refresh response missing access_token")?;
+    let refresh_token = raw
+        .get("refresh_token")
+        .and_then(Value::as_str)
+        .context("Codex token refresh response missing refresh_token")?;
+    let id_token = raw
+        .get("id_token")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    Ok(RefreshedCodexTokens {
+        id_token,
+        access_token: access_token.to_string(),
+        refresh_token: refresh_token.to_string(),
+    })
+}
+
+fn should_refresh_codex_auth(tokens: &CodexAuthTokens) -> bool {
+    if parse_jwt_expiration(&tokens.access_token).is_some_and(|expires_at| expires_at <= Utc::now()) {
+        return true;
+    }
+    tokens.last_refresh.is_some_and(|refreshed_at| {
+        refreshed_at < Utc::now() - Duration::days(CODEX_REFRESH_INTERVAL_DAYS)
+    })
+}
+
+fn parse_jwt_expiration(token: &str) -> Option<DateTime<Utc>> {
+    let payload = token.split('.').nth(1)?;
+    let decoded = URL_SAFE_NO_PAD.decode(payload).ok()?;
+    let raw: Value = serde_json::from_slice(&decoded).ok()?;
+    let exp = raw.get("exp")?.as_i64()?;
+    DateTime::<Utc>::from_timestamp(exp, 0)
+}
+
+fn is_codex_usage_refreshable_error(error: &anyhow::Error) -> bool {
+    format!("{error:#}")
+        .to_ascii_lowercase()
+        .contains("401 unauthorized")
+}
+
+fn write_json(path: &Path, value: &Value) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    fs::write(path, format!("{}\n", serde_json::to_string_pretty(value)?))
+        .with_context(|| format!("write {}", path.display()))
 }
 
 fn default_now_seconds() -> i64 {
@@ -433,6 +750,7 @@ pub fn pick_weekly_window(usage: &UsageResponse) -> Option<&UsageWindow> {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::sync::{Arc, Mutex};
 
     use super::*;
 
@@ -444,6 +762,47 @@ mod tests {
         ));
         let _ = fs::remove_file(&base);
         base
+    }
+
+    fn sample_usage(plan: &str) -> UsageResponse {
+        UsageResponse {
+            email: Some("alpha@example.com".to_string()),
+            plan_type: Some(plan.to_string()),
+            rate_limit: Some(UsageRateLimit {
+                primary_window: Some(UsageWindow {
+                    used_percent: 12.0,
+                    limit_window_seconds: 18_000,
+                    reset_after_seconds: 3_600,
+                    reset_at: 18_000,
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: 41.0,
+                    limit_window_seconds: 604_800,
+                    reset_after_seconds: 300_000,
+                    reset_at: 604_800,
+                }),
+            }),
+        }
+    }
+
+    fn write_codex_auth(
+        path: &Path,
+        access_token: &str,
+        refresh_token: &str,
+        last_refresh: chrono::DateTime<chrono::Utc>,
+    ) {
+        let snapshot = serde_json::json!({
+            "auth_mode": "chatgpt",
+            "OPENAI_API_KEY": null,
+            "tokens": {
+                "id_token": "id-old",
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "account_id": "acct-alpha"
+            },
+            "last_refresh": last_refresh.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
+        });
+        write_json(path, &snapshot).unwrap();
     }
 
     #[test]
@@ -539,5 +898,94 @@ mod tests {
         assert_eq!(history.weekly_windows.len(), 2);
         assert_eq!(history.weekly_windows[0].start_at, 0);
         assert_eq!(history.weekly_windows[1].start_at, 604_800);
+    }
+
+    #[test]
+    fn stale_codex_auth_refreshes_before_usage_request() {
+        let auth_path = temp_file("codex-stale-auth.json");
+        write_codex_auth(
+            &auth_path,
+            "access-old",
+            "refresh-old",
+            chrono::Utc::now() - chrono::Duration::days(9),
+        );
+        let seen_tokens = Arc::new(Mutex::new(Vec::<String>::new()));
+        let usage_tokens = Arc::clone(&seen_tokens);
+
+        let initial_tokens = read_codex_auth_tokens(&auth_path).unwrap().unwrap();
+        let usage = fetch_codex_usage_with_auto_refresh(
+            &auth_path,
+            &initial_tokens,
+            move |account_id, access_token| {
+                assert_eq!(account_id, "acct-alpha");
+                usage_tokens.lock().unwrap().push(access_token.to_string());
+                Ok(sample_usage("team"))
+            },
+            |refresh_token| {
+                assert_eq!(refresh_token, "refresh-old");
+                Ok(RefreshedCodexTokens {
+                    id_token: Some("id-new".to_string()),
+                    access_token: "access-new".to_string(),
+                    refresh_token: "refresh-new".to_string(),
+                })
+            },
+        )
+        .unwrap();
+
+        assert_eq!(usage.plan_type.as_deref(), Some("team"));
+        assert_eq!(&*seen_tokens.lock().unwrap(), &["access-new".to_string()]);
+
+        let refreshed = read_codex_auth_tokens(&auth_path).unwrap().unwrap();
+        assert_eq!(refreshed.access_token, "access-new");
+        assert_eq!(refreshed.refresh_token.as_deref(), Some("refresh-new"));
+    }
+
+    #[test]
+    fn codex_usage_401_refreshes_and_retries_once() {
+        let auth_path = temp_file("codex-401-auth.json");
+        write_codex_auth(
+            &auth_path,
+            "access-old",
+            "refresh-old",
+            chrono::Utc::now(),
+        );
+        let seen_tokens = Arc::new(Mutex::new(Vec::<String>::new()));
+        let usage_tokens = Arc::clone(&seen_tokens);
+
+        let initial_tokens = read_codex_auth_tokens(&auth_path).unwrap().unwrap();
+        let usage = fetch_codex_usage_with_auto_refresh(
+            &auth_path,
+            &initial_tokens,
+            move |account_id, access_token| {
+                assert_eq!(account_id, "acct-alpha");
+                usage_tokens.lock().unwrap().push(access_token.to_string());
+                if access_token == "access-old" {
+                    Err(anyhow::anyhow!(
+                        "usage request failed: HTTP status client error (401 Unauthorized)"
+                    ))
+                } else {
+                    Ok(sample_usage("team"))
+                }
+            },
+            |refresh_token| {
+                assert_eq!(refresh_token, "refresh-old");
+                Ok(RefreshedCodexTokens {
+                    id_token: None,
+                    access_token: "access-new".to_string(),
+                    refresh_token: "refresh-new".to_string(),
+                })
+            },
+        )
+        .unwrap();
+
+        assert_eq!(usage.plan_type.as_deref(), Some("team"));
+        assert_eq!(
+            &*seen_tokens.lock().unwrap(),
+            &["access-old".to_string(), "access-new".to_string()]
+        );
+
+        let refreshed = read_codex_auth_tokens(&auth_path).unwrap().unwrap();
+        assert_eq!(refreshed.access_token, "access-new");
+        assert_eq!(refreshed.refresh_token.as_deref(), Some("refresh-new"));
     }
 }

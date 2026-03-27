@@ -71,30 +71,50 @@ fn run_refresh_all() -> Result<()> {
 
     // Force-refresh usage for every saved profile
     let saved = store.list_saved_profiles()?;
+    let current_snapshot = store.get_current_snapshot().ok();
+    let current_account_id = current_snapshot.as_ref().and_then(|snapshot| {
+        snapshot
+            .get("tokens")
+            .and_then(|t| t.get("account_id"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    });
+    let current_name = store.get_current_account_name().ok().flatten();
+    let mut current_saved = false;
     for profile in &saved {
-        let account_id = profile.snapshot
+        let saved_account_id = profile.snapshot
             .get("tokens")
             .and_then(|t| t.get("account_id"))
             .and_then(|v| v.as_str());
-        let access_token = profile.snapshot
-            .get("tokens")
-            .and_then(|t| t.get("access_token"))
-            .and_then(|v| v.as_str());
-        if let Err(error) = refresh_usage_snapshot(&usage, account_id, access_token) {
+        let use_current_auth = current_account_id.as_deref() == saved_account_id
+            || current_name.as_deref() == Some(profile.name.as_str());
+        let effective_account_id = if use_current_auth {
+            current_account_id.as_deref().or(saved_account_id)
+        } else {
+            saved_account_id
+        };
+        let auth_path = if use_current_auth {
+            current_saved = true;
+            paths.auth_path()
+        } else {
+            profile.file_path.as_path()
+        };
+        if let Err(error) = refresh_codex_usage_snapshot(&usage, auth_path, effective_account_id) {
             codex_errors.push(format!("saved {}: {error:#}", profile.name));
+        } else if use_current_auth {
+            let _ = store.update_account(&profile.name);
         }
     }
 
     // Also refresh the current (unsaved) profile
-    if let Ok(current) = store.get_current_snapshot() {
-        let account_id = current.get("tokens")
-            .and_then(|t| t.get("account_id"))
-            .and_then(|v| v.as_str());
-        let access_token = current.get("tokens")
-            .and_then(|t| t.get("access_token"))
-            .and_then(|v| v.as_str());
-        if let Err(error) = refresh_usage_snapshot(&usage, account_id, access_token) {
-            codex_errors.push(format!("current: {error:#}"));
+    if !current_saved {
+        if let Some(current) = current_snapshot {
+            let account_id = current.get("tokens")
+                .and_then(|t| t.get("account_id"))
+                .and_then(|v| v.as_str());
+            if let Err(error) = refresh_codex_usage_snapshot(&usage, paths.auth_path(), account_id) {
+                codex_errors.push(format!("current: {error:#}"));
+            }
         }
     }
 
@@ -107,30 +127,51 @@ fn run_refresh_all() -> Result<()> {
             claude_paths.usage_history_path().to_path_buf(),
             300,
         ).with_fetcher(agent_switch::claude::fetch_claude_usage);
+        let current_creds = cl_store.get_current_credentials().ok();
+        let current_account_id = current_creds.as_ref().map(|creds| creds.account_id());
+        let current_name = cl_store.get_current_account_name().ok().flatten();
+        let mut current_saved = false;
 
         if let Ok(saved) = cl_store.list_saved_profiles() {
             for profile in saved {
                 if let Ok(creds) = serde_json::from_value::<ClaudeCredentials>(profile.snapshot) {
-                    let composite_id = format!("{}|{}", creds.account_id(), creds.subscription_type());
+                    let use_current_credentials = current_name.as_deref() == Some(profile.name.as_str())
+                        || (current_account_id.is_some()
+                            && current_account_id.as_deref() == Some(creds.account_id().as_str()));
+                    let effective_creds = if use_current_credentials {
+                        current_saved = true;
+                        current_creds.as_ref().unwrap_or(&creds)
+                    } else {
+                        &creds
+                    };
+                    let composite_id = format!(
+                        "{}|{}",
+                        effective_creds.account_id(),
+                        effective_creds.subscription_type()
+                    );
                     if let Err(error) = refresh_usage_snapshot(
                         &cl_usage,
                         Some(composite_id.as_str()),
-                        Some(creds.access_token()),
+                        Some(effective_creds.access_token()),
                     ) {
                         claude_errors.push(format!("saved {}: {error:#}", profile.name));
+                    } else if use_current_credentials {
+                        let _ = cl_store.update_account(&profile.name);
                     }
                 }
             }
         }
 
-        if let Ok(creds) = cl_store.get_current_credentials() {
-            let composite_id = format!("{}|{}", creds.account_id(), creds.subscription_type());
-            if let Err(error) = refresh_usage_snapshot(
-                &cl_usage,
-                Some(composite_id.as_str()),
-                Some(creds.access_token()),
-            ) {
-                claude_errors.push(format!("current: {error:#}"));
+        if !current_saved {
+            if let Some(creds) = current_creds {
+                let composite_id = format!("{}|{}", creds.account_id(), creds.subscription_type());
+                if let Err(error) = refresh_usage_snapshot(
+                    &cl_usage,
+                    Some(composite_id.as_str()),
+                    Some(creds.access_token()),
+                ) {
+                    claude_errors.push(format!("current: {error:#}"));
+                }
             }
         }
     }
@@ -175,6 +216,15 @@ fn refresh_usage_snapshot(
     access_token: Option<&str>,
 ) -> Result<()> {
     let result = usage.read_usage(account_id, access_token, true, false)?;
+    usage.record_usage_snapshot(account_id, result.usage.as_ref())
+}
+
+fn refresh_codex_usage_snapshot(
+    usage: &UsageService,
+    auth_path: &std::path::Path,
+    account_id: Option<&str>,
+) -> Result<()> {
+    let result = usage.read_codex_usage(auth_path, true, false)?;
     usage.record_usage_snapshot(account_id, result.usage.as_ref())
 }
 

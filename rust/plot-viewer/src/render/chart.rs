@@ -125,7 +125,7 @@ fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_stat
         .collect();
 
     // 7d data lines.
-    let mut datasets = visible_series
+    let datasets = visible_series
         .iter()
         .zip(series_points.iter())
         .map(|(series, points)| {

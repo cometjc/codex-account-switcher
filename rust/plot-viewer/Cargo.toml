@@ -7,6 +7,8 @@ description = "Rust TUI for agent profile management and usage plots"
 
 [dependencies]
 anyhow = "1"
+base64 = "0.22.1"
+chrono = "0.4.44"
 crossterm = "0.29"
 ratatui = "0.30"
 reqwest = { version = "0.12.28", default-features = false, features = ["blocking", "json", "rustls-tls"] }
