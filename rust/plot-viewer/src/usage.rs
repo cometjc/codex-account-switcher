@@ -478,10 +478,9 @@ fn trim_history_windows(windows: &mut Vec<UsageWindowHistory>, max_count: usize)
     }
     for window in windows {
         window.observations.sort_by_key(|observation| observation.observed_at);
-        if window.observations.len() > 256 {
-            let remove_count = window.observations.len() - 256;
-            window.observations.drain(0..remove_count);
-        }
+        window
+            .observations
+            .retain(|observation| observation.observed_at >= window.start_at && observation.observed_at <= window.end_at);
     }
 }
 
@@ -898,6 +897,54 @@ mod tests {
         assert_eq!(history.weekly_windows.len(), 2);
         assert_eq!(history.weekly_windows[0].start_at, 0);
         assert_eq!(history.weekly_windows[1].start_at, 604_800);
+    }
+
+    #[test]
+    fn trim_history_windows_keeps_full_week_of_observations() {
+        let mut windows = vec![UsageWindowHistory {
+            limit_window_seconds: 604_800,
+            start_at: 0,
+            end_at: 604_800,
+            observations: (0..300)
+                .map(|idx| UsageObservation {
+                    observed_at: idx * 2_000,
+                    used_percent: idx as f64 % 100.0,
+                })
+                .collect(),
+        }];
+
+        trim_history_windows(&mut windows, 3);
+
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].observations.len(), 300);
+    }
+
+    #[test]
+    fn trim_history_windows_removes_observations_outside_window_range() {
+        let mut windows = vec![UsageWindowHistory {
+            limit_window_seconds: 18_000,
+            start_at: 100,
+            end_at: 200,
+            observations: vec![
+                UsageObservation {
+                    observed_at: 90,
+                    used_percent: 1.0,
+                },
+                UsageObservation {
+                    observed_at: 150,
+                    used_percent: 2.0,
+                },
+                UsageObservation {
+                    observed_at: 210,
+                    used_percent: 3.0,
+                },
+            ],
+        }];
+
+        trim_history_windows(&mut windows, 34);
+
+        assert_eq!(windows[0].observations.len(), 1);
+        assert_eq!(windows[0].observations[0].observed_at, 150);
     }
 
     #[test]

@@ -1,3 +1,19 @@
+# 2026-03-26 usage history keeps full weekly observations
+
+- [x] 釐清目前 usage history 被截短的真正邊界，分清楚 observation cap 與 window retention
+- [x] 先補 Rust regression test，鎖住單一 7d window 的 observation 不再因 256 上限被裁掉
+- [x] 將 observation cleanup 改成只依時間範圍保留，不再依筆數裁切
+- [x] 執行 `cargo test --manifest-path rust/plot-viewer/Cargo.toml` 驗證
+
+## Review
+
+- 根因確認是 `trim_history_windows()` 對每個 window 的 `observations` 有硬編碼 `256` 筆上限，對 weekly window 來說只夠保留大約 42 小時的 10 分鐘採樣點，因此看起來像 7 天歷史一直累積不起來。
+- 這次保留既有 window-level retention（weekly 3 windows、5h 34 windows），但移除 observation count cap；window 內的 observation 現在只依 `start_at..=end_at` 時間範圍清理。
+- 新增 regression：
+  - `trim_history_windows_keeps_full_week_of_observations`
+  - `trim_history_windows_removes_observations_outside_window_range`
+- 驗證：`cargo test --manifest-path rust/plot-viewer/Cargo.toml` 全綠（51 + 1 + 3 tests）。
+
 # 2026-03-26 current-first saved profile reconcile for Codex and Claude
 
 - [x] 將 Codex/Claude 的 saved refresh 流程改成 current-first：若 saved profile 對應 current，就先更新 current，再回寫 saved
