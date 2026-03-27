@@ -101,7 +101,7 @@ pub fn load_profiles_with_report(
             )?;
             push_refresh_error(&mut refresh_errors, error);
             usage_service
-                .record_usage_snapshot(current_account_id.as_deref(), usage_view.usage.as_ref())?;
+                .record_usage_snapshot(current_account_id.as_deref(), &usage_view)?;
             let chart_data = build_profile_chart_data(
                 current_account_id.as_deref(),
                 usage_view.usage.as_ref(),
@@ -148,7 +148,7 @@ pub fn load_profiles_with_report(
                 cache_only,
             )?;
             push_refresh_error(&mut refresh_errors, error);
-            cu.record_usage_snapshot(Some(account_id.as_str()), usage_view.usage.as_ref())?;
+            cu.record_usage_snapshot(Some(account_id.as_str()), &usage_view)?;
             let chart_data = build_profile_chart_data(Some(account_id.as_str()), usage_view.usage.as_ref(), cu)?;
             profiles.push(ProfileEntry {
                 kind: ProfileKind::Copilot,
@@ -245,7 +245,7 @@ fn load_claude_profiles(
                 let _ = store.update_account(&saved_profile.name);
             }
             usage_service
-                .record_usage_snapshot(effective_comp_id.as_deref(), usage_view.usage.as_ref())?;
+                .record_usage_snapshot(effective_comp_id.as_deref(), &usage_view)?;
             let chart_data = build_profile_chart_data(
                 effective_comp_id.as_deref(),
                 usage_view.usage.as_ref(),
@@ -338,7 +338,7 @@ fn load_claude_profiles(
                 cache_only,
             )?;
             push_refresh_error(&mut refresh_errors, error);
-            usage_service.record_usage_snapshot(Some(&comp_id), usage_view.usage.as_ref())?;
+            usage_service.record_usage_snapshot(Some(&comp_id), &usage_view)?;
             let chart_data = build_profile_chart_data(
                 Some(&comp_id),
                 usage_view.usage.as_ref(),
@@ -410,7 +410,7 @@ fn build_saved_entry(
     } else {
         profile.snapshot.clone()
     };
-    usage_service.record_usage_snapshot(effective_account_id.as_deref(), usage_view.usage.as_ref())?;
+    usage_service.record_usage_snapshot(effective_account_id.as_deref(), &usage_view)?;
     let chart_data =
         build_profile_chart_data(effective_account_id.as_deref(), usage_view.usage.as_ref(), usage_service)?;
 
@@ -938,7 +938,13 @@ mod tests {
 
         let account_id = "claude-test|pro";
         let service = usage_service.with_now_seconds(now);
-        service.record_usage_snapshot(Some(account_id), Some(&usage)).unwrap();
+        let read = crate::usage::UsageReadResult {
+            usage: Some(usage.clone()),
+            source: crate::usage::UsageSource::Api,
+            fetched_at: Some(now),
+            stale: false,
+        };
+        service.record_usage_snapshot(Some(account_id), &read).unwrap();
 
         let chart_data = build_profile_chart_data(Some(account_id), Some(&usage), &service).unwrap();
 
