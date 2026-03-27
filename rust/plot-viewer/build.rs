@@ -1,8 +1,10 @@
 fn main() {
-    // build-number is incremented by `make install` before each build.
-    // Fall back to git commit count when the file is absent (e.g., CI).
-    let count = std::fs::read_to_string("build-number")
+    // BUILD_NUMBER comes from Makefile install, then falls back to build-number
+    // file or git commit count when absent (e.g., CI).
+    let count = std::env::var("BUILD_NUMBER")
         .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| std::fs::read_to_string("build-number").ok())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| {
@@ -24,6 +26,7 @@ fn main() {
         .unwrap_or_else(|| "unknown".to_string());
 
     println!("cargo:rustc-env=BUILD_VER=#{count} {hash}");
+    println!("cargo:rerun-if-env-changed=BUILD_NUMBER");
     println!("cargo:rerun-if-changed=build-number");
     println!("cargo:rerun-if-changed=.git/HEAD");
     println!("cargo:rerun-if-changed=.git/refs/heads");
