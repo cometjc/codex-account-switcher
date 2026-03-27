@@ -317,36 +317,37 @@ fn normalize_account_name(raw: &str) -> Result<String> {
 /// Map a raw Claude usage API JSON response + subscription_type to UsageResponse.
 /// `now` is the current unix timestamp in seconds (injected for testability).
 pub fn map_claude_usage_response(raw: &Value, subscription_type: &str, now: i64) -> Option<UsageResponse> {
-    let five_hour = raw.get("five_hour")?;
-    let seven_day = raw.get("seven_day")?;
+    let five_hour = raw
+        .get("five_hour")
+        .and_then(|window| parse_claude_usage_window(window, 18_000, now));
+    let seven_day = raw
+        .get("seven_day")
+        .and_then(|window| parse_claude_usage_window(window, 604_800, now));
 
-    let five_h_utilization = five_hour.get("utilization")?.as_f64()?;
-    let five_h_resets_at = five_hour.get("resets_at")?.as_str()?;
-    let seven_d_utilization = seven_day.get("utilization")?.as_f64()?;
-    let seven_d_resets_at = seven_day.get("resets_at")?.as_str()?;
-
-    // Round to nearest minute so sub-second jitter in the server's resets_at field
-    // does not produce duplicate window entries across calls.
-    let five_h_reset_at = parse_rfc3339_unix(five_h_resets_at).map(|t| (t + 30) / 60 * 60)?;
-    let seven_d_reset_at = parse_rfc3339_unix(seven_d_resets_at).map(|t| (t + 30) / 60 * 60)?;
+    if five_hour.is_none() && seven_day.is_none() {
+        return None;
+    }
 
     Some(UsageResponse {
         email: None,
         plan_type: Some(subscription_type.to_string()),
         rate_limit: Some(UsageRateLimit {
-            primary_window: Some(UsageWindow {
-                used_percent: five_h_utilization.clamp(0.0, 100.0),
-                limit_window_seconds: 18_000,
-                reset_at: five_h_reset_at,
-                reset_after_seconds: (five_h_reset_at - now).max(0),
-            }),
-            secondary_window: Some(UsageWindow {
-                used_percent: seven_d_utilization.clamp(0.0, 100.0),
-                limit_window_seconds: 604_800,
-                reset_at: seven_d_reset_at,
-                reset_after_seconds: (seven_d_reset_at - now).max(0),
-            }),
+            primary_window: five_hour,
+            secondary_window: seven_day,
         }),
+    })
+}
+
+fn parse_claude_usage_window(value: &Value, limit_window_seconds: i64, now: i64) -> Option<UsageWindow> {
+    let utilization = value.get("utilization")?.as_f64()?;
+    let resets_at = value.get("resets_at")?.as_str()?;
+    let reset_at = parse_rfc3339_unix(resets_at).map(|t| (t + 30) / 60 * 60)?;
+
+    Some(UsageWindow {
+        used_percent: utilization.clamp(0.0, 100.0),
+        limit_window_seconds,
+        reset_at,
+        reset_after_seconds: (reset_at - now).max(0),
     })
 }
 
@@ -448,8 +449,10 @@ fn fetch_claude_usage_once(account_id: &str, access_token: &str) -> anyhow::Resu
         .json()
         .context("parse Claude usage JSON")?;
 
-    map_claude_usage_response(&raw, subscription_type, now)
-        .ok_or_else(|| anyhow::anyhow!("unexpected Claude usage response shape"))
+    map_claude_usage_response(&raw, subscription_type, now).ok_or_else(|| {
+        debug_print_claude_usage_payload(account_id, subscription_type, &raw);
+        anyhow::anyhow!("unexpected Claude usage response shape")
+    })
 }
 
 fn build_claude_usage_request(
@@ -564,6 +567,70 @@ fn is_usage_refreshable_error(error: &anyhow::Error) -> bool {
         || message.contains("invalid access token")
 }
 
+fn is_debug_mode_enabled() -> bool {
+    std::env::var("AGENT_SWITCH_DEBUG_CLAUDE_USAGE")
+        .ok()
+        .is_some_and(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+}
+
+fn debug_print_claude_usage_payload(account_id: &str, subscription_type: &str, raw: &Value) {
+    if !is_debug_mode_enabled() {
+        return;
+    }
+
+    let top_level_keys = extract_keys(Some(raw));
+    let safe_payload = sanitize_debug_payload(raw);
+    let five_hour_keys = extract_keys(raw.get("five_hour"));
+    let seven_day_keys = extract_keys(raw.get("seven_day"));
+    let raw_shape = serde_json::to_string_pretty(&safe_payload).unwrap_or_else(|_| "<unable to render payload>".to_string());
+
+    eprintln!("[debug] Claude usage response shape mismatch");
+    eprintln!("  account_id: {account_id}");
+    eprintln!("  subscription: {subscription_type}");
+    eprintln!("  top_level_keys: {top_level_keys:?}");
+    eprintln!("  five_hour_present: {}", five_hour_keys.is_some());
+    eprintln!("  seven_day_present: {}", seven_day_keys.is_some());
+    eprintln!("  five_hour_keys: {five_hour_keys:?}");
+    eprintln!("  seven_day_keys: {seven_day_keys:?}");
+    eprintln!("  safe_payload_summary: {raw_shape}");
+}
+
+fn extract_keys(value: Option<&Value>) -> Option<Vec<String>> {
+    let value = value?.as_object()?;
+    let mut keys: Vec<String> = value.keys().cloned().collect();
+    keys.sort_unstable();
+    Some(keys)
+}
+
+fn sanitize_debug_payload(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut redacted = serde_json::Map::new();
+            for (key, value) in map {
+                if is_sensitive_debug_key(key) {
+                    redacted.insert(key.clone(), Value::String("[redacted]".to_string()));
+                } else {
+                    redacted.insert(key.clone(), sanitize_debug_payload(value));
+                }
+            }
+            Value::Object(redacted)
+        }
+        Value::Array(list) => {
+            Value::Array(list.iter().map(sanitize_debug_payload).collect())
+        }
+        other => other.clone(),
+    }
+}
+
+fn is_sensitive_debug_key(key: &str) -> bool {
+    let key_lower = key.to_ascii_lowercase();
+    key_lower.contains("token")
+        || key_lower.contains("authorization")
+        || key_lower == "api-key"
+        || key_lower == "apikey"
+        || key_lower == "api_key"
+}
+
 fn current_unix_seconds() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -646,6 +713,23 @@ mod tests {
         let seven_d = rl.secondary_window.as_ref().unwrap();
         assert_eq!(seven_d.limit_window_seconds, 604_800);
         assert!((seven_d.used_percent - 28.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn map_claude_usage_response_accepts_weekly_only_shape() {
+        let now = 1_730_000_000_i64;
+        let raw = serde_json::json!({
+            "five_hour": { "utilization": 0.0, "resets_at": null },
+            "seven_day":  { "utilization": 28.0, "resets_at": "2025-10-29T04:59:59.000000+00:00" }
+        });
+        let response = map_claude_usage_response(&raw, "team", now).unwrap();
+
+        assert_eq!(response.plan_type.as_deref(), Some("team"));
+        assert!(response.rate_limit.as_ref().unwrap().primary_window.is_none());
+        let rl = response.rate_limit.as_ref().unwrap();
+        let seven_d = rl.secondary_window.as_ref().unwrap();
+        assert_eq!(seven_d.limit_window_seconds, 604_800);
+        assert_eq!(seven_d.used_percent, 28.0);
     }
 
     #[test]
@@ -764,6 +848,29 @@ mod tests {
         assert_eq!(persisted.access_token(), "sk-ant-oat01-new");
         assert_eq!(persisted.claude_ai_oauth.refresh_token, "sk-ant-ort01-new");
         assert_eq!(persisted.claude_ai_oauth.expires_at, 1_730_200_000);
+    }
+
+    #[test]
+    fn sanitize_debug_payload_does_not_leak_tokens() {
+        let raw = serde_json::json!({
+            "five_hour": { "utilization": 30.0, "resets_at": "2026-03-26T00:00:00.000000+00:00", "access_token": "should-not-appear" },
+            "seven_day": { "utilization": 12.0, "access_token": "hidden", "nested": { "refreshToken": "token-value" } },
+            "auth": { "authorization": "bearer-token", "api_key": "api-secret", "meta": { "note": "ok" } },
+            "accessToken": "top-secret",
+        });
+
+        let sanitized = sanitize_debug_payload(&raw);
+        let rendered = sanitized.to_string();
+
+        assert!(!rendered.contains("should-not-appear"));
+        assert!(!rendered.contains("hidden"));
+        assert!(!rendered.contains("token-value"));
+        assert!(!rendered.contains("bearer-token"));
+        assert!(!rendered.contains("api-secret"));
+        assert_eq!(sanitized["five_hour"]["access_token"], serde_json::json!("[redacted]"));
+        assert_eq!(sanitized["seven_day"]["nested"]["refreshToken"], serde_json::json!("[redacted]"));
+        assert_eq!(sanitized["auth"]["authorization"], serde_json::json!("[redacted]"));
+        assert_eq!(sanitized["auth"]["api_key"], serde_json::json!("[redacted]"));
     }
 
     #[test]
