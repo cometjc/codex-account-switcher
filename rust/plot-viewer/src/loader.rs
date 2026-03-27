@@ -497,14 +497,12 @@ fn build_profile_chart_data(
         .map(project_history_points)
         .unwrap_or_default();
     let five_hour_band = build_five_hour_band(weekly_window, five_hour_window);
-    let last_chart_x = seven_day_points.last().map(|point| point.x);
     let five_hour_subframe = build_five_hour_subframe(
         weekly_window,
         five_hour_window,
         weekly_history,
         &history.five_hour_windows,
         &history.weekly_windows,
-        last_chart_x,
     );
 
     Ok(ProfileChartData {
@@ -547,7 +545,6 @@ fn build_five_hour_subframe(
     weekly_history: Option<&UsageWindowHistory>,
     all_five_hour_windows: &[UsageWindowHistory],
     all_weekly_windows: &[UsageWindowHistory],
-    last_chart_x: Option<f64>,
 ) -> OwnedFiveHourSubframeState {
     let Some(weekly_window) = weekly_window else {
         return OwnedFiveHourSubframeState {
@@ -579,17 +576,13 @@ fn build_five_hour_subframe(
     if start_x > end_x {
         std::mem::swap(&mut start_x, &mut end_x);
     }
-    // Align with the 7d curve: the last plotted point uses observation timestamps on the same
-    // weekly axis; API 5h reset_at can trail "now" on that axis, so expand the band to cover it.
-    if let Some(lx) = last_chart_x {
-        let lx = lx.clamp(0.0, 7.0);
-        if lx < start_x {
-            start_x = lx;
-        }
-        if lx > end_x {
-            end_x = lx;
-        }
-    }
+    // Chart x uses the same weekly axis as `project_history_points`:
+    //   point_x = (observed_at - weekly_start) / weekly_duration * 7
+    //   end_x   = (five_hour.reset_at - weekly_start) / weekly_duration * 7
+    // For consistent inputs, last observation should satisfy observed_at <= five_hour.reset_at
+    // (next 5h reset is in the future), so the last point is not to the right of end_x.
+    // If observed_at > reset_at (e.g. stale cached 5h vs newer weekly observations), that is a
+    // data/refresh issue — do not patch here.
 
     let current_7d = weekly_window.used_percent.clamp(0.0, 100.0);
     let five_hour_used = five_hour_window.used_percent.clamp(0.0, 100.0);
@@ -876,23 +869,40 @@ mod tests {
             ],
         };
         let expected_api_end = 540_000f64 / 604_800.0 * 7.0;
-        let subframe_api_only =
-            build_five_hour_subframe(Some(&weekly), Some(&five_hour), Some(&history), &[], &[], None);
-        assert!(subframe_api_only.available);
-        assert!(
-            (subframe_api_only.end_x.unwrap() - expected_api_end).abs() < 1e-9,
-            "without last point, end_x follows 5h reset_at only"
-        );
-
-        let subframe = build_five_hour_subframe(Some(&weekly), Some(&five_hour), Some(&history), &[], &[], Some(7.0));
+        let subframe = build_five_hour_subframe(Some(&weekly), Some(&five_hour), Some(&history), &[], &[]);
         assert!(subframe.available);
+        assert!(
+            (subframe.end_x.unwrap() - expected_api_end).abs() < 1e-9,
+            "end_x follows five_hour.reset_at on the weekly axis"
+        );
+        let last_point_x = project_history_points(&history).last().unwrap().x;
+        assert!(
+            last_point_x > subframe.end_x.unwrap(),
+            "fixture: last obs at week end (x=7) but 5h reset_at earlier — inconsistent (stale 5h vs obs)"
+        );
         assert!(subframe.start_x.unwrap() < subframe.end_x.unwrap());
-        assert_eq!(subframe.end_x, Some(7.0), "band extends to last 7d chart x (now)");
         assert_eq!(subframe.lower_y, Some(45.0));
         assert_eq!(subframe.upper_y, Some(95.0));
 
+        // Consistent API: 5h window ends at or after the last observation time on the same week.
+        let five_hour_aligned = UsageWindow {
+            used_percent: 30.0,
+            limit_window_seconds: 18_000,
+            reset_after_seconds: 1_800,
+            reset_at: 604_800,
+        };
+        let subframe_ok = build_five_hour_subframe(
+            Some(&weekly),
+            Some(&five_hour_aligned),
+            Some(&history),
+            &[],
+            &[],
+        );
+        assert_eq!(subframe_ok.end_x, Some(7.0));
+        assert_eq!(project_history_points(&history).last().unwrap().x, 7.0);
+
         // Without history: fallback to weekly_used - 5h_used = 30, upper = 30 + (30/30)*100 = 130 -> 100
-        let subframe_no_hist = build_five_hour_subframe(Some(&weekly), Some(&five_hour), None, &[], &[], None);
+        let subframe_no_hist = build_five_hour_subframe(Some(&weekly), Some(&five_hour), None, &[], &[]);
         assert_eq!(subframe_no_hist.lower_y, Some(30.0));
         assert_eq!(subframe_no_hist.upper_y, Some(100.0));
     }
