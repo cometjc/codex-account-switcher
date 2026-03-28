@@ -1,6 +1,7 @@
 dist
 node_modules
 .worktrees
+.nlsdd/
 target/
 .claude/
 .github/hooks/
