@@ -2,7 +2,7 @@
 
 - 當使用者指出 shared-baseline 的推送/同步更新流程不是一般開發治理規則時，不要再把它放進 `ai-rules/`；這類帶 trigger/decision/exit 的流程應集中到 shared repo 的對應 `skills/*.md`，並同步移除索引中的舊章節，避免 skill 與 `ai-rules/` 雙重權威來源。
 - 當用 `new-rule` 做 baseline adoption review 且已有 adopted baseline 時，預設用雙 ref 形式比較正式規則面，例如 `git diff adopted/<project> main -- . ':(exclude)skills/*'`；`skills/` 預設排除，只有任務本身明確在改 workflow skill 時才納入。
-- 當使用者要求「使用 nlsdd 完成剩下全部計畫」時，不能只在本地直接做一大塊修改；要先把剩餘 scope 全部寫進 central executor 的 execution / plan / lanes，再沿 lane truth 推進與收斂。
+- 當使用者要求用 **parallel-lane 流程**完成剩下全部計畫時，不能只在本地直接做一大塊修改；要先把剩餘 scope 全部寫進 central executor 的 execution / plan / lanes，再沿 lane truth 推進與收斂（實作見 `parallel-lane-dev` 倉庫）。
 - 當使用者直接指出介面文案或欄位語意要修正時，要同步檢查欄位命名與資訊分工是否清楚，不要把時間與使用量剩餘混在同一欄。
 - 表格式 CLI UI 的欄位名要放在 header，不要把 `Time to reset`、`Usage Left`、`Drift` 這種欄位名稱重複印進每一列資料內容。
 - 當排序邏輯加入可切換模式時，要一起把目前模式顯示在 help 或 status 區，否則使用者很難理解為什麼排名改變。
@@ -14,33 +14,33 @@
 - 當同一個 UI 有 `Delta` / `Quota` 這類語意不同的 mode 時，連 option label 也要跟著 mode-aware；不能只清 prompt panel，卻讓下方選項殘留另一個 mode 的資訊。
 - 驗證會讀 `dist/` 產物的測試不要和 `npm run build` 並行跑，否則容易撞到 clean/build 中間態，得到假的 `MODULE_NOT_FOUND`。
 - 當使用者要求長時間維持多 sub-agent 並行時，不要持續用臨時 refill task 重切地圖；要先固定成不重疊的 lane plan，之後所有 sub-agent 都沿 lane plan 與 lane-local MVC checklist 前進，直到某條 lane 真正耗盡再新增下一條 lane。
-- 當使用者要求「4 active worker with NLSDD」時，不能只數 lane 數量；要確認 executor 內真實正在前進的 workers 數量已達 4，否則只是靜態排程，不是真正的並行。
+- 當使用者要求「4 active worker」搭配 parallel-lane 時，不能只數 lane 數量；要確認 executor 內真實正在前進的 workers 數量已達 4，否則只是靜態排程，不是真正的並行。
 - Lane 4 做 docs/tests/tracking 收口時，若 Lane 2/3/5 還在改共享檔，不要急著把 README 或 Node regression tests 一次寫死；先把可先定義的 tracking truth 寫入 todo/lessons，並保留後續 cherry-pick 空位。
-- 多 lane reviewer 若共享 dirty worktree，極易把其他 lane 或既有 WIP 誤判成當前 task 的 scope violation；NLSDD 下 reviewer 必須只看 lane-item commit diff。
+- 多 lane reviewer 若共享 dirty worktree，極易把其他 lane 或既有 WIP 誤判成當前 task 的 scope violation；parallel-lane 流程下 reviewer 必須只看 lane-item commit diff。
 - implementer 不應順手更新 `tasks/todo.md`、lane checklist 或 roadmap 追蹤檔；這些追蹤更新預設由 coordinator 統一回寫。
 - 若某個 lane 的可見輸出其實依賴另一條 lane 的 boundary，應先把 boundary 擴張切成依賴 lane item，再執行可見輸出 lane，不要在 implementer 執行中臨時擴 scope。
-- NLSDD 執行中若 sub-agent 反覆只回 `IN_PROGRESS`，不要只盯 thread 訊號；要直接檢查 lane worktree 的 `HEAD`、source diff 與 lane-local 驗證，避免漏掉其實已完成但未正常回報的 commit。
+- parallel-lane 執行中若 sub-agent 反覆只回 `IN_PROGRESS`，不要只盯 thread 訊號；要直接檢查 lane worktree 的 `HEAD`、source diff 與 lane-local 驗證，避免漏掉其實已完成但未正常回報的 commit。
 - 做多 lane workflow 噪音治理時，先分清楚是「未忽略的 build outputs」還是「已經被 git 追蹤的 artifacts」；前者靠 `.gitignore`，後者還要做 lane-local 的去追蹤清理，不能只加 ignore 就以為會安靜下來。
 - 當 sub-agent 遇到 workflow 層 blocker（例如 reviewer 被 `target` 噪音干擾）時，不要只回 `BLOCKED`；應一併提出狹義 remediation 建議，讓 coordinator 能更快做 lane hygiene 或 dependency 決策。
-- `spec/NLSDD/` 只放已落地且已驗證的 NLSDD 定義；execution、scoreboard、scripts 與執行流程文件應放在 `NLSDD/`，不要把 runtime artifacts 收進 spec。
-- 會被 refresh / probe / agent activity 持續改寫的 NLSDD runtime 輸出，應放在 `NLSDD/state/` 並加入 ignore；不要讓 auto-refresh 直接覆寫 tracked 的 `NLSDD/scoreboard.md`。
-- 若執行環境在 subagent `git commit` 時會跳 permission prompt，不能把後續沉默直接解讀成 agent 沒反應；NLSDD 應要求 subagent 在 commit 前主動回 `READY_TO_COMMIT`，coordinator probe 也要把 permission gate 納入判讀。
-- NLSDD 下只要 lane-local MVC step 已完成且驗證通過，就應直接 commit；不要把多個已完成 MVC step 累積在同一個未提交 worktree，否則 review、probe 與 refill 邊界都會變模糊。
+- `parallel-lane-dev` 倉庫內 `spec/` 只放已落地且已驗證的定義；execution、scoreboard、scripts 與執行流程文件放在該倉庫的腳本與追蹤目錄（目錄名為歷史遺留），不要把 runtime artifacts 收進 spec。
+- 會被 refresh / probe / agent activity 持續改寫的 runtime 輸出，應放在該倉庫之 ignored state 目錄並 ignore；不要讓 auto-refresh 直接覆寫 tracked 的 scoreboard 正文。
+- 若執行環境在 subagent `git commit` 時會跳 permission prompt，不能把後續沉默直接解讀成 agent 沒反應；parallel-lane 應要求 subagent 在 commit 前主動回 `READY_TO_COMMIT`，coordinator probe 也要把 permission gate 納入判讀。
+- parallel-lane 下只要 lane-local MVC step 已完成且驗證通過，就應直接 commit；不要把多個已完成 MVC step 累積在同一個未提交 worktree，否則 review、probe 與 refill 邊界都會變模糊。
 - 若 subagent 所在環境容易被 `git commit` 權限提示擋住，應把 commit 職責收回 main agent：subagent 只回傳完成的 MVC、驗證結果與 commit-ready 摘要，由 main agent/coordinator 執行 commit。
-- `main agent` 的本地規則自動 commit，不能直接套用到 `NLSDD subagent`。NLSDD 需要把 commit 責任按工作情境切開：main agent 直接 commit；subagent 預設只交 `READY_TO_COMMIT` 給 coordinator。
-- NLSDD tooling 在 linked worktree / recovery branch 中不應直接回退到 git common-dir 對應的 canonical repo root；要先找當前 worktree 自己的 `NLSDD` surface，否則 schedule / refresh / refill 會誤讀別條 branch 的 manual scoreboard 與 execution docs。
-- NLSDD 的 `execution root` 和 `.worktrees/...` 的 `worktree pool root` 可能不是同一個目錄；linked worktree 內應讀自己的 execution docs，但 lane worktree 路徑仍要回到 canonical repo root 解析。
+- `main agent` 的本地規則自動 commit，不能直接套用到 **parallel-lane subagent**。並行 lane 需要把 commit 責任按工作情境切開：main agent 直接 commit；subagent 預設只交 `READY_TO_COMMIT` 給 coordinator。
+- parallel-lane 工具在 linked worktree / recovery branch 中不應直接回退到 git common-dir 對應的 canonical repo root；要先找當前 worktree 自己的 execution surface，否則 schedule / refresh / refill 會誤讀別條 branch 的 manual scoreboard 與 execution docs（細節見 `parallel-lane-dev` 腳本）。
+- parallel-lane 的 `execution root` 和 `.worktrees/...` 的 `worktree pool root` 可能不是同一個目錄；linked worktree 內應讀自己的 execution docs，但 lane worktree 路徑仍要回到 canonical repo root 解析。
 - 當 manual scoreboard 或 lane plan 重新定義下一輪 active set 時，不能只改 tracked 文件；若 lane journal 還留著舊 dispatch 狀態，`schedule/refill` 仍會被 runtime state 拉回舊真相，所以要在下一輪 dispatch 前同步 refresh 或重寫 lane journal。
-- NLSDD 下若 active/parked lane set 需要重排，應優先用原子 helper 同步 tracked scoreboard phase 與 lane journal；不要分兩步人工更新，否則 scheduler 會在中間窗口讀到雙真相。
-- NLSDD 的目標不是維持表面上的 4-active，而是維持真實的並行前進；若 execution 已收束成單一 critical lane，導致 2-3 個 slot 只是在等它，就應立即 replan，切新 lane 或並行推進其他 plans/executions。
-- execution-insights journal 若只有 append 沒有 read/use path，很快就會變成埋在 runtime state 裡的黑洞；只要工作處於或剛結束 NLSDD 階段且進入 `review`，就應同步檢視 open / adopted insights 並規劃是否升級成 lane item、lesson 或 resolved/rejected 狀態。
+- parallel-lane 下若 active/parked lane set 需要重排，應優先用原子 helper 同步 tracked scoreboard phase 與 lane journal；不要分兩步人工更新，否則 scheduler 會在中間窗口讀到雙真相。
+- parallel-lane 的目標不是維持表面上的 4-active，而是維持真實的並行前進；若 execution 已收束成單一 critical lane，導致 2-3 個 slot 只是在等它，就應立即 replan，切新 lane 或並行推進其他 plans/executions。
+- execution-insights journal 若只有 append 沒有 read/use path，很快就會變成埋在 runtime state 裡的黑洞；只要工作處於或剛結束 parallel-lane 階段且進入 `review`，就應同步檢視 open / adopted insights 並規劃是否升級成 lane item、lesson 或 resolved/rejected 狀態。
 - execution-insights 裡的 adopted global learnings 一旦已 graduate 到 tracked spec / lessons，就應立即在 runtime journal 補寫 resolved event；不要讓 durable learning 長期停在 runtime actionable surface。
-- 若使用者反覆用同一句話要求啟動既定 NLSDD 流程，應把它收斂成明確的 magic word 並寫進 `AGENTS.md`，讓後續能用固定口令直接啟動同一套 lane reuse workflow。
+- 若使用者反覆用同一句話要求啟動既定 parallel-lane 流程，應把它收斂成明確的 magic word 並寫進 `AGENTS.md` / `parallel-lane-dev` 技能，讓後續能用固定口令直接啟動同一套 lane reuse workflow。
 - 若使用者已經用 `proceed` 明確授權 main agent 持續收斂本地 integration flow，commit 成功後不要機械式停在「下一步要不要我幫你推」；若下一步只有單一、低風險、可逆的 finishing 動作，就應直接自動接續。
 - 同一種狀態只能有單一權威來源；其餘文件若需要呈現同類資訊，必須明確是 projection/derived view，且所有更新都要走同一個 sync 介面，不能混用手改與 script 回寫。
 - 當 workflow 已經擴張到 plan、lane、review、result branch 與多份 markdown/state surface 彼此互相引用時，不要再靠「多份文件同步」維持一致性；應收斂成中央執行器與單一資料庫，並強制所有交換只走同一個 executor 介面。
-- `nlsdd-go` 不是只做一次 truth scan；它語意上包含「補齊 truth 後繼續推進」。除非遇到需要使用者選路的分岔，否則不該停在 active lanes 已存在但尚未繼續執行的中間態。
-- `nlsdd-go` 的終點不能只看當前 execution 是否 no-op；要看相關 plan 是否真的跑完。若 execution 沒 lane 可跑但 plan 還有未完成項，應繼續 replan / reopen truthful work，而不是把「execution 暫時空了」誤報成整輪完成。
+- **平行 lane 持續推進口令**（見 `parallel-lane-dev` 技能）不是只做一次 truth scan；語意上包含「補齊 truth 後繼續推進」。除非遇到需要使用者選路的分岔，否則不該停在 active lanes 已存在但尚未繼續執行的中間態。
+- 該口令的終點不能只看當前 execution 是否 no-op；要看相關 plan 是否真的跑完。若 execution 沒 lane 可跑但 plan 還有未完成項，應繼續 replan / reopen truthful work，而不是把「execution 暫時空了」誤報成整輪完成。
 - 當使用者糾正回覆語言時，要立刻切換到指定語言，並把這個偏好上升成明確本地規則寫進 `AGENTS.md`，避免後續回覆再漂回預設語言。
-- 當使用者明確點名某條 NLSDD lane 要「繼續推進」並要求在指定 worktree 內工作時，main agent 應只在那個 worktree 收斂、驗證與提交，不要把變更回寫到主線工作樹。
+- 當使用者明確點名某條 lane 要「繼續推進」並要求在指定 worktree 內工作時，main agent 應只在那個 worktree 收斂、驗證與提交，不要把變更回寫到主線工作樹。
 - 遇到 auth/refresh 類問題時，不能因為文件寫有 auto-refresh 就假設現有 snapshot 一定能被自動救回；必須先實跑 refresh endpoint，分清楚是 access token 過期，還是 refresh token 本身已失效/重用，再決定是修 code path 還是要求重新登入/reseed。

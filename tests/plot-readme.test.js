@@ -43,6 +43,6 @@ test('README reflects the Rust-first agent-switch runtime and thin npm shim', ()
     plotSection,
     /thin shim.*single Rust `agent-switch` binary entrypoint/i,
   );
-  assert.match(readme, /Node\.js 18 or newer for repo automation and NLSDD scripts/);
+  assert.match(readme, /Node\.js 18 or newer for repo contract tests/);
   assert.doesNotMatch(plotSection, /@oclif\/core|dist\/index\.js|legacy development helpers|plot:viewer:\*/);
 });

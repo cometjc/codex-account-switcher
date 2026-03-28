@@ -12,7 +12,7 @@ Codex stores your authentication session in a single `auth.json` file. This tool
 ## Requirements
 
 - Rust toolchain with Cargo
-- Node.js 18 or newer for repo automation and NLSDD scripts
+- Node.js 18 or newer for repo contract tests (`node --test`) and npm metadata
 
 ## Rust TUI
 
@@ -81,4 +81,4 @@ Notes:
 
 - If Claude usage returns HTTP `429` or `401`, `agent-switch` does **not** retry with the same access token. It refreshes the current Claude OAuth credentials in `~/.claude/.credentials.json`, then makes one follow-up usage request with the rotated token.
 - Works on macOS/Linux with symlink switching and on Windows with file copy switching.
-- Node remains in the repo for executor automation and NLSDD tooling, not as the primary auth runtime.
+- Node remains in the repo for contract tests and npm metadata, not as the primary auth runtime. Parallel-lane executor tooling lives in the **`parallel-lane-dev`** repository.

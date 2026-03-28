@@ -24,10 +24,7 @@
 - Offload research, exploration, and parallel analysis to subagents
 - For complex problems, throw more compute at it via subagents
 - One task per subagent for focused execution
-- 若使用者輸入 `nlsdd-go`，將其視為固定口令：透過中央 executor 持續推進所有 plans，直到 executor 內的相關 plan 都完成。
-- `nlsdd-go` 的正式入口是 repo-local executor（`.nlsdd/executor.sqlite` + `node NLSDD/scripts/nlsdd-executor.cjs`），不是手動掃描 `plan/`、scoreboard markdown 或 lane journal。
-- `plan/` 不應保留 live plan；主控端在 `nlsdd-go` 前應先確認 `plan/` 已清空，必要時先用 executor import/cleanup。
-- subagent 與主控端之間只允許透過 executor + worktree/result branch 交換狀態；不要再把自由文字、lane markdown、scoreboard row 當成正式交換介面。
+- **多 subagent / parallel-lane 執行**（含固定口令、executor、lane worktree；口令名稱見 `parallel-lane-dev` 技能）已遷到獨立倉庫 **`parallel-lane-dev`**（本機預設 `~/repo/parallel-lane-dev`）。規則與腳本見該 repo 之 **`plugins/parallel-lane-dev/skills/parallel-lane-dev/SKILL.md`** 與其根目錄腳本目錄。**本 repo 不再內嵌該執行器。**
 
 ---
 
@@ -37,7 +34,7 @@
 - Ruthlessly iterate on these lessons until mistake rate drops
 - Review lessons at session start for relevant project
 - 若此次請求本身是規則新增或規則修正，且正式規則文件已更新並完成驗證，main agent 應預設直接 commit；不要停在「這批還沒 commit」等待額外提醒
-- 這條自動 commit 規則適用於 main agent 的本地治理變更，不自動授權 NLSDD subagent 在 lane worktree 內自行 `git commit`
+- 這條自動 commit 規則適用於 main agent 的本地治理變更，不自動授權平行 lane subagent 在 lane worktree 內自行 `git commit`（見 `parallel-lane-dev` 倉庫規則）
 - 若 main agent 已處於使用者明確授權的 `proceed` 收斂流程中，且本地 commit 成功後下一步只有單一、低風險、可逆的 finishing 動作，應預設自動接續，不要再多停一次等待額外 `proceed`
 - 上一條只適用於沒有分支策略歧義的情況；例如已在 `main` 且唯一自然下一步是 `git push origin main`，可以直接做。若仍存在 merge / PR / push / release 等多條路徑，就必須先停下來對齊
 
@@ -102,7 +99,7 @@
 - `Cargo.toml`, `Cargo.lock`, `build.rs`, `build-number`: Rust build and embedded version metadata.
 - `bin/agent-switch.cjs`: npm-published shim; runs a built `target/*/agent-switch` if present, otherwise `cargo run --bin agent-switch`.
 - `scripts/link-dev-bin.cjs`, `scripts/unlink-dev-bin.cjs`: optional dev symlink into global npm `bin`.
-- `NLSDD/scripts/**`: NLSDD automation (Node, CommonJS).
+- 並行 lane / executor 自動化已移至 **`parallel-lane-dev`** 倉庫（本機 `~/repo/parallel-lane-dev`），不再列於本 tree。
 - `tests/*.test.js`: `node:test` contract tests (no npm `dependencies` / `devDependencies` for the product).
 - `package.json`: npm metadata and `files` publish whitelist; legacy TypeScript CLI and `node_modules` product deps are removed.
 
@@ -110,12 +107,12 @@
 - **Rust**: `cargo test` (preferred to validate changes; see `CLAUDE.md` build rule).
 - **npm**: `npm run build` → `cargo build --bin agent-switch` (also `prepublishOnly`).
 - **npm install / ci**: lockfile has no transitive deps; installs are effectively no-ops aside from npm metadata.
-- **NLSDD**: `npm run nlsdd:*` or `node NLSDD/scripts/...`.
+- **parallel-lane-dev**：在該倉庫根目錄使用其 `package.json` 內之 npm scripts，或依該倉庫 README 呼叫 Node 腳本。
 - **Node tests**: `node --test tests/entrypoints.test.js` (and other `tests/*.test.js` as needed).
 
 ## Coding Style & Naming Conventions
 - **Rust**: follow existing modules and patterns in `src/`.
-- **Node (NLSDD, tests)**: CommonJS; 2-space indent; prefer built-in `node:*` modules.
+- **Node (contract tests)**: CommonJS; 2-space indent; prefer built-in `node:*` modules.
 
 ## Testing Guidelines
 - Rust: `cargo test`.
