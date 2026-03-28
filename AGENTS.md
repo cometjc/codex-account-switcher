@@ -24,7 +24,7 @@
 - Offload research, exploration, and parallel analysis to subagents
 - For complex problems, throw more compute at it via subagents
 - One task per subagent for focused execution
-- **多 subagent / parallel-lane 執行**（含固定口令、executor、lane worktree；口令名稱見 `parallel-lane-dev` 技能）已遷到獨立倉庫 **`parallel-lane-dev`**（本機預設 `~/repo/parallel-lane-dev`）。規則與腳本見該 repo 之 **`plugins/parallel-lane-dev/skills/parallel-lane-dev/SKILL.md`** 與其根目錄腳本目錄。**本 repo 不再內嵌該執行器。**
+- **多 subagent / parallel-lane（PLD）**：本 repo 使用 **`plugins/parallel-lane-dev/`**（`scripts` / `skills` 預設 symlink 至同層 **`agent-plugins`** 內套件；安裝見 **`scripts/install-pld-plugin.sh`** 與該目錄 `README.md`）。真相來源：**`.pld/executor.sqlite`**。口令 **pld-go** → **`npm run pld:executor:go`**。技能：**`plugins/parallel-lane-dev/skills/parallel-lane-dev/SKILL.md`**。**
 
 ---
 
@@ -99,7 +99,7 @@
 - `Cargo.toml`, `Cargo.lock`, `build.rs`, `build-number`: Rust build and embedded version metadata.
 - `bin/agent-switch.cjs`: npm-published shim; runs a built `target/*/agent-switch` if present, otherwise `cargo run --bin agent-switch`.
 - `scripts/link-dev-bin.cjs`, `scripts/unlink-dev-bin.cjs`: optional dev symlink into global npm `bin`.
-- 並行 lane / executor 自動化已移至 **`parallel-lane-dev`** 倉庫（本機 `~/repo/parallel-lane-dev`），不再列於本 tree。
+- **`plugins/parallel-lane-dev/`**：PLD scoreboard / executions（專案專用）；`scripts` 為上游 **`parallel-lane-dev`** 腳本目錄的 symlink（見該目錄 `README.md`）。
 - `tests/*.test.js`: `node:test` contract tests (no npm `dependencies` / `devDependencies` for the product).
 - `package.json`: npm metadata and `files` publish whitelist; legacy TypeScript CLI and `node_modules` product deps are removed.
 
@@ -107,7 +107,7 @@
 - **Rust**: `cargo test` (preferred to validate changes; see `CLAUDE.md` build rule).
 - **npm**: `npm run build` → `cargo build --bin agent-switch` (also `prepublishOnly`).
 - **npm install / ci**: lockfile has no transitive deps; installs are effectively no-ops aside from npm metadata.
-- **parallel-lane-dev**：在該倉庫根目錄使用其 `package.json` 內之 npm scripts，或依該倉庫 README 呼叫 Node 腳本。
+- **PLD**：`npm run pld:executor:audit`、`npm run pld:executor:go` 等（完整列表見根 `package.json` 的 `pld:*`）；需本機 **`sqlite3`** CLI。
 - **Node tests**: `node --test tests/entrypoints.test.js` (and other `tests/*.test.js` as needed).
 
 ## Coding Style & Naming Conventions

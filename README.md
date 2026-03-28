@@ -81,4 +81,8 @@ Notes:
 
 - If Claude usage returns HTTP `429` or `401`, `agent-switch` does **not** retry with the same access token. It refreshes the current Claude OAuth credentials in `~/.claude/.credentials.json`, then makes one follow-up usage request with the rotated token.
 - Works on macOS/Linux with symlink switching and on Windows with file copy switching.
-- Node remains in the repo for contract tests and npm metadata, not as the primary auth runtime. Parallel-lane executor tooling lives in the **`parallel-lane-dev`** repository.
+- Node remains in the repo for contract tests and npm metadata, not as the primary auth runtime. **PLD** (parallel-lane) tooling is wired under [`plugins/parallel-lane-dev/`](plugins/parallel-lane-dev/) (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+
+## Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for build, test, Clippy, and `cargo-audit`. Exit codes and optional Claude usage debug: [docs/cli.md](docs/cli.md).
