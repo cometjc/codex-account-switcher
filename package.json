@@ -7,7 +7,7 @@
     "agent-switch": "bin/agent-switch.cjs"
   },
   "scripts": {
-    "build": "cargo build --manifest-path rust/plot-viewer/Cargo.toml --bin agent-switch",
+    "build": "cargo build --bin agent-switch",
     "link:dev": "node scripts/link-dev-bin.cjs",
     "unlink:dev": "node scripts/unlink-dev-bin.cjs",
     "nlsdd:scoreboard:refresh": "node NLSDD/scripts/nlsdd-refresh-scoreboard.cjs",
@@ -41,9 +41,9 @@
   },
   "files": [
     "bin",
-    "rust/plot-viewer/Cargo.toml",
-    "rust/plot-viewer/Cargo.lock",
-    "rust/plot-viewer/src",
+    "Cargo.toml",
+    "Cargo.lock",
+    "src",
     "README.md",
     "LICENSE"
   ],

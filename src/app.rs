@@ -1,4 +1,6 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -58,6 +60,10 @@ enum DialogMode {
     SaveCurrent(ProfileKind),
     RenameSaved(String),
     ConfirmDelete(String),
+    /// Name for `cursor-profiles/<name>.json` under the agent-switch config dir before ingest server starts.
+    AddCursorProfile,
+    /// Waiting for POST /ingest from Windows `cursor-export` over Tailscale.
+    CursorIngestWaiting { profile_name: String, port: u16 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,6 +107,16 @@ impl DialogState {
     }
 }
 
+#[derive(Debug)]
+struct CursorIngestSession {
+    profile_name: String,
+    #[allow(dead_code)]
+    port: u16,
+    stop: Arc<AtomicBool>,
+    join: Option<std::thread::JoinHandle<()>>,
+    rx: Receiver<Result<usize, String>>,
+}
+
 pub struct App {
     profiles: Vec<ProfileEntry>,
     selected_profile_index: usize,
@@ -130,6 +146,7 @@ pub struct App {
     hidden_profiles: std::collections::HashSet<String>,
     background_refresh_state: BackgroundRefreshState,
     background_refresh_receiver: Option<Receiver<BackgroundRefreshReport>>,
+    cursor_ingest: Option<CursorIngestSession>,
 }
 
 #[derive(Debug)]
@@ -201,6 +218,7 @@ impl App {
             hidden_profiles,
             background_refresh_state: BackgroundRefreshState::Idle,
             background_refresh_receiver: None,
+            cursor_ingest: None,
         };
         app.ensure_background_refresh_task();
         Ok(app)
@@ -256,6 +274,7 @@ impl App {
             hidden_profiles: std::collections::HashSet::new(),
             background_refresh_state: BackgroundRefreshState::Idle,
             background_refresh_receiver: None,
+            cursor_ingest: None,
         }
     }
 
@@ -274,11 +293,21 @@ impl App {
             terminal.run(self)?;
         } // terminal restored here via Drop
         if self.should_exec && !self.binary_path.is_empty() {
-            use std::os::unix::process::CommandExt;
             let args: Vec<String> = std::env::args().collect();
-            let _ = std::process::Command::new(&self.binary_path)
-                .args(&args[1..])
-                .exec();
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                let _ = std::process::Command::new(&self.binary_path)
+                    .args(&args[1..])
+                    .exec();
+            }
+            #[cfg(windows)]
+            {
+                let _ = std::process::Command::new(&self.binary_path)
+                    .args(&args[1..])
+                    .spawn();
+                std::process::exit(0);
+            }
         }
         Ok(())
     }
@@ -286,6 +315,7 @@ impl App {
     fn run_loop(&mut self, terminal: &mut ratatui::DefaultTerminal) -> Result<()> {
         while !self.should_quit && !self.should_exec {
             self.poll_background_refresh();
+            self.poll_cursor_ingest();
             terminal.draw(|frame| self.render(frame))?;
 
             if event::poll(Duration::from_millis(150))? {
@@ -468,6 +498,11 @@ impl App {
                     }
                 }
             }
+            InputAction::AddCursorProfile => {
+                if self.pane_focus == PaneFocus::Accounts {
+                    self.open_add_cursor_profile_dialog();
+                }
+            }
             InputAction::Character(' ') => {
                 self.toggle_selected_profile_hidden();
             }
@@ -482,10 +517,70 @@ impl App {
     }
 
     fn input_context(&self) -> InputContext {
-        if self.dialog.is_some() || self.filter_input.is_some() {
-            InputContext::TextEntry
-        } else {
-            InputContext::Normal
+        if self.filter_input.is_some() {
+            return InputContext::TextEntry;
+        }
+        if let Some(d) = &self.dialog {
+            if matches!(d.mode, DialogMode::CursorIngestWaiting { .. }) {
+                return InputContext::CursorIngest;
+            }
+            return InputContext::TextEntry;
+        }
+        InputContext::Normal
+    }
+
+    fn open_add_cursor_profile_dialog(&mut self) {
+        self.dialog = Some(DialogState {
+            mode: DialogMode::AddCursorProfile,
+            input: String::new(),
+            cursor: 0,
+        });
+    }
+
+    fn parse_port_from_bind(bind: &str) -> u16 {
+        bind.rsplit(':')
+            .next()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(9847)
+    }
+
+    fn stop_cursor_ingest(&mut self) {
+        if let Some(mut s) = self.cursor_ingest.take() {
+            s.stop.store(true, Ordering::SeqCst);
+            if let Some(j) = s.join.take() {
+                let _ = j.join();
+            }
+        }
+    }
+
+    fn poll_cursor_ingest(&mut self) {
+        let Some(session) = &self.cursor_ingest else {
+            return;
+        };
+        match session.rx.try_recv() {
+            Ok(Ok(bytes)) => {
+                let label = session.profile_name.clone();
+                if let Some(s) = self.cursor_ingest.take() {
+                    if let Some(j) = s.join {
+                        let _ = j.join();
+                    }
+                }
+                self.dialog = None;
+                self.status_message = Some(format!(
+                    "Saved Cursor profile \"{label}\" storageState ({bytes} bytes)."
+                ));
+            }
+            Ok(Err(e)) => {
+                if let Some(s) = self.cursor_ingest.take() {
+                    if let Some(j) = s.join {
+                        let _ = j.join();
+                    }
+                }
+                self.dialog = None;
+                self.status_message = Some(format!("Cursor ingest failed: {e}"));
+            }
+            Err(TryRecvError::Empty) => {}
+            Err(TryRecvError::Disconnected) => {}
         }
     }
 
@@ -605,6 +700,18 @@ impl App {
     }
 
     fn handle_dialog_action(&mut self, action: InputAction) -> Result<()> {
+        if let Some(d) = &self.dialog {
+            if matches!(d.mode, DialogMode::CursorIngestWaiting { .. }) {
+                match action {
+                    InputAction::Quit | InputAction::Cancel => {
+                        self.stop_cursor_ingest();
+                        self.dialog = None;
+                    }
+                    _ => {}
+                }
+                return Ok(());
+            }
+        }
         match action {
             InputAction::Quit | InputAction::Cancel => {
                 self.dialog = None;
@@ -698,6 +805,51 @@ impl App {
                 self.dialog = None;
                 let _ = self.reload_profiles(false, None)?;
             }
+            DialogMode::AddCursorProfile => {
+                let raw = dialog.input.trim();
+                if raw.is_empty() {
+                    return Ok(());
+                }
+                let name = crate::cursor_ingest::sanitize_cursor_profile_name(raw);
+                let Some(store) = self.store.as_ref() else {
+                    self.dialog = None;
+                    return Ok(());
+                };
+                let path = store.paths().cursor_storage_state_path(&name);
+                let bind = crate::cursor_ingest::cursor_ingest_bind_addr();
+                let token = crate::cursor_ingest::cursor_ingest_token();
+                let stop = Arc::new(AtomicBool::new(false));
+                let stop_clone = Arc::clone(&stop);
+                let (tx, rx) = mpsc::channel();
+                let join = match crate::cursor_ingest::spawn_cursor_ingest_server(
+                    &bind,
+                    path,
+                    token,
+                    tx,
+                    stop_clone,
+                ) {
+                    Ok(j) => j,
+                    Err(e) => {
+                        self.status_message = Some(format!("ingest server: {e:#}"));
+                        self.dialog = None;
+                        return Ok(());
+                    }
+                };
+                let port = Self::parse_port_from_bind(&bind);
+                self.cursor_ingest = Some(CursorIngestSession {
+                    profile_name: name.clone(),
+                    port,
+                    stop,
+                    join: Some(join),
+                    rx,
+                });
+                self.dialog = Some(DialogState {
+                    mode: DialogMode::CursorIngestWaiting { profile_name: name, port },
+                    input: String::new(),
+                    cursor: 0,
+                });
+            }
+            DialogMode::CursorIngestWaiting { .. } => {}
             DialogMode::ConfirmDelete(target_name) => {
                 if dialog.input.trim().eq_ignore_ascii_case("y")
                     || dialog.input.trim().eq_ignore_ascii_case("yes")
@@ -1029,7 +1181,7 @@ impl App {
         } else {
             match self.pane_focus {
                 PaneFocus::Accounts => vec![
-                    Line::from("Enter=switch/save · r=rename · d=delete · u=refresh · a=all · q=quit"),
+                    Line::from("Enter=switch/save · o=Cursor profile · r=rename · d=delete · u=refresh · a=all · q=quit"),
                     Line::from(format!(
                         "Tab=hide · p=profiles · ↑↓=navigate · /=filter{}",
                         if self.filter_input.is_some() { " (Esc=clear)" } else { "" }
@@ -1147,14 +1299,47 @@ impl App {
         let Some(dialog) = self.dialog.as_ref() else {
             return;
         };
+        if let DialogMode::CursorIngestWaiting { profile_name, port } = &dialog.mode {
+            let area = popup_area(frame.area(), 78, 24);
+            frame.render_widget(Clear, area);
+            let text = Text::from(vec![
+                Line::from(format!("Saving as: {profile_name}.json")),
+                Line::from(""),
+                Line::from(format!(
+                    "POST Playwright storageState JSON to http://<this-host>:{port}/ingest"
+                )),
+                Line::from("(GET /health). Only source IP 100.* (Tailscale) is accepted."),
+                Line::from(""),
+                Line::from(format!(
+                    "On Windows: cursor-export --url http://<linux-tailscale-ip>:{port}/ingest"
+                )),
+                Line::from(""),
+                Line::from("Esc = cancel"),
+            ]);
+            let widget = Paragraph::new(text)
+                .block(
+                    Block::default()
+                        .title("Cursor profile ingest")
+                        .borders(Borders::ALL),
+                )
+                .wrap(Wrap { trim: true });
+            frame.render_widget(widget, area);
+            return;
+        }
         let title = match &dialog.mode {
             DialogMode::SaveCurrent(_) => "Save current profile",
             DialogMode::RenameSaved(_) => "Rename saved profile",
             DialogMode::ConfirmDelete(_) => "Delete saved profile",
+            DialogMode::AddCursorProfile => "New Cursor profile",
+            DialogMode::CursorIngestWaiting { .. } => "Cursor profile ingest",
         };
         let prompt = match &dialog.mode {
             DialogMode::SaveCurrent(_) => "Enter a name for the current auth snapshot.",
             DialogMode::RenameSaved(_) => "Enter the new saved profile name.",
+            DialogMode::AddCursorProfile => {
+                "Enter a label for this Cursor Chrome storageState (agent-switch config dir / cursor-profiles/)."
+            }
+            DialogMode::CursorIngestWaiting { .. } => "",
             DialogMode::ConfirmDelete(target) => {
                 if dialog.input.is_empty() {
                     return self.render_confirm_prompt(frame, title, &format!("Delete \"{target}\"? Type y to confirm."));

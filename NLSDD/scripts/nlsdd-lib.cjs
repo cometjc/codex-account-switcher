@@ -548,7 +548,7 @@ function classifyNoise(statusOutput) {
   const entries = lines.map((line) => {
     const status = line.slice(0, 2);
     const filePath = line.slice(3);
-    const isArtifact = filePath.startsWith('rust/plot-viewer/target/');
+    const isArtifact = filePath.startsWith('target/');
     const isUntracked = status === '??';
     return {status, filePath, isArtifact, isUntracked};
   });
@@ -573,7 +573,7 @@ function splitStatusEntries(statusOutput) {
 
   for (const line of lines) {
     const filePath = line.slice(3);
-    if (filePath.startsWith('rust/plot-viewer/target/')) {
+    if (filePath.startsWith('target/')) {
       artifactPaths.push(filePath);
     } else {
       sourcePaths.push(filePath);

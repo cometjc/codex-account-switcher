@@ -83,7 +83,7 @@ Use this file to keep NLSDD execution predictable, low-conflict, and easy to rev
   - `untracked-artifact-noise`
   - `tracked-artifact-noise`
   - `mixed`
-- Build outputs such as `rust/plot-viewer/target/` are artifacts, not lane-item scope.
+- Build outputs such as `target/` are artifacts, not lane-item scope.
 - Reviewers ignore artifact-noise paths and evaluate only source changes in the lane-item diff.
 - If tracked artifact noise appears, coordinator should schedule a lane hygiene cleanup rather than letting it accumulate.
 

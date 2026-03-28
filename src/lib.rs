@@ -2,6 +2,7 @@ pub mod app;
 pub mod app_data;
 pub mod claude;
 pub mod copilot;
+pub mod cursor_ingest;
 pub mod cron;
 pub mod input;
 pub mod loader;

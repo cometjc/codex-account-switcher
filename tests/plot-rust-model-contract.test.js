@@ -8,7 +8,7 @@ function readText(relativePath) {
 }
 
 test('Rust plot snapshot model keeps the embedded loader contract stable', () => {
-  const rustModel = readText('rust/plot-viewer/src/model.rs');
+  const rustModel = readText('src/model.rs');
 
   assert.match(rustModel, /#[\[]serde\(rename = "schemaVersion"\)\]/);
   assert.match(rustModel, /#[\[]serde\(rename = "generatedAt"\)\]/);

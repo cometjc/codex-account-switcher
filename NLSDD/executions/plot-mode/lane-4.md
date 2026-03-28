@@ -1,13 +1,13 @@
 # Lane 4 Plan - Rust Panels and Recommendation Surface
 
 > Ownership family:
-> `rust/plot-viewer/src/render/panels.rs` and panel-specific regression tests added later under `tests/`
+> `src/render/panels.rs` and panel-specific regression tests added later under `tests/`
 >
 > NLSDD worktree: `.worktrees/lane-4-panels`
 >
 > Lane-local verification:
 > `node --test tests/plot-readme.test.js`
-> `cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path rust/plot-viewer/Cargo.toml`
+> `cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path Cargo.toml`
 
 ## M - Model / Panel Mapping
 

@@ -3,6 +3,7 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputAction {
     Quit,
+    AddCursorProfile,
     Up,
     Down,
     Left,
@@ -34,6 +35,8 @@ pub enum InputAction {
 pub enum InputContext {
     Normal,
     TextEntry,
+    /// Waiting for Cursor storage POST; only Esc / q quit.
+    CursorIngest,
 }
 
 pub fn map_event(event: &Event, context: InputContext) -> Option<InputAction> {
@@ -53,6 +56,14 @@ pub fn map_event(event: &Event, context: InputContext) -> Option<InputAction> {
 
     if modifiers.contains(KeyModifiers::CONTROL) && matches!(code, KeyCode::Char('c')) {
         return Some(InputAction::Quit);
+    }
+
+    if matches!(context, InputContext::CursorIngest) {
+        return match code {
+            KeyCode::Esc => Some(InputAction::Cancel),
+            KeyCode::Char('q') => Some(InputAction::Quit),
+            _ => None,
+        };
     }
 
     if matches!(context, InputContext::TextEntry) {
@@ -98,6 +109,7 @@ pub fn map_event(event: &Event, context: InputContext) -> Option<InputAction> {
         KeyCode::Char('a') => Some(InputAction::RefreshAll),
         KeyCode::Char('r') => Some(InputAction::Rename),
         KeyCode::Delete | KeyCode::Char('d') => Some(InputAction::Delete),
+        KeyCode::Char('o') => Some(InputAction::AddCursorProfile),
         KeyCode::Char(ch) => Some(InputAction::Character(*ch)),
         _ => None,
     }

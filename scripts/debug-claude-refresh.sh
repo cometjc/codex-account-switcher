@@ -21,7 +21,7 @@ before_history_mtime="$(stat -c %Y "${history_path}" 2>/dev/null || echo missing
 
 echo "Running Claude live refresh via agent-switch (debug payload summaries enabled)..."
 set +e
-AGENT_SWITCH_DEBUG_CLAUDE_USAGE=1 cargo run --quiet --manifest-path "${repo_root}/rust/plot-viewer/Cargo.toml" --bin agent-switch -- --refresh-all 2>&1 | tee "${log_path}"
+AGENT_SWITCH_DEBUG_CLAUDE_USAGE=1 cargo run --quiet --manifest-path "${repo_root}/Cargo.toml" --bin agent-switch -- --refresh-all 2>&1 | tee "${log_path}"
 refresh_status=${PIPESTATUS[0]}
 set -e
 
@@ -90,7 +90,7 @@ PY
 cat <<'EOF'
 
 Next manual TUI smoke check:
-  1. cargo run --manifest-path rust/plot-viewer/Cargo.toml --bin agent-switch
+  1. cargo run --manifest-path Cargo.toml --bin agent-switch
   2. Confirm a Claude profile appears with the [cl] tag.
   3. Press `u` or `a` if needed, then verify the Details pane shows Claude metadata.
   4. Press `Tab` to move to the plot pane and confirm weekly / 5h chart data is visible when history exists.

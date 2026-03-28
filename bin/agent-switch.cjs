@@ -5,10 +5,10 @@ const path = require('node:path');
 const {spawnSync} = require('node:child_process');
 
 const repoRoot = path.resolve(__dirname, '..');
-const manifestPath = path.join(repoRoot, 'rust', 'plot-viewer', 'Cargo.toml');
+const manifestPath = path.join(repoRoot, 'Cargo.toml');
 const binaryCandidates = [
-  path.join(repoRoot, 'rust', 'plot-viewer', 'target', 'release', 'agent-switch'),
-  path.join(repoRoot, 'rust', 'plot-viewer', 'target', 'debug', 'agent-switch'),
+  path.join(repoRoot, 'target', 'release', 'agent-switch'),
+  path.join(repoRoot, 'target', 'debug', 'agent-switch'),
 ];
 const argv = process.argv.slice(2);
 

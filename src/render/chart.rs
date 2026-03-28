@@ -45,8 +45,9 @@ pub fn render_chart<State: RenderState>(frame: &mut Frame, context: &RenderConte
         return;
     }
 
+    // Reserve the hint row first so it never collapses to 0 when vertical space is tight.
     let [chart_area, band_area] =
-        Layout::vertical([Constraint::Min(6), Constraint::Length(1)]).areas(inner);
+        Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(inner);
 
     render_usage_chart(frame, chart_area, &chart_state);
 
@@ -212,12 +213,35 @@ fn apply_band_backgrounds(
     x_bounds: [f64; 2],
     y_bounds: [f64; 2],
 ) -> HashSet<(u16, u16)> {
+    let y_span = y_bounds[1] - y_bounds[0];
+    let denom = graph_area.height.saturating_sub(1).max(1) as f64;
+    let min_band_dy = if y_span.abs() < f64::EPSILON {
+        1.0
+    } else {
+        y_span / denom
+    };
+
     let mut blocked = HashSet::new();
-    for (color_slot, start_x, end_x, lower_y, upper_y) in band_rects {
-        let (left, right) = project_band_x_bounds(*start_x, *end_x, graph_area, x_bounds);
-        let top = project_y(*upper_y, graph_area, y_bounds);
-        let bottom = project_y(*lower_y, graph_area, y_bounds);
-        let bg = band_background_color(*color_slot);
+    for &(color_slot, start_x, end_x, y_min, y_max) in band_rects {
+        let (mut y_lo, mut y_hi) = (y_min.min(y_max), y_min.max(y_max));
+        if y_hi - y_lo < min_band_dy {
+            let mid = (y_lo + y_hi) / 2.0;
+            y_lo = mid - min_band_dy / 2.0;
+            y_hi = mid + min_band_dy / 2.0;
+            y_lo = y_lo.clamp(y_bounds[0], y_bounds[1]);
+            y_hi = y_hi.clamp(y_bounds[0], y_bounds[1]);
+            if y_hi - y_lo < min_band_dy {
+                y_hi = (y_lo + min_band_dy).min(y_bounds[1]);
+                if y_hi - y_lo < min_band_dy {
+                    y_lo = (y_hi - min_band_dy).max(y_bounds[0]);
+                }
+            }
+        }
+
+        let (left, right) = project_band_x_bounds(start_x, end_x, graph_area, x_bounds);
+        let top = project_y(y_hi, graph_area, y_bounds);
+        let bottom = project_y(y_lo, graph_area, y_bounds);
+        let bg = band_background_color(color_slot);
         for y in top.min(bottom)..=top.max(bottom) {
             for x in left.min(right)..=left.max(right) {
                 let cell = &mut frame.buffer_mut()[(x, y)];

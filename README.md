@@ -25,7 +25,7 @@ Codex stores your authentication session in a single `auth.json` file. This tool
 ## Build
 
 ```sh
-cargo build --manifest-path rust/plot-viewer/Cargo.toml --bin agent-switch
+cargo build --bin agent-switch
 ```
 
 ## Install (npm)

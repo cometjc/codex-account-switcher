@@ -62,6 +62,37 @@ impl AppPaths {
     pub fn cron_status_path(&self) -> &Path {
         &self.cron_status_path
     }
+
+    /// Playwright `storageState` JSON files for Cursor dashboard sessions (one file per profile name).
+    /// Stored under the app config dir (not `~/.codex`, which is Codex-only).
+    pub fn cursor_profiles_dir(&self) -> PathBuf {
+        detect_agent_switch_config_dir().join("cursor-profiles")
+    }
+
+    pub fn cursor_storage_state_path(&self, profile_name: &str) -> PathBuf {
+        self.cursor_profiles_dir().join(format!("{profile_name}.json"))
+    }
+}
+
+/// XDG-style config: `~/.config/agent-switch` (Unix), `%APPDATA%\agent-switch` (Windows).
+fn detect_agent_switch_config_dir() -> PathBuf {
+    if cfg!(windows) {
+        if let Ok(app) = std::env::var("APPDATA") {
+            if !app.is_empty() {
+                return PathBuf::from(app).join("agent-switch");
+            }
+        }
+    }
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        if !xdg.is_empty() {
+            return PathBuf::from(xdg).join("agent-switch");
+        }
+    }
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    home.join(".config").join("agent-switch")
 }
 
 fn detect_codex_dir() -> PathBuf {

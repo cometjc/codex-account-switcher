@@ -16,7 +16,7 @@ before_cache_mtime="$(stat -c %Y "${cache_path}" 2>/dev/null || echo missing)"
 before_history_mtime="$(stat -c %Y "${history_path}" 2>/dev/null || echo missing)"
 
 echo "Running Claude live refresh via agent-switch..."
-cargo run --quiet --manifest-path "${repo_root}/rust/plot-viewer/Cargo.toml" --bin agent-switch -- --refresh-all
+cargo run --quiet --manifest-path "${repo_root}/Cargo.toml" --bin agent-switch -- --refresh-all
 
 if [[ ! -f "${cache_path}" ]]; then
   echo "Claude cache file was not created: ${cache_path}" >&2
@@ -77,7 +77,7 @@ PY
 cat <<'EOF'
 
 Next manual TUI smoke check:
-  1. cargo run --manifest-path rust/plot-viewer/Cargo.toml --bin agent-switch
+  1. cargo run --manifest-path Cargo.toml --bin agent-switch
   2. Confirm a Claude profile appears with the [cl] tag.
   3. Press `u` or `a` if needed, then verify the Details pane shows Claude metadata.
   4. Press `Tab` to move to the plot pane and confirm weekly / 5h chart data is visible when history exists.

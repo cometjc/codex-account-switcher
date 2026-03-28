@@ -1,13 +1,13 @@
 # Lane 3 Plan - Rust Chart Surface
 
 > Ownership family:
-> `rust/plot-viewer/src/render/chart.rs` and chart-specific regression tests added later under `tests/`
+> `src/render/chart.rs` and chart-specific regression tests added later under `tests/`
 >
 > NLSDD worktree: `.worktrees/lane-3-chart`
 >
 > Lane-local verification:
-> `cargo test --manifest-path rust/plot-viewer/Cargo.toml render::chart -- --nocapture`
-> `cargo check --manifest-path rust/plot-viewer/Cargo.toml`
+> `cargo test --manifest-path Cargo.toml render::chart -- --nocapture`
+> `cargo check --manifest-path Cargo.toml`
 
 ## M - Model / Chart Mapping
 

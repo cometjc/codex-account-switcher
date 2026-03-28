@@ -1,13 +1,13 @@
 # Lane 2 Plan - Rust Runtime and State
 
 > Ownership family:
-> `rust/plot-viewer/src/main.rs`, `rust/plot-viewer/src/app.rs`, `rust/plot-viewer/src/input.rs`, `rust/plot-viewer/src/model.rs`, `rust/plot-viewer/src/render/mod.rs`, `tests/plot-rust-model-contract.test.js`, `tests/plot-viewer-scaffold.test.js`
+> `src/main.rs`, `src/app.rs`, `src/input.rs`, `src/model.rs`, `src/render/mod.rs`, `tests/plot-rust-model-contract.test.js`, `tests/plot-viewer-scaffold.test.js`
 >
 > NLSDD worktree: `.worktrees/lane-2-runtime`
 >
 > Lane-local verification:
-> `cargo test --manifest-path rust/plot-viewer/Cargo.toml`
-> `cargo check --manifest-path rust/plot-viewer/Cargo.toml`
+> `cargo test --manifest-path Cargo.toml`
+> `cargo check --manifest-path Cargo.toml`
 
 ## M - Model / State
 

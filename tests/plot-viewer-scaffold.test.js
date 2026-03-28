@@ -19,24 +19,24 @@ function assertFilePresent(relativePath) {
 
 test('plot-viewer scaffold files are present', () => {
   [
-    'rust/plot-viewer/Cargo.toml',
-    'rust/plot-viewer/Cargo.lock',
-    'rust/plot-viewer/src/lib.rs',
-    'rust/plot-viewer/src/main.rs',
-    'rust/plot-viewer/src/app.rs',
-    'rust/plot-viewer/src/input.rs',
-    'rust/plot-viewer/src/model.rs',
-    'rust/plot-viewer/src/paths.rs',
-    'rust/plot-viewer/src/render/mod.rs',
-    'rust/plot-viewer/src/render/chart.rs',
-    'rust/plot-viewer/src/store.rs',
-    'rust/plot-viewer/src/usage.rs',
+    'Cargo.toml',
+    'Cargo.lock',
+    'src/lib.rs',
+    'src/main.rs',
+    'src/app.rs',
+    'src/input.rs',
+    'src/model.rs',
+    'src/paths.rs',
+    'src/render/mod.rs',
+    'src/render/chart.rs',
+    'src/store.rs',
+    'src/usage.rs',
     'bin/agent-switch.cjs',
   ].forEach(assertFilePresent);
 });
 
 test('Rust Cargo metadata locks the unified agent-switch shape', () => {
-  const cargoToml = readText('rust/plot-viewer/Cargo.toml');
+  const cargoToml = readText('Cargo.toml');
 
   assert.match(cargoToml, /^\[package\]$/m);
   assert.match(cargoToml, /^name = "agent-switch"$/m);
@@ -51,14 +51,17 @@ test('Rust Cargo metadata locks the unified agent-switch shape', () => {
 });
 
 test('Rust source modules keep the agent-switch entrypoints stable', () => {
-  const mainRs = readText('rust/plot-viewer/src/main.rs');
-  const libRs = readText('rust/plot-viewer/src/lib.rs');
-  const renderMod = readText('rust/plot-viewer/src/render/mod.rs');
-  const chartRs = readText('rust/plot-viewer/src/render/chart.rs');
-  const appRs = readText('rust/plot-viewer/src/app.rs');
+  const mainRs = readText('src/main.rs');
+  const libRs = readText('src/lib.rs');
+  const renderMod = readText('src/render/mod.rs');
+  const chartRs = readText('src/render/chart.rs');
+  const appRs = readText('src/app.rs');
 
   assert.match(mainRs, /^use agent_switch::app::App;$/m);
-  assert.match(mainRs, /let mut app = App::load\(store, usage, cron_status, claude_store, claude_usage_service\)\?;/);
+  assert.match(
+    mainRs,
+    /let mut app = App::load\(store, usage, cron_status, claude_store, claude_usage_service, copilot_usage_service\)\?;/,
+  );
   assert.match(mainRs, /app\.run\(\)/);
 
   assert.match(libRs, /^pub mod app;$/m);
@@ -70,12 +73,12 @@ test('Rust source modules keep the agent-switch entrypoints stable', () => {
   assert.match(appRs, /^pub struct App \{$/m);
   assert.match(appRs, /^enum PaneFocus \{$/m);
   assert.match(appRs, /let render_state = AppRenderState \{/);
-  assert.match(appRs, /render::render\(frame, right_area, &render_state\);/);
+  assert.match(appRs, /render::render\(frame, chart_area, &render_state\);/);
 
   assert.match(renderMod, /^pub mod chart;$/m);
   assert.match(renderMod, /^pub fn render<State: RenderState>\(frame: &mut Frame, area: Rect, state: &State\) \{$/m);
   assert.match(renderMod, /Rust agent-switch plot view/);
-  assert.match(chartRs, /title\("usage chart \(align to 7d window\)"\)/);
+  assert.match(chartRs, /title\("Usage chart \(align to 7d window\)"\)/);
 });
 
 test('legacy Node product runtime files are removed while Rust shim files remain', () => {

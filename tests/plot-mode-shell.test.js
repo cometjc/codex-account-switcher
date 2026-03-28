@@ -8,9 +8,9 @@ function readText(relativePath) {
 }
 
 test('plot mode is rendered from Rust app state, not Node shell wiring', () => {
-  const appRs = readText('rust/plot-viewer/src/app.rs');
-  const renderMod = readText('rust/plot-viewer/src/render/mod.rs');
-  const chartRs = readText('rust/plot-viewer/src/render/chart.rs');
+  const appRs = readText('src/app.rs');
+  const renderMod = readText('src/render/mod.rs');
+  const chartRs = readText('src/render/chart.rs');
 
   assert.match(appRs, /enum PaneFocus \{/);
   assert.match(appRs, /PaneFocus::Plot/);

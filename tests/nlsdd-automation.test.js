@@ -49,14 +49,14 @@ function setupTempGitRepo(dir) {
   run('git', ['config', 'user.name', 'Codex Test'], dir);
   run('git', ['config', 'user.email', 'codex@example.com'], dir);
   fs.writeFileSync(path.join(dir, 'tracked.txt'), 'initial\n', 'utf8');
-  fs.mkdirSync(path.join(dir, 'rust', 'plot-viewer', 'target'), {recursive: true});
+  fs.mkdirSync(path.join(dir, 'target'), {recursive: true});
   fs.writeFileSync(
-    path.join(dir, 'rust', 'plot-viewer', 'target', 'noise.bin'),
+    path.join(dir, 'target', 'noise.bin'),
     'initial-artifact\n',
     'utf8',
   );
   run('git', ['add', 'tracked.txt'], dir);
-  run('git', ['add', 'rust/plot-viewer/target/noise.bin'], dir);
+  run('git', ['add', 'target/noise.bin'], dir);
   run('git', ['commit', '-m', 'init'], dir);
 }
 
@@ -67,7 +67,7 @@ function setupNlsddFixture() {
 
   fs.writeFileSync(path.join(laneWorktree, 'tracked.txt'), 'changed\n', 'utf8');
   fs.writeFileSync(
-    path.join(laneWorktree, 'rust', 'plot-viewer', 'target', 'noise.bin'),
+    path.join(laneWorktree, 'target', 'noise.bin'),
     'changed-artifact\n',
     'utf8',
   );
@@ -219,10 +219,10 @@ function setupSelfHostingScheduleFixture() {
   for (const lanePlan of lanePlans) {
     const laneDir = path.join(root, lanePlan.worktree);
     fs.mkdirSync(laneDir, {recursive: true});
-    fs.mkdirSync(path.join(laneDir, 'rust', 'plot-viewer', 'target'), {recursive: true});
+    fs.mkdirSync(path.join(laneDir, 'target'), {recursive: true});
     fs.writeFileSync(path.join(laneDir, 'tracked.txt'), `lane-${lanePlan.lane}\n`, 'utf8');
     fs.writeFileSync(
-      path.join(laneDir, 'rust', 'plot-viewer', 'target', 'noise.bin'),
+      path.join(laneDir, 'target', 'noise.bin'),
       `artifact-${lanePlan.lane}\n`,
       'utf8',
     );
@@ -501,7 +501,7 @@ test('probe helper reports source changes, artifact noise, and verification comm
   assert.equal(result.lane, 'Lane 1');
   assert.equal(result.sourcePaths.includes('tracked.txt'), true);
   assert.equal(
-    result.artifactPaths.includes('rust/plot-viewer/target/noise.bin'),
+    result.artifactPaths.includes('target/noise.bin'),
     true,
   );
   assert.equal(result.noise, 'mixed');
@@ -681,8 +681,8 @@ test('message helper tells implementers to hand commit-ready mvc back to coordin
     execution: 'plot-mode',
     lane: '4',
     item: 'Recommendation-rich compare panel',
-    scope: 'rust/plot-viewer/src/render/panels.rs and related tests',
-    verification: 'cargo test --manifest-path rust/plot-viewer/Cargo.toml render::panels',
+    scope: 'src/render/panels.rs and related tests',
+    verification: 'cargo test --manifest-path Cargo.toml render::panels',
   });
 
   assert.match(message, /Execution: plot-mode/);
@@ -1423,12 +1423,12 @@ test('envelope reducer projects tracked scoreboard and lane status from a single
     `# Lane 4
 
 > Ownership family:
-> \`rust/plot-viewer/src/render/panels.rs\`
+> \`src/render/panels.rs\`
 >
 > NLSDD worktree: \`.worktrees/lane-4-panels\`
 >
 > Lane-local verification:
-> \`cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path rust/plot-viewer/Cargo.toml\`
+> \`cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path Cargo.toml\`
 
 ## C - Controller / Docs and Verification Surfaces
 
@@ -1450,7 +1450,7 @@ test('envelope reducer projects tracked scoreboard and lane status from a single
 
 | Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| plot-mode | Lane 4 | Rust panels + docs | Recommendation-rich Compare panel on the recovery baseline | queued | \`51ac2eb\` | \`cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path rust/plot-viewer/Cargo.toml\` | none | Extend panel structure only if later plot UX still needs richer side-panel content | stale note |
+| plot-mode | Lane 4 | Rust panels + docs | Recommendation-rich Compare panel on the recovery baseline | queued | \`51ac2eb\` | \`cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path Cargo.toml\` | none | Extend panel structure only if later plot UX still needs richer side-panel content | stale note |
 `,
     'utf8',
   );
@@ -1467,7 +1467,7 @@ test('envelope reducer projects tracked scoreboard and lane status from a single
     nextRefillTarget: 'Extend panel structure only if later plot UX still needs richer side-panel content',
     relatedCommit: '6bb1fba',
     verification: [
-      'cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path rust/plot-viewer/Cargo.toml',
+      'cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path Cargo.toml',
     ],
     summary: 'Lane 4 adopted-target emphasis is ready to commit',
     detail: 'READY_TO_COMMIT package from panels lane',
@@ -1731,12 +1731,12 @@ test('review helper reduces execution state before reading projected review acti
     `# Lane 3
 
 > Ownership family:
-> \`rust/plot-viewer/src/render/chart.rs\`
+> \`src/render/chart.rs\`
 >
 > NLSDD worktree: \`.worktrees/lane-3-chart\`
 >
 > Lane-local verification:
-> \`cargo check --manifest-path rust/plot-viewer/Cargo.toml\`
+> \`cargo check --manifest-path Cargo.toml\`
 
 ## C - Controller
 
@@ -1750,7 +1750,7 @@ test('review helper reduces execution state before reading projected review acti
 
 | Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| plot-mode | Lane 3 | Rust chart surface | Chart compatibility follow-up | queued | \`abc1234\` | \`cargo check --manifest-path rust/plot-viewer/Cargo.toml\` | none | none | stale row |
+| plot-mode | Lane 3 | Rust chart surface | Chart compatibility follow-up | queued | \`abc1234\` | \`cargo check --manifest-path Cargo.toml\` | none | none | stale row |
 `,
     'utf8',
   );
@@ -1765,7 +1765,7 @@ test('review helper reduces execution state before reading projected review acti
     phaseAfter: 'spec-review-pending',
     currentItem: 'Chart compatibility follow-up',
     relatedCommit: 'abc1234',
-    verification: ['cargo check --manifest-path rust/plot-viewer/Cargo.toml'],
+    verification: ['cargo check --manifest-path Cargo.toml'],
     summary: 'Lane 3 chart compatibility follow-up is ready for spec review',
     detail: 'READY_FOR_REVIEW from chart lane',
     nextExpectedPhase: 'quality-review-pending',
@@ -2404,7 +2404,7 @@ test('dispatch cycle promotes the next queued work from reduced execution state'
     `# Lane 2
 
 > Ownership family:
-> \`rust/plot-viewer/src/render/mod.rs\`
+> \`src/render/mod.rs\`
 >
 > NLSDD worktree: \`.worktrees/lane-2-runtime\`
 >
@@ -2518,13 +2518,13 @@ test('launch helper returns assignment bundles for newly promoted lanes from red
     `# Lane 2
 
 > Ownership family:
-> \`rust/plot-viewer/src/render/mod.rs\`
+> \`src/render/mod.rs\`
 >
 > NLSDD worktree: \`.worktrees/lane-2-runtime\`
 >
 > Lane-local verification:
 > \`git status --short\`
-> \`cargo check --manifest-path rust/plot-viewer/Cargo.toml\`
+> \`cargo check --manifest-path Cargo.toml\`
 
 ## V - View
 
@@ -2586,13 +2586,13 @@ test('launch helper returns assignment bundles for newly promoted lanes from red
   assert.equal(result.assignments[0].nextItem, 'Runtime compare seam follow-up');
   assert.deepEqual(result.assignments[0].verification, [
     'git status --short',
-    'cargo check --manifest-path rust/plot-viewer/Cargo.toml',
+    'cargo check --manifest-path Cargo.toml',
   ]);
-  assert.match(result.assignments[0].scope, /rust\/plot-viewer\/src\/render\/mod\.rs/);
+  assert.match(result.assignments[0].scope, /src\/render\/mod\.rs/);
   assert.match(result.assignments[0].message, /Execution: plot-mode/);
   assert.match(result.assignments[0].message, /Lane: Lane 2/);
   assert.match(result.assignments[0].message, /Lane item intent: Runtime compare seam follow-up/);
-  assert.match(result.assignments[0].message, /Write scope: rust\/plot-viewer\/src\/render\/mod\.rs/);
+  assert.match(result.assignments[0].message, /Write scope: src\/render\/mod\.rs/);
 });
 
 test('review loop driver returns coordinator-ready bundles for review and correction phases', () => {
@@ -2605,13 +2605,13 @@ test('review loop driver returns coordinator-ready bundles for review and correc
     `# Lane 2
 
 > Ownership family:
-> \`rust/plot-viewer/src/render/mod.rs\`
+> \`src/render/mod.rs\`
 >
 > NLSDD worktree: \`.worktrees/lane-2-runtime\`
 >
 > Lane-local verification:
-> \`cargo test --manifest-path rust/plot-viewer/Cargo.toml\`
-> \`cargo check --manifest-path rust/plot-viewer/Cargo.toml\`
+> \`cargo test --manifest-path Cargo.toml\`
+> \`cargo check --manifest-path Cargo.toml\`
 
 ## V - View
 
@@ -2624,12 +2624,12 @@ test('review loop driver returns coordinator-ready bundles for review and correc
     `# Lane 4
 
 > Ownership family:
-> \`rust/plot-viewer/src/render/panels.rs\`
+> \`src/render/panels.rs\`
 >
 > NLSDD worktree: \`.worktrees/lane-4-panels\`
 >
 > Lane-local verification:
-> \`cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path rust/plot-viewer/Cargo.toml\`
+> \`cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path Cargo.toml\`
 
 ## C - Controller
 
@@ -2643,8 +2643,8 @@ test('review loop driver returns coordinator-ready bundles for review and correc
 
 | Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| plot-mode | Lane 2 | Rust runtime + boundary | Runtime compare seam follow-up | spec-review-pending | \`abc1234\` | \`cargo test --manifest-path rust/plot-viewer/Cargo.toml\` | none | none | spec row |
-| plot-mode | Lane 4 | Rust panels + docs | Recommendation-rich Compare panel on the recovery baseline | correction | \`def5678\` | \`cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path rust/plot-viewer/Cargo.toml\` | none | none | correction row |
+| plot-mode | Lane 2 | Rust runtime + boundary | Runtime compare seam follow-up | spec-review-pending | \`abc1234\` | \`cargo test --manifest-path Cargo.toml\` | none | none | spec row |
+| plot-mode | Lane 4 | Rust panels + docs | Recommendation-rich Compare panel on the recovery baseline | correction | \`def5678\` | \`cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path Cargo.toml\` | none | none | correction row |
 `,
     'utf8',
   );
@@ -2657,8 +2657,8 @@ test('review loop driver returns coordinator-ready bundles for review and correc
     latestCommit: 'abc1234',
     lastReviewerResult: null,
     lastVerification: [
-      'cargo test --manifest-path rust/plot-viewer/Cargo.toml',
-      'cargo check --manifest-path rust/plot-viewer/Cargo.toml',
+      'cargo test --manifest-path Cargo.toml',
+      'cargo check --manifest-path Cargo.toml',
     ],
     blockedBy: null,
     note: 'spec review next',
@@ -2673,7 +2673,7 @@ test('review loop driver returns coordinator-ready bundles for review and correc
     latestCommit: 'def5678',
     lastReviewerResult: 'FAIL',
     lastVerification: [
-      'cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path rust/plot-viewer/Cargo.toml',
+      'cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path Cargo.toml',
     ],
     blockedBy: null,
     note: 'Compare panel still re-derives label heuristics instead of consuming runtime-owned payload.',
@@ -2693,7 +2693,7 @@ test('review loop driver returns coordinator-ready bundles for review and correc
   assert.equal(result.actions[1].lane, 'Lane 4');
   assert.equal(result.actions[1].action, 'correction-loop');
   assert.match(result.actions[1].message, /Reviewer finding: Compare panel still re-derives label heuristics/);
-  assert.match(result.actions[1].message, /Accepted write scope: rust\/plot-viewer\/src\/render\/panels\.rs/);
+  assert.match(result.actions[1].message, /Accepted write scope: src\/render\/panels\.rs/);
 });
 
 test('ready-to-commit intake helper returns structured coordinator commit bundle', () => {
@@ -2774,12 +2774,12 @@ test('coordinator loop combines launch, review, and commit intake into one summa
     `# Lane 2
 
 > Ownership family:
-> \`rust/plot-viewer/src/render/mod.rs\`
+> \`src/render/mod.rs\`
 >
 > NLSDD worktree: \`.worktrees/lane-2-runtime\`
 >
 > Lane-local verification:
-> \`cargo test --manifest-path rust/plot-viewer/Cargo.toml\`
+> \`cargo test --manifest-path Cargo.toml\`
 
 ## V - View
 
@@ -2792,12 +2792,12 @@ test('coordinator loop combines launch, review, and commit intake into one summa
     `# Lane 3
 
 > Ownership family:
-> \`rust/plot-viewer/src/render/chart.rs\`
+> \`src/render/chart.rs\`
 >
 > NLSDD worktree: \`.worktrees/lane-3-chart\`
 >
 > Lane-local verification:
-> \`cargo check --manifest-path rust/plot-viewer/Cargo.toml\`
+> \`cargo check --manifest-path Cargo.toml\`
 
 ## C - Controller
 
@@ -2830,8 +2830,8 @@ test('coordinator loop combines launch, review, and commit intake into one summa
 
 | Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| plot-mode | Lane 2 | Rust runtime + boundary | Runtime compare seam follow-up | queued | \`${lane2Head}\` | \`cargo test --manifest-path rust/plot-viewer/Cargo.toml\` | none | none | queued row |
-| plot-mode | Lane 3 | Rust chart surface | Chart compatibility follow-up | spec-review-pending | \`abc1234\` | \`cargo check --manifest-path rust/plot-viewer/Cargo.toml\` | none | none | review row |
+| plot-mode | Lane 2 | Rust runtime + boundary | Runtime compare seam follow-up | queued | \`${lane2Head}\` | \`cargo test --manifest-path Cargo.toml\` | none | none | queued row |
+| plot-mode | Lane 3 | Rust chart surface | Chart compatibility follow-up | spec-review-pending | \`abc1234\` | \`cargo check --manifest-path Cargo.toml\` | none | none | review row |
 | plot-mode | Lane 5 | Plot viewer docs + operator flow | Recovery-baseline README and local run instructions | coordinator-commit-pending | \`n/a\` | \`npm run build\` | none | none | commit row |
 `,
     'utf8',
@@ -2843,7 +2843,7 @@ test('coordinator loop combines launch, review, and commit intake into one summa
     phase: 'queued',
     'expected-next-phase': 'implementing',
     commit: lane2Head,
-    verification: ['cargo test --manifest-path rust/plot-viewer/Cargo.toml'],
+    verification: ['cargo test --manifest-path Cargo.toml'],
     note: 'ready to dispatch',
     'updated-at': '2026-03-21T11:30:00.000Z',
   });
@@ -2853,7 +2853,7 @@ test('coordinator loop combines launch, review, and commit intake into one summa
     phase: 'spec-review-pending',
     'expected-next-phase': 'quality-review-pending',
     commit: 'abc1234',
-    verification: ['cargo check --manifest-path rust/plot-viewer/Cargo.toml'],
+    verification: ['cargo check --manifest-path Cargo.toml'],
     note: 'spec review next',
     'updated-at': '2026-03-21T11:31:00.000Z',
   });
@@ -2909,12 +2909,12 @@ test('coordinator loop degrades cleanly when runtime scoreboard is malformed', (
     `# Lane 2
 
 > Ownership family:
-> \`rust/plot-viewer/src/render/mod.rs\`
+> \`src/render/mod.rs\`
 >
 > NLSDD worktree: \`.worktrees/lane-2-runtime\`
 >
 > Lane-local verification:
-> \`cargo test --manifest-path rust/plot-viewer/Cargo.toml\`
+> \`cargo test --manifest-path Cargo.toml\`
 
 ## V - View
 
@@ -2947,7 +2947,7 @@ test('coordinator loop degrades cleanly when runtime scoreboard is malformed', (
 
 | Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| plot-mode | Lane 2 | Rust runtime + boundary | Runtime compare seam follow-up | queued | \`${lane2Head}\` | \`cargo test --manifest-path rust/plot-viewer/Cargo.toml\` | none | none | queued row |
+| plot-mode | Lane 2 | Rust runtime + boundary | Runtime compare seam follow-up | queued | \`${lane2Head}\` | \`cargo test --manifest-path Cargo.toml\` | none | none | queued row |
 | plot-mode | Lane 5 | Plot viewer docs + operator flow | Recovery-baseline README and local run instructions | coordinator-commit-pending | \`n/a\` | \`npm run build\` | none | none | commit row |
 `,
     'utf8',
@@ -2959,7 +2959,7 @@ test('coordinator loop degrades cleanly when runtime scoreboard is malformed', (
     phase: 'queued',
     'expected-next-phase': 'implementing',
     commit: lane2Head,
-    verification: ['cargo test --manifest-path rust/plot-viewer/Cargo.toml'],
+    verification: ['cargo test --manifest-path Cargo.toml'],
     note: 'ready to dispatch',
     'updated-at': '2026-03-21T11:30:00.000Z',
   });
@@ -3027,12 +3027,12 @@ test('coordinator loop surfaces telemetry summary and review path when present',
     `# Lane 2
 
 > Ownership family:
-> \`rust/plot-viewer/src/render/mod.rs\`
+> \`src/render/mod.rs\`
 >
 > NLSDD worktree: \`.worktrees/lane-2-runtime\`
 >
 > Lane-local verification:
-> \`cargo test --manifest-path rust/plot-viewer/Cargo.toml\`
+> \`cargo test --manifest-path Cargo.toml\`
 
 ## V - View
 
@@ -3046,7 +3046,7 @@ test('coordinator loop surfaces telemetry summary and review path when present',
 
 | Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| plot-mode | Lane 2 | Rust runtime + boundary | Runtime compare seam follow-up | queued | \`${lane2Head}\` | \`cargo test --manifest-path rust/plot-viewer/Cargo.toml\` | none | none | queued row |
+| plot-mode | Lane 2 | Rust runtime + boundary | Runtime compare seam follow-up | queued | \`${lane2Head}\` | \`cargo test --manifest-path Cargo.toml\` | none | none | queued row |
 `,
     'utf8',
   );
@@ -3056,7 +3056,7 @@ test('coordinator loop surfaces telemetry summary and review path when present',
     phase: 'queued',
     'expected-next-phase': 'implementing',
     commit: lane2Head,
-    verification: ['cargo test --manifest-path rust/plot-viewer/Cargo.toml'],
+    verification: ['cargo test --manifest-path Cargo.toml'],
     note: 'ready to dispatch',
     'updated-at': '2026-03-21T11:30:00.000Z',
   });
@@ -3139,12 +3139,12 @@ test('dispatch plan helper builds a prioritized action queue from autopilot outp
     `# Lane 2
 
 > Ownership family:
-> \`rust/plot-viewer/src/render/mod.rs\`
+> \`src/render/mod.rs\`
 >
 > NLSDD worktree: \`.worktrees/lane-2-runtime\`
 >
 > Lane-local verification:
-> \`cargo test --manifest-path rust/plot-viewer/Cargo.toml\`
+> \`cargo test --manifest-path Cargo.toml\`
 
 ## V - View
 
@@ -3157,12 +3157,12 @@ test('dispatch plan helper builds a prioritized action queue from autopilot outp
     `# Lane 3
 
 > Ownership family:
-> \`rust/plot-viewer/src/render/chart.rs\`
+> \`src/render/chart.rs\`
 >
 > NLSDD worktree: \`.worktrees/lane-3-chart\`
 >
 > Lane-local verification:
-> \`cargo check --manifest-path rust/plot-viewer/Cargo.toml\`
+> \`cargo check --manifest-path Cargo.toml\`
 
 ## C - Controller
 
@@ -3194,8 +3194,8 @@ test('dispatch plan helper builds a prioritized action queue from autopilot outp
 
 | Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| plot-mode | Lane 2 | Rust runtime + boundary | Runtime compare seam follow-up | queued | \`${lane2Head}\` | \`cargo test --manifest-path rust/plot-viewer/Cargo.toml\` | none | none | queued row |
-| plot-mode | Lane 3 | Rust chart surface | Chart compatibility follow-up | correction | \`abc1234\` | \`cargo check --manifest-path rust/plot-viewer/Cargo.toml\` | none | none | review row |
+| plot-mode | Lane 2 | Rust runtime + boundary | Runtime compare seam follow-up | queued | \`${lane2Head}\` | \`cargo test --manifest-path Cargo.toml\` | none | none | queued row |
+| plot-mode | Lane 3 | Rust chart surface | Chart compatibility follow-up | correction | \`abc1234\` | \`cargo check --manifest-path Cargo.toml\` | none | none | review row |
 | plot-mode | Lane 5 | Plot viewer docs + operator flow | Recovery-baseline README and local run instructions | coordinator-commit-pending | \`n/a\` | \`npm run build\` | none | none | commit row |
 `,
     'utf8',
@@ -3207,7 +3207,7 @@ test('dispatch plan helper builds a prioritized action queue from autopilot outp
     phase: 'queued',
     'expected-next-phase': 'implementing',
     commit: lane2Head,
-    verification: ['cargo test --manifest-path rust/plot-viewer/Cargo.toml'],
+    verification: ['cargo test --manifest-path Cargo.toml'],
     note: 'ready to dispatch',
     'updated-at': '2026-03-21T11:40:00.000Z',
   });
@@ -3217,7 +3217,7 @@ test('dispatch plan helper builds a prioritized action queue from autopilot outp
     phase: 'correction',
     'expected-next-phase': 'spec-review-pending',
     commit: 'abc1234',
-    verification: ['cargo check --manifest-path rust/plot-viewer/Cargo.toml'],
+    verification: ['cargo check --manifest-path Cargo.toml'],
     note: 'Chart wording still needs correction',
     'updated-at': '2026-03-21T11:41:00.000Z',
   });
@@ -3275,12 +3275,12 @@ test('review helper surfaces actionable execution insights alongside review acti
     `# Lane 3
 
 > Ownership family:
-> \`rust/plot-viewer/src/render/chart.rs\`
+> \`src/render/chart.rs\`
 >
 > NLSDD worktree: \`.worktrees/lane-3-chart\`
 >
 > Lane-local verification:
-> \`cargo check --manifest-path rust/plot-viewer/Cargo.toml\`
+> \`cargo check --manifest-path Cargo.toml\`
 
 ## C - Controller
 
@@ -3294,7 +3294,7 @@ test('review helper surfaces actionable execution insights alongside review acti
 
 | Execution | Lane | Ownership | Current item | Phase | Item commit | Last verification | Blocked by | Next refill target | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| plot-mode | Lane 3 | Rust chart surface | Chart compatibility follow-up | correction | \`abc1234\` | \`cargo check --manifest-path rust/plot-viewer/Cargo.toml\` | none | none | review row |
+| plot-mode | Lane 3 | Rust chart surface | Chart compatibility follow-up | correction | \`abc1234\` | \`cargo check --manifest-path Cargo.toml\` | none | none | review row |
 `,
     'utf8',
   );
@@ -3304,7 +3304,7 @@ test('review helper surfaces actionable execution insights alongside review acti
     phase: 'correction',
     'expected-next-phase': 'spec-review-pending',
     commit: 'abc1234',
-    verification: ['cargo check --manifest-path rust/plot-viewer/Cargo.toml'],
+    verification: ['cargo check --manifest-path Cargo.toml'],
     note: 'Chart wording still needs correction',
     'updated-at': '2026-03-21T11:41:00.000Z',
   });

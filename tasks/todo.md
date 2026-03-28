@@ -3,7 +3,7 @@
 - [x] 釐清 app 啟動變慢的根因，將啟動路徑改成只讀 cache / stale cache，不在 UI 載入前同步打 usage API
 - [x] 先補 Rust regression tests，鎖住啟動只吃 cache、僅對超過 10 分鐘未更新的 profiles 排入背景 refresh
 - [x] 實作背景 refresh task 狀態，並把 cron/status 與背景更新訊息移到左側 Details 下方的新 `Refresh tasks` 區塊
-- [x] 執行 `cargo test --manifest-path rust/plot-viewer/Cargo.toml` 驗證
+- [x] 執行 `cargo test --manifest-path Cargo.toml` 驗證
 
 ## Review
 
@@ -17,14 +17,14 @@
   - `usage.rs` 修正了舊行為中 `cache_only=true` 卻把過期 cache 標成 `stale=false` 的 bug，現在 stale cache 會誠實標記。
   - `app.rs` 新增背景 refresh worker：若 profile 超過 10 分鐘未更新，會在 UI 啟動後背景逐筆 refresh，完成後用 `Background refresh updated N profiles` 回寫狀態。
   - 原本底部 global cron/status line 已移除；左側 `Details` 下方新增 `Refresh tasks` 區塊，承接背景 refresh 狀態、背景完成訊息與 cron 錯誤摘要。
-- 驗證：`cargo test --manifest-path rust/plot-viewer/Cargo.toml` 全綠（55 + 1 + 3 tests）。
+- 驗證：`cargo test --manifest-path Cargo.toml` 全綠（55 + 1 + 3 tests）。
 
 # 2026-03-26 Claude history alias merge
 
 - [x] 釐清 Claude 歷史 key 漂移的整合點，避免每次 reauth 都開新 bucket
 - [x] 先補 regression test，鎖住 current Claude profile 會把舊 pseudo-id history 併到新 key
 - [x] 在 usage/history 層新增 merge helper，並接回 Claude current-first / fallback matching 流程
-- [x] 執行 `cargo test --manifest-path rust/plot-viewer/Cargo.toml` 驗證
+- [x] 執行 `cargo test --manifest-path Cargo.toml` 驗證
 
 ## Review
 
@@ -36,14 +36,14 @@
 - 新增 regression：
   - `merge_profile_history_aliases_moves_alias_history_into_canonical_key`
   - `claude_saved_profile_merges_old_history_into_current_key`
-- 驗證：`cargo test --manifest-path rust/plot-viewer/Cargo.toml` 全綠（53 + 1 + 3 tests）。
+- 驗證：`cargo test --manifest-path Cargo.toml` 全綠（53 + 1 + 3 tests）。
 
 # 2026-03-26 usage history keeps full weekly observations
 
 - [x] 釐清目前 usage history 被截短的真正邊界，分清楚 observation cap 與 window retention
 - [x] 先補 Rust regression test，鎖住單一 7d window 的 observation 不再因 256 上限被裁掉
 - [x] 將 observation cleanup 改成只依時間範圍保留，不再依筆數裁切
-- [x] 執行 `cargo test --manifest-path rust/plot-viewer/Cargo.toml` 驗證
+- [x] 執行 `cargo test --manifest-path Cargo.toml` 驗證
 
 ## Review
 
@@ -52,7 +52,7 @@
 - 新增 regression：
   - `trim_history_windows_keeps_full_week_of_observations`
   - `trim_history_windows_removes_observations_outside_window_range`
-- 驗證：`cargo test --manifest-path rust/plot-viewer/Cargo.toml` 全綠（51 + 1 + 3 tests）。
+- 驗證：`cargo test --manifest-path Cargo.toml` 全綠（51 + 1 + 3 tests）。
 
 # 2026-03-26 current-first saved profile reconcile for Codex and Claude
 
@@ -60,7 +60,7 @@
 - [x] 補上 current-name/account matching 規則，避免 reauth 後 current 被誤判成 unsaved duplicate
 - [x] 讓 app 載入與 cron refresh 共用同一條 reconcile truth
 - [x] 補 Rust regression tests，鎖住 Codex 與 Claude 的 current-first sync-back 行為
-- [x] 執行 `cargo test --manifest-path rust/plot-viewer/Cargo.toml` 驗證
+- [x] 執行 `cargo test --manifest-path Cargo.toml` 驗證
 
 ## Review
 
@@ -70,21 +70,21 @@
 - 新增 regression：
   - `codex_saved_profile_uses_current_snapshot_and_syncs_saved_file`
   - `claude_saved_profile_uses_current_snapshot_when_name_matches`
-- 驗證：`cargo test --manifest-path rust/plot-viewer/Cargo.toml` 全綠（49 + 1 + 3 tests）。
+- 驗證：`cargo test --manifest-path Cargo.toml` 全綠（49 + 1 + 3 tests）。
 
 # 2026-03-26 Codex usage 401 refresh recovery
 
 - [x] 釐清 Codex `wham/usage` 401 的根因與本 repo 目前 token lifecycle 缺口
 - [x] 先補 Rust 測試，鎖住 Codex usage `401` 會觸發 refresh + retry，並把新 token 寫回 auth snapshot
 - [x] 實作 Codex token refresh / persisted auth 更新，避免 saved profile 因過期 token 永久 401
-- [x] 執行 `cargo test --manifest-path rust/plot-viewer/Cargo.toml` 驗證
+- [x] 執行 `cargo test --manifest-path Cargo.toml` 驗證
 
 ## Review
 
 - 根因不是 `wham/usage` 端點本身改掉，而是本 repo 的 Codex 路徑一直只拿 snapshot 裡的 `tokens.access_token` 直接打 usage API，完全沒有跟上官方 Codex client 的 token lifecycle：`last_refresh` 超過約 8 天要先 refresh，且 `401` 要 refresh-and-retry。
 - 實際檢查本機 `~/.codex/accounts/t5-team.json` 可見 `last_refresh=2026-03-17...`，已超過 stale 門檻；這解釋了為什麼 saved `t5-team` 會在 usage refresh 時先撞 `401 Unauthorized`。
-- `rust/plot-viewer/src/usage.rs` 現在新增 Codex auth snapshot 解析、OAuth refresh、`last_refresh` 寫回、stale pre-refresh 與 `401` retry；`loader.rs` 與 `main.rs` 也改成對 Codex profile 傳入實際 auth snapshot path（current `auth.json` 或 saved account file），讓 rotated token 會寫回正確檔案，而不是只修到 current profile。
-- 驗證：`cargo test --manifest-path rust/plot-viewer/Cargo.toml` 全綠（47 + 1 + 3 tests）。
+- `src/usage.rs` 現在新增 Codex auth snapshot 解析、OAuth refresh、`last_refresh` 寫回、stale pre-refresh 與 `401` retry；`loader.rs` 與 `main.rs` 也改成對 Codex profile 傳入實際 auth snapshot path（current `auth.json` 或 saved account file），讓 rotated token 會寫回正確檔案，而不是只修到 current profile。
+- 驗證：`cargo test --manifest-path Cargo.toml` 全綠（47 + 1 + 3 tests）。
 
 # 2026-03-26 Claude 401 usage refresh bug
 
@@ -97,7 +97,7 @@
 
 - 根因是 `fetch_claude_usage_with_auto_refresh()` 原本只把 `429` 視為可透過 refresh 解決的 usage 錯誤；`401 Unauthorized` 會直接往外丟，所以 status line 會顯示 `Claude issue: Claude usage request failed: HTTP status client error (401 ...)`。
 - 已先補 regression test，確認 `401` 會在修正前穩定失敗；修正後 `401` 與 `429` 都會觸發一次 Claude OAuth token refresh，再用旋轉後的 token 重試一次 usage request。
-- `cargo test --manifest-path rust/plot-viewer/Cargo.toml` 全綠（43 + 1 + 3 tests），README 的 Claude live verification 說明也已同步更新為 `429` / `401`。
+- `cargo test --manifest-path Cargo.toml` 全綠（43 + 1 + 3 tests），README 的 Claude live verification 說明也已同步更新為 `429` / `401`。
 
 # 2026-03-26 common-dev-rules adoption workflow relocation
 
@@ -151,12 +151,12 @@
 ## Review
 
 - 這輪不是只在本地把 Rust 程式碼補一補，而是先照使用者要求，把剩餘 scope 全部寫進 central executor：新增 `rust-auth-migration` execution、單一 pending plan、4 條 lanes，並讓 Lane 1 綁目前主工作樹、Lane 2-4 各自有 queue worktree path。
-- Lane 1 已實際落地新的 Rust domain/runtime：`rust/plot-viewer` 現在是 `codex-auth` crate，新增 `lib.rs`、`paths.rs`、`store.rs`、`usage.rs`，`main.rs` 直接啟動 Rust app，不再吃 snapshot path 才能跑。
+- Lane 1 已實際落地新的 Rust domain/runtime：crate 已上移到 repo 根目錄（`agent-switch`），新增 `lib.rs`、`paths.rs`、`store.rs`、`usage.rs`，`main.rs` 直接啟動 Rust app，不再吃 snapshot path 才能跑。
 - Lane 2 / Lane 3 的 visible runtime 也一起落地：`app.rs` 現在承接同一個 Rust TUI 內的 account list、save/rename/delete/refresh dialog、以及 built-in plot view；plot 不再是外部 viewer 的正式 truth，而是同 app 內的 view state。
 - Lane 4 同步把 repo truth 切到 Rust-first：README 改成 Rust runtime + built-in plot 說法，`package.json` 的 build / plot scripts 指向 Rust `codex-auth` binary，對應 Node regression tests 也改成守護新的 Cargo metadata 與 README/entrypoint truth。
 - 驗證：
-  - `cargo test --manifest-path rust/plot-viewer/Cargo.toml`
-  - `cargo check --manifest-path rust/plot-viewer/Cargo.toml`
+  - `cargo test --manifest-path Cargo.toml`
+  - `cargo check --manifest-path Cargo.toml`
   - `node --test tests/plot-mode-shell.test.js tests/plot-readme.test.js tests/plot-viewer-scaffold.test.js tests/plot-rust-model-contract.test.js`
   - `npm run build`
   - `git diff --check`
@@ -283,8 +283,8 @@
 - 這次在 Rust viewer 內新增 `SelectionState`、`RenderProfile`、`FocusTarget`，讓 `AppRenderState` 直接提供 `selection_state()`；chart 與 panels 也改成從這個 contract 讀 `selected/current/focus`，不再各自偷讀不同來源。
 - 兩個 Rust 測試現在直接鎖住這個行為：初始 selected/current/focus 必須一致，且在 profile cycling + focus cycling 後，selected/current/focus 仍要一起正確更新。
 - 驗證：
-  - `cargo test --manifest-path rust/plot-viewer/Cargo.toml`
-  - `cargo check --manifest-path rust/plot-viewer/Cargo.toml`
+  - `cargo test --manifest-path Cargo.toml`
+  - `cargo check --manifest-path Cargo.toml`
   - `node --test tests/plot-viewer-scaffold.test.js`
 
 # 2026-03-22 plot-mode Lane 3 real chart rendering
@@ -300,8 +300,8 @@
 - 這次在 `render/mod.rs` 補上 `ChartState` / `ChartPoint` / `FiveHourBandState`，由 runtime 把 selected profile 的 7d points 與 5h band 正式交給 chart renderer。
 - `chart.rs` 現在會真的畫出 ratatui line chart、x/y axis labels、band overlay 與 band summary；同時用兩個 Rust tests 鎖住「有 band」與「band unavailable」兩條 visible path，避免再退回 placeholder copy。
 - 驗證：
-  - `cargo test --manifest-path rust/plot-viewer/Cargo.toml render::chart -- --nocapture`
-  - `cargo check --manifest-path rust/plot-viewer/Cargo.toml`
+  - `cargo test --manifest-path Cargo.toml render::chart -- --nocapture`
+  - `cargo check --manifest-path Cargo.toml`
 
 # 2026-03-22 plot-mode Lane 4 panel refresh
 
@@ -316,8 +316,8 @@
 - `render/panels.rs` 現在直接吃 shared `selection_state()` + `chart_state()`：Summary 會顯示 focused/current/focus、7d sample 數與 5h band 狀態；Compare 會清楚標出 adopted target、current route，以及當 target 已經是 current 時的 `Routing delta: none`。
 - 這讓 Lane 4 不再重組 label heuristic，也讓先前 reviewer 指出的「compare panel still re-derives label heuristics」有正式修正路徑。
 - 驗證：
-  - `cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path rust/plot-viewer/Cargo.toml`
-  - `cargo test render_panels_locks_visible_summary_compare_copy_and_shape --manifest-path rust/plot-viewer/Cargo.toml`
+  - `cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path Cargo.toml`
+  - `cargo test render_panels_locks_visible_summary_compare_copy_and_shape --manifest-path Cargo.toml`
   - `node --test tests/plot-readme.test.js`
 
 # 2026-03-22 proceed 後自動 finishing step 規則
@@ -474,10 +474,10 @@
     - `npm run build`
     - `npm run plot:viewer:build`
     - `node --test tests/plot-handoff.test.js tests/plot-readme.test.js tests/plot-snapshot.test.js`
-    - `cargo test --manifest-path rust/plot-viewer/Cargo.toml render::chart -- --nocapture`
-    - `cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path rust/plot-viewer/Cargo.toml`
-    - `cargo test render_panels_locks_visible_summary_compare_copy_and_shape --manifest-path rust/plot-viewer/Cargo.toml`
-    - `cargo check --manifest-path rust/plot-viewer/Cargo.toml`
+    - `cargo test --manifest-path Cargo.toml render::chart -- --nocapture`
+    - `cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path Cargo.toml`
+    - `cargo test render_panels_locks_visible_summary_compare_copy_and_shape --manifest-path Cargo.toml`
+    - `cargo check --manifest-path Cargo.toml`
 
 # 2026-03-21 NLSDD commit gate 誤判修正
 
@@ -567,11 +567,11 @@
 - 驗證：
   - `npm run build` in `.worktrees/lane-1-node`
   - `node --test tests/plot-snapshot.test.js tests/plot-handoff.test.js` in `.worktrees/lane-1-node`
-  - `cargo test --manifest-path rust/plot-viewer/Cargo.toml render::chart -- --nocapture` in `.worktrees/lane-3-chart`
-  - `cargo check --manifest-path rust/plot-viewer/Cargo.toml` in `.worktrees/lane-3-chart`
+  - `cargo test --manifest-path Cargo.toml render::chart -- --nocapture` in `.worktrees/lane-3-chart`
+  - `cargo check --manifest-path Cargo.toml` in `.worktrees/lane-3-chart`
   - Lane 4 agent verification:
-    - `cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path rust/plot-viewer/Cargo.toml`
-    - `cargo test render_panels_locks_visible_summary_compare_copy_and_shape --manifest-path rust/plot-viewer/Cargo.toml`
+    - `cargo test render_panels_builds_visible_summary_and_compare_blocks --manifest-path Cargo.toml`
+    - `cargo test render_panels_locks_visible_summary_compare_copy_and_shape --manifest-path Cargo.toml`
 
 # 2026-03-21 plot-mode 4-active-lane re-plan
 
@@ -1099,7 +1099,7 @@
 - 新增 [`spec/NLSDD/operating-rules.md`](/home/jethro/repo/side-projects/codex-account-switcher/spec/NLSDD/operating-rules.md)，作為 repo 內建的 NLSDD workflow 定義。
 - 新增 [`spec/NLSDD/guardrails.md`](/home/jethro/repo/side-projects/codex-account-switcher/spec/NLSDD/guardrails.md)、[`spec/NLSDD/communication.md`](/home/jethro/repo/side-projects/codex-account-switcher/spec/NLSDD/communication.md)、[`NLSDD/scoreboard.md`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scoreboard.md)。
 - plot-mode lane docs 現在集中在 `NLSDD/executions/plot-mode/`，不再散落於 `plan/` 根目錄。
-- `.gitignore` 現在忽略 `rust/plot-viewer/target/`，後續再配合 lane-local cleanup 去掉已進索引的 artifacts。
+- `.gitignore` 現在忽略 `target/`，後續再配合 lane-local cleanup 去掉已進索引的 artifacts。
 
 # 2026-03-21 plot mode NLSDD 第一輪執行
 
@@ -1119,10 +1119,10 @@
 - 這輪證明 `NLSDD` 可實際運作：每個 lane item 都有 lane-local commit，reviewer 只看該 item diff，correction loop 也能留在原 lane 內處理。
 - 驗證：
   - `node --test tests/plot-handoff.test.js` in `.worktrees/lane-1-node`
-  - `cargo test --manifest-path rust/plot-viewer/Cargo.toml` in `.worktrees/lane-2-runtime`
-  - `cargo check --manifest-path rust/plot-viewer/Cargo.toml` in `.worktrees/lane-2-runtime`
-  - `cargo test --manifest-path rust/plot-viewer/Cargo.toml` in `.worktrees/lane-3-chart`
-  - `cargo test --manifest-path rust/plot-viewer/Cargo.toml` in `.worktrees/lane-4-panels`
+  - `cargo test --manifest-path Cargo.toml` in `.worktrees/lane-2-runtime`
+  - `cargo check --manifest-path Cargo.toml` in `.worktrees/lane-2-runtime`
+  - `cargo test --manifest-path Cargo.toml` in `.worktrees/lane-3-chart`
+  - `cargo test --manifest-path Cargo.toml` in `.worktrees/lane-4-panels`
 
 # 2026-03-21 NLSDD 集中化與 noise cleanup
 
@@ -1420,7 +1420,7 @@
 - 驗證：
   - `npm run build`
   - `node --test tests/plot-handoff.test.js tests/plot-mode-shell.test.js tests/plot-readme.test.js tests/plot-rust-model-contract.test.js tests/plot-snapshot.test.js tests/plot-viewer-scaffold.test.js`
-  - `cargo check --manifest-path rust/plot-viewer/Cargo.toml`
+  - `cargo check --manifest-path Cargo.toml`
 - `npm run plot:viewer:build`
 
 # 2026-03-21 NLSDD review findings remediation

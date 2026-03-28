@@ -12,15 +12,19 @@ function readText(relativePath) {
 }
 
 test('Rust main entrypoint stays wired to the unified agent-switch app', () => {
-  const mainRs = readText('rust/plot-viewer/src/main.rs');
-  const libRs = readText('rust/plot-viewer/src/lib.rs');
+  const mainRs = readText('src/main.rs');
+  const libRs = readText('src/lib.rs');
 
   assert.match(mainRs, /^use agent_switch::app::App;$/m);
   assert.match(mainRs, /^use agent_switch::paths::AppPaths;$/m);
   assert.match(mainRs, /^use agent_switch::store::\{AccountStore, StorePlatform\};$/m);
   assert.match(mainRs, /^use agent_switch::usage::UsageService;$/m);
   assert.match(mainRs, /^use agent_switch::claude::\{ClaudePaths, ClaudeStore, ClaudeCredentials\};$/m);
-  assert.match(mainRs, /let mut app = App::load\(store, usage, cron_status, claude_store, claude_usage_service\)\?;/);
+  assert.match(mainRs, /^use agent_switch::copilot::\{CopilotCredentials, CopilotPaths\};$/m);
+  assert.match(
+    mainRs,
+    /let mut app = App::load\(store, usage, cron_status, claude_store, claude_usage_service, copilot_usage_service\)\?;/,
+  );
   assert.match(mainRs, /app\.run\(\)/);
 
   assert.match(libRs, /^pub mod app;$/m);
@@ -34,10 +38,7 @@ test('package bin points at the Rust thin shim', () => {
   const shimPath = repoPath('bin/agent-switch.cjs');
 
   assert.equal(packageJson.bin['agent-switch'], 'bin/agent-switch.cjs');
-  assert.equal(
-    packageJson.scripts.build,
-    'cargo build --manifest-path rust/plot-viewer/Cargo.toml --bin agent-switch',
-  );
+  assert.equal(packageJson.scripts.build, 'cargo build --bin agent-switch');
   assert.ok(fs.existsSync(shimPath), 'expected Rust thin shim to exist');
 
   const shimSource = fs.readFileSync(shimPath, 'utf8');
