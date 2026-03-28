@@ -1,6 +1,7 @@
 @AGENTS.md
 @ai-rules/adoption-workflow.md
 @ai-rules/shared-baseline-sync-and-local-adoption.md
+@ai-rules/shared-rules-entry-and-thin-adapters.md
 @ai-rules/commit-each-minimum-viable-change.md
 @ai-rules/choose-agents-skill-script-or-runbook.md
 @ai-rules/verify-third-party-module-interface-before-integration.md

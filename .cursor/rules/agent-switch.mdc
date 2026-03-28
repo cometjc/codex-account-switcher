@@ -6,6 +6,7 @@ description: Governance index + shared baseline chapters for this repo
 @[file](../../AGENTS.md)
 @[file](../../ai-rules/adoption-workflow.md)
 @[file](../../ai-rules/shared-baseline-sync-and-local-adoption.md)
+@[file](../../ai-rules/shared-rules-entry-and-thin-adapters.md)
 @[file](../../ai-rules/commit-each-minimum-viable-change.md)
 @[file](../../ai-rules/choose-agents-skill-script-or-runbook.md)
 @[file](../../ai-rules/verify-third-party-module-interface-before-integration.md)
@@ -15,4 +16,4 @@ description: Governance index + shared baseline chapters for this repo
 ### Cursor-specific notes
 
 - TypeScript CLI：`npm run build`；Rust 元件：依 `CLAUDE.md` 與 `AGENTS.md` 之專案區段執行驗證。
-- 新增或重命名 `ai-rules/` 內檔案時，應同步更新根目錄 `AGENTS.md` 的索引區段。
+- 新增或重命名 `ai-rules/` 內檔案時，依 `ai-rules/shared-rules-entry-and-thin-adapters.md` 更新 `AGENTS.md` 索引與本檔 `@[file]` 列表，不在此處複製章節全文。

@@ -1,0 +1,35 @@
+# 共用規則與本地框架（權威入口與薄適配）
+
+## 與其他 baseline 章節的分工
+
+- **同步與採納決策**（與上游 diff、逐條討論）：見 [adoption-workflow.md](adoption-workflow.md) 與 [shared-baseline-sync-and-local-adoption.md](shared-baseline-sync-and-local-adoption.md)。
+- **本章**只約束：**本 repo 內**如何把「共用／baseline 規則」接進目錄結構與各 AI 工具設定，避免雙源與漏接線。
+
+## 核心要求
+
+1. **單一權威入口**  
+   - 本 repo 的治理說明與 baseline 章節索引以根目錄 **`AGENTS.md`** 為準；代理應能只讀它（及其 `@` 的 `ai-rules`）即掌握正式規則邊界。
+
+2. **規則正文單一來源**  
+   - 與組織 baseline 對齊的**完整條文**只放在 **`ai-rules/*.md`**，並由 `AGENTS.md` 的「共同 baseline 章節」列出連結。  
+   - 不得在 `CLAUDE.md`、`.cursor/rules/*.mdc`、`.github/copilot-instructions.md` 等適配檔內**複製貼上**與某章節等長的正文；適配檔僅能 **指向**（例如 `@` / import）既有檔案。
+
+3. **新增或採納一章節時的必做步驟（檢查清單）**  
+   - [ ] 在 `ai-rules/` 新增或更新對應 `.md`（章節自洽、可驗證）。  
+   - [ ] 在 `AGENTS.md` 的「共同 baseline 章節」**新增一筆**指向該檔的連結（與檔名一致）。  
+   - [ ] 在 **`CLAUDE.md`** 頂部 `@` 列表**補上**該檔（與既有章節同一風格）。  
+   - [ ] 若使用 Cursor：在 **`.cursor/rules/*.mdc`** 的 `@[file](...)` 列表**補上**該檔；必要時在「Cursor-specific notes」只寫工具專屬補充，不重複規則正文。  
+   - [ ] 若專案另有 Copilot 等適配：同樣只加**指標**，不重複貼上章節全文。
+
+4. **改名或刪除章節時**  
+   - 同步更新 `AGENTS.md` 索引、所有適配檔中的 `@`／連結；並以 `git grep` 或全文搜尋舊檔名確認無斷鏈。
+
+## 驗證方式
+
+- `AGENTS.md`「共同 baseline 章節」列出的每個 `ai-rules/*.md` 路徑，檔案均存在且為正式採用章節。  
+- `CLAUDE.md` 與 `.cursor/rules/agent-switch.mdc`（若存在）中的 `@`／`@[file]` 列表與上述索引一致，無遺漏、無指向已刪檔案。  
+- 適配檔內**沒有**與某一 `ai-rules` 章節大段重複的規則正文（僅短句指標或工具專屬補充可接受）。
+
+## 為什麼需要這條規則
+
+若共用規則只寫在某一工具設定裡、或與 `ai-rules` 各複製一份，會出現：更新只改一處、其他工具仍讀舊文、或無法對齊 baseline diff。固定「`AGENTS.md` + `ai-rules` 為單一來源、適配僅引用」後，**引入共用規則與框架**的變更可被同一套檢查清單驗證。
