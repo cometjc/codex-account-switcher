@@ -82,7 +82,7 @@
 ## Review
 
 - 根因不是 `wham/usage` 端點本身改掉，而是本 repo 的 Codex 路徑一直只拿 snapshot 裡的 `tokens.access_token` 直接打 usage API，完全沒有跟上官方 Codex client 的 token lifecycle：`last_refresh` 超過約 8 天要先 refresh，且 `401` 要 refresh-and-retry。
-- 實際檢查本機 `~/.codex/accounts/t5-team.json` 可見 `last_refresh=2026-03-17...`，已超過 stale 門檻；這解釋了為什麼 saved `t5-team` 會在 usage refresh 時先撞 `401 Unauthorized`。
+- 實際檢查本機 `~/.codex/accounts/example-corp-profile.json` 可見 `last_refresh=2026-03-17...`，已超過 stale 門檻；這解釋了為什麼 saved `example-corp-profile` 會在 usage refresh 時先撞 `401 Unauthorized`。
 - `src/usage.rs` 現在新增 Codex auth snapshot 解析、OAuth refresh、`last_refresh` 寫回、stale pre-refresh 與 `401` retry；`loader.rs` 與 `main.rs` 也改成對 Codex profile 傳入實際 auth snapshot path（current `auth.json` 或 saved account file），讓 rotated token 會寫回正確檔案，而不是只修到 current profile。
 - 驗證：`cargo test --manifest-path Cargo.toml` 全綠（47 + 1 + 3 tests）。
 
@@ -600,9 +600,9 @@
 
 ## Review
 
-- 根因：`npm run nlsdd:scoreboard:refresh` 原本直接覆寫 tracked 的 [`NLSDD/scoreboard.md`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scoreboard.md)，導致每次 refresh 都把主工作樹弄髒，也讓 merge / cherry-pick 容易被 runtime 狀態阻塞。
+- 根因：`npm run nlsdd:scoreboard:refresh` 原本直接覆寫 tracked 的 [`NLSDD/scoreboard.md`](/path/to/workspace/agent-switch/NLSDD/scoreboard.md)，導致每次 refresh 都把主工作樹弄髒，也讓 merge / cherry-pick 容易被 runtime 狀態阻塞。
 - 修正：新增 ignored runtime scoreboard 邊界，refresh 現在改寫 `NLSDD/state/scoreboard.runtime.md`；tracked 的 `NLSDD/scoreboard.md` 只保留 coordinator 維護的 canonical row set 與說明。
-- 一併把 [`NLSDD/state/`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/state/) 納入 [`.gitignore`](/home/jethro/repo/side-projects/codex-account-switcher/.gitignore)，讓 lane journal 與 runtime scoreboard 同屬執行期狀態，不再污染 tracked tree。
+- 一併把 [`NLSDD/state/`](/path/to/workspace/agent-switch/NLSDD/state/) 納入 [`.gitignore`](/path/to/workspace/agent-switch/.gitignore)，讓 lane journal 與 runtime scoreboard 同屬執行期狀態，不再污染 tracked tree。
 - 補上 `schedule` / `refill` 讀取鏈路，現在會優先使用 runtime scoreboard；只有 runtime 檔不存在時，才回退到 tracked scoreboard，避免 source of truth 再次分裂。
 - 再進一步將 tracked scoreboard 表格收斂為 manual-only 欄位；runtime refresh 會從這份人工欄位表擴張出完整的 derived table，讓 tracked 與 runtime 的責任分界更乾淨。
 - 驗證：
@@ -683,10 +683,10 @@
 
 ## Review
 
-- 根因：[`src/commands/root.ts`](/home/jethro/repo/side-projects/codex-account-switcher/src/commands/root.ts) 原本把 `Time to reset`、`Usage Left`、`Drift` 直接寫在每列 `W:` / `5H:` 詳細行裡，導致欄位名變成 row 內容而不是 header。
-- 修正：新增 [`src/lib/root-table-layout.ts`](/home/jethro/repo/side-projects/codex-account-switcher/src/lib/root-table-layout.ts) 集中處理 header 與 window detail line，讓 header 擁有欄位名，row 只渲染實際值。
-- 接線：[`src/commands/root.ts`](/home/jethro/repo/side-projects/codex-account-switcher/src/commands/root.ts) 改為呼叫 layout helper，而不是手寫帶 label 的詳細列字串。
-- 回歸測試：新增 [`tests/root-table-layout.test.js`](/home/jethro/repo/side-projects/codex-account-switcher/tests/root-table-layout.test.js) 驗證三個欄位名只出現在 header，不出現在 window row。
+- 根因：[`src/commands/root.ts`](/path/to/workspace/agent-switch/src/commands/root.ts) 原本把 `Time to reset`、`Usage Left`、`Drift` 直接寫在每列 `W:` / `5H:` 詳細行裡，導致欄位名變成 row 內容而不是 header。
+- 修正：新增 [`src/lib/root-table-layout.ts`](/path/to/workspace/agent-switch/src/lib/root-table-layout.ts) 集中處理 header 與 window detail line，讓 header 擁有欄位名，row 只渲染實際值。
+- 接線：[`src/commands/root.ts`](/path/to/workspace/agent-switch/src/commands/root.ts) 改為呼叫 layout helper，而不是手寫帶 label 的詳細列字串。
+- 回歸測試：新增 [`tests/root-table-layout.test.js`](/path/to/workspace/agent-switch/tests/root-table-layout.test.js) 驗證三個欄位名只出現在 header，不出現在 window row。
 - 驗證：
   `npm run build`
   `node --test tests/root-table-layout.test.js`
@@ -1075,14 +1075,14 @@
 
 ## Review
 
-- 新增 [`NLSDD/executions/plot-mode/overview.md`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/executions/plot-mode/overview.md) 作為總覽，固定 plot-mode execution 的 lanes 與各自 ownership family。
+- 新增 [`NLSDD/executions/plot-mode/overview.md`](/path/to/workspace/agent-switch/NLSDD/executions/plot-mode/overview.md) 作為總覽，固定 plot-mode execution 的 lanes 與各自 ownership family。
 - 新增 4 份 lane plan：
   `NLSDD/executions/plot-mode/lane-1.md`
   `NLSDD/executions/plot-mode/lane-2.md`
   `NLSDD/executions/plot-mode/lane-3.md`
   `NLSDD/executions/plot-mode/lane-4.md`
-- [`spec/NLSDD/guardrails.md`](/home/jethro/repo/side-projects/codex-account-switcher/spec/NLSDD/guardrails.md) 現在明確要求：sub-agent 應先從 lane plan 指派，回報要帶 `Lane + MVC step`，且 refill 應優先消耗同 lane 的下一個 unchecked item。
-- [`plan/2026-03-20-multi-phase-routing-plan.md`](/home/jethro/repo/side-projects/codex-account-switcher/plan/2026-03-20-multi-phase-routing-plan.md) 也同步記錄這次 lane-based orchestration 決策。
+- [`spec/NLSDD/guardrails.md`](/path/to/workspace/agent-switch/spec/NLSDD/guardrails.md) 現在明確要求：sub-agent 應先從 lane plan 指派，回報要帶 `Lane + MVC step`，且 refill 應優先消耗同 lane 的下一個 unchecked item。
+- [`plan/2026-03-20-multi-phase-routing-plan.md`](/path/to/workspace/agent-switch/plan/2026-03-20-multi-phase-routing-plan.md) 也同步記錄這次 lane-based orchestration 決策。
 
 # 2026-03-21 NLSDD operating rules 落地
 
@@ -1096,8 +1096,8 @@
 
 ## Review
 
-- 新增 [`spec/NLSDD/operating-rules.md`](/home/jethro/repo/side-projects/codex-account-switcher/spec/NLSDD/operating-rules.md)，作為 repo 內建的 NLSDD workflow 定義。
-- 新增 [`spec/NLSDD/guardrails.md`](/home/jethro/repo/side-projects/codex-account-switcher/spec/NLSDD/guardrails.md)、[`spec/NLSDD/communication.md`](/home/jethro/repo/side-projects/codex-account-switcher/spec/NLSDD/communication.md)、[`NLSDD/scoreboard.md`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scoreboard.md)。
+- 新增 [`spec/NLSDD/operating-rules.md`](/path/to/workspace/agent-switch/spec/NLSDD/operating-rules.md)，作為 repo 內建的 NLSDD workflow 定義。
+- 新增 [`spec/NLSDD/guardrails.md`](/path/to/workspace/agent-switch/spec/NLSDD/guardrails.md)、[`spec/NLSDD/communication.md`](/path/to/workspace/agent-switch/spec/NLSDD/communication.md)、[`NLSDD/scoreboard.md`](/path/to/workspace/agent-switch/NLSDD/scoreboard.md)。
 - plot-mode lane docs 現在集中在 `NLSDD/executions/plot-mode/`，不再散落於 `plan/` 根目錄。
 - `.gitignore` 現在忽略 `target/`，後續再配合 lane-local cleanup 去掉已進索引的 artifacts。
 
@@ -1112,10 +1112,10 @@
 
 ## Review
 
-- Lane 1 在 [`.worktrees/lane-1-node`](/home/jethro/repo/side-projects/codex-account-switcher/.worktrees/lane-1-node) 完成 real-binary handoff test，修正後綁回 `RootCommand.prototype.launchPlotViewer`，不再只是旁路測試。
-- Lane 2 在 [`.worktrees/lane-2-runtime`](/home/jethro/repo/side-projects/codex-account-switcher/.worktrees/lane-2-runtime) 先做 panel boundary expansion，再補一次 correction，把 `PanelRenderContext` 分清楚 outer `area` 與實際 drawable `content_area/layout`。
-- Lane 3 在 [`.worktrees/lane-3-chart`](/home/jethro/repo/side-projects/codex-account-switcher/.worktrees/lane-3-chart) 將 `chart.rs` 抽成私有 `ChartViewModel`，把 focused profile、7d bounds、5h band availability 的推導邏輯留在 chart lane 內。
-- Lane 4 在 [`.worktrees/lane-4-panels`](/home/jethro/repo/side-projects/codex-account-switcher/.worktrees/lane-4-panels) 消費 Lane 2 seam，補上 `Selected / Current / Focus / Pairing` 這類真正可見的 Summary / Compare body 內容。
+- Lane 1 在 [`.worktrees/lane-1-node`](/path/to/workspace/agent-switch/.worktrees/lane-1-node) 完成 real-binary handoff test，修正後綁回 `RootCommand.prototype.launchPlotViewer`，不再只是旁路測試。
+- Lane 2 在 [`.worktrees/lane-2-runtime`](/path/to/workspace/agent-switch/.worktrees/lane-2-runtime) 先做 panel boundary expansion，再補一次 correction，把 `PanelRenderContext` 分清楚 outer `area` 與實際 drawable `content_area/layout`。
+- Lane 3 在 [`.worktrees/lane-3-chart`](/path/to/workspace/agent-switch/.worktrees/lane-3-chart) 將 `chart.rs` 抽成私有 `ChartViewModel`，把 focused profile、7d bounds、5h band availability 的推導邏輯留在 chart lane 內。
+- Lane 4 在 [`.worktrees/lane-4-panels`](/path/to/workspace/agent-switch/.worktrees/lane-4-panels) 消費 Lane 2 seam，補上 `Selected / Current / Focus / Pairing` 這類真正可見的 Summary / Compare body 內容。
 - 這輪證明 `NLSDD` 可實際運作：每個 lane item 都有 lane-local commit，reviewer 只看該 item diff，correction loop 也能留在原 lane 內處理。
 - 驗證：
   - `node --test tests/plot-handoff.test.js` in `.worktrees/lane-1-node`
@@ -1135,8 +1135,8 @@
 ## Review
 
 - `spec/NLSDD/` 現在只承接已完成且已驗證的 NLSDD 定義；`NLSDD/` 承接 execution、scoreboard、scripts 與執行流程文件，避免把 runtime artifacts 混進 spec。
-- [`NLSDD/scoreboard.md`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scoreboard.md) 集中記錄 execution、lane、phase、latest commit、next refill target 與 noise 狀態。
-- [`spec/NLSDD/communication.md`](/home/jethro/repo/side-projects/codex-account-switcher/spec/NLSDD/communication.md) 將 reviewer / implementer / coordinator 的 sidecar 通道與 arbitration 規則固定化。
+- [`NLSDD/scoreboard.md`](/path/to/workspace/agent-switch/NLSDD/scoreboard.md) 集中記錄 execution、lane、phase、latest commit、next refill target 與 noise 狀態。
+- [`spec/NLSDD/communication.md`](/path/to/workspace/agent-switch/spec/NLSDD/communication.md) 將 reviewer / implementer / coordinator 的 sidecar 通道與 arbitration 規則固定化。
 - 噪音治理現在明確分成兩層：`.gitignore` 處理未追蹤 `target/`，lane worktree 再各自清掉已進索引的 `target/**`。
 
 # 2026-03-21 NLSDD scoreboard 半自動化第一版
@@ -1148,7 +1148,7 @@
 
 ## Review
 
-- 新增 [`NLSDD/scripts/nlsdd-refresh-scoreboard.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-refresh-scoreboard.cjs)，會讀取 `NLSDD/scoreboard.md`、lane plans、lane worktrees，以及 `~/.codex/state_5.sqlite`。
+- 新增 [`NLSDD/scripts/nlsdd-refresh-scoreboard.cjs`](/path/to/workspace/agent-switch/NLSDD/scripts/nlsdd-refresh-scoreboard.cjs)，會讀取 `NLSDD/scoreboard.md`、lane plans、lane worktrees，以及 `~/.codex/state_5.sqlite`。
 - scoreboard 現在保留 `Current item`、`Phase`、`Item commit`、`Blocked by`、`Next refill target`、`Notes` 這些人工決策欄位，同時自動更新 `Branch HEAD`、`Last probe`、`Noise`。
 - 自動附錄的 `Recent Codex Threads` 會列出最近在這個 repo cwd 活動的 subagent nickname、role、thread id 與 updated time，讓 coordinator 不用手動去 `.codex` 查。
 - 驗證：
@@ -1164,9 +1164,9 @@
 
 ## Review
 
-- 新增 [`NLSDD/scripts/nlsdd-lib.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-lib.cjs) 集中處理 scoreboard 表格、lane plan、thread/session event、phase 推導與 refill item 抽取。
-- 新增 [`NLSDD/scripts/nlsdd-probe-lane.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-probe-lane.cjs)、[`NLSDD/scripts/nlsdd-suggest-refill.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-suggest-refill.cjs)、[`NLSDD/scripts/nlsdd-compose-message.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-compose-message.cjs)。
-- [`NLSDD/scoreboard.md`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scoreboard.md) 現在同時承載 manual `Phase` 與 auto-derived `Effective phase`，避免 automation 直接覆寫 coordinator 意圖。
+- 新增 [`NLSDD/scripts/nlsdd-lib.cjs`](/path/to/workspace/agent-switch/NLSDD/scripts/nlsdd-lib.cjs) 集中處理 scoreboard 表格、lane plan、thread/session event、phase 推導與 refill item 抽取。
+- 新增 [`NLSDD/scripts/nlsdd-probe-lane.cjs`](/path/to/workspace/agent-switch/NLSDD/scripts/nlsdd-probe-lane.cjs)、[`NLSDD/scripts/nlsdd-suggest-refill.cjs`](/path/to/workspace/agent-switch/NLSDD/scripts/nlsdd-suggest-refill.cjs)、[`NLSDD/scripts/nlsdd-compose-message.cjs`](/path/to/workspace/agent-switch/NLSDD/scripts/nlsdd-compose-message.cjs)。
+- [`NLSDD/scoreboard.md`](/path/to/workspace/agent-switch/NLSDD/scoreboard.md) 現在同時承載 manual `Phase` 與 auto-derived `Effective phase`，避免 automation 直接覆寫 coordinator 意圖。
 - `autopilot refill` 在 v2 仍維持 assistive 模式：腳本只建議下一個 item，不直接派工或改 checklist。
 
 # 2026-03-21 NLSDD 多 lane / 4 active threads 模型
@@ -1177,9 +1177,9 @@
 
 ## Review
 
-- [`spec/NLSDD/operating-rules.md`](/home/jethro/repo/side-projects/codex-account-switcher/spec/NLSDD/operating-rules.md) 現在以 `lane pool size + active subagent cap` 取代舊的固定 `active lane count`。
-- [`NLSDD/scripts/nlsdd-suggest-schedule.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-suggest-schedule.cjs) 會彙整 active lanes、refill-ready lanes、queued lanes 與 dispatch suggestions。
-- [`NLSDD/scoreboard.md`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scoreboard.md) 補了建議 phase vocabulary，讓超過 4 條 lane 時仍能用 `queued` / `parked` 管理非 active lanes。
+- [`spec/NLSDD/operating-rules.md`](/path/to/workspace/agent-switch/spec/NLSDD/operating-rules.md) 現在以 `lane pool size + active subagent cap` 取代舊的固定 `active lane count`。
+- [`NLSDD/scripts/nlsdd-suggest-schedule.cjs`](/path/to/workspace/agent-switch/NLSDD/scripts/nlsdd-suggest-schedule.cjs) 會彙整 active lanes、refill-ready lanes、queued lanes 與 dispatch suggestions。
+- [`NLSDD/scoreboard.md`](/path/to/workspace/agent-switch/NLSDD/scoreboard.md) 補了建議 phase vocabulary，讓超過 4 條 lane 時仍能用 `queued` / `parked` 管理非 active lanes。
 
 # 2026-03-21 NLSDD worktree-local root 解析修正
 
@@ -1229,9 +1229,9 @@
 
 ## Review
 
-- [`NLSDD/scripts/nlsdd-lib.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-lib.cjs) 新增 `inspectLaneWorktree()` 與 `detectStaleImplementing()`，讓 schedule 在 lane journal 之外也會看 worktree truth。
-- [`NLSDD/scripts/nlsdd-suggest-schedule.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-suggest-schedule.cjs) 現在會額外輸出 `Stale implementing lanes`。
-- regression 在 [tests/nlsdd-automation.test.js](/home/jethro/repo/side-projects/codex-account-switcher/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-suggest-schedule.cjs --execution plot-mode` 已通過。
+- [`NLSDD/scripts/nlsdd-lib.cjs`](/path/to/workspace/agent-switch/NLSDD/scripts/nlsdd-lib.cjs) 新增 `inspectLaneWorktree()` 與 `detectStaleImplementing()`，讓 schedule 在 lane journal 之外也會看 worktree truth。
+- [`NLSDD/scripts/nlsdd-suggest-schedule.cjs`](/path/to/workspace/agent-switch/NLSDD/scripts/nlsdd-suggest-schedule.cjs) 現在會額外輸出 `Stale implementing lanes`。
+- regression 在 [tests/nlsdd-automation.test.js](/path/to/workspace/agent-switch/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-suggest-schedule.cjs --execution plot-mode` 已通過。
 
 # 2026-03-21 NLSDD dispatch cycle helper
 
@@ -1242,14 +1242,14 @@
 
 ## Review
 
-- 新增 [`NLSDD/scripts/nlsdd-run-cycle.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-run-cycle.cjs) 與 `npm run nlsdd:cycle`。
+- 新增 [`NLSDD/scripts/nlsdd-run-cycle.cjs`](/path/to/workspace/agent-switch/NLSDD/scripts/nlsdd-run-cycle.cjs) 與 `npm run nlsdd:cycle`。
 - cycle helper 現在會先把可由 tracked phase 解決的 `stale-implementing` lane 收回 truthful phase，再按既有 plan/journal 自動 promote 下一批 dispatchable lanes。
 - 輸出會明確列出：
   - `Reconciled lanes`
   - `Promoted lanes`
   - `Idle slots`
   - `No dispatch reason`
-- regression 在 [tests/nlsdd-automation.test.js](/home/jethro/repo/side-projects/codex-account-switcher/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-run-cycle.cjs --execution plot-mode --json` 已通過。
+- regression 在 [tests/nlsdd-automation.test.js](/path/to/workspace/agent-switch/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-run-cycle.cjs --execution plot-mode --json` 已通過。
 
 # 2026-03-21 NLSDD launch-active-set bridge
 
@@ -1259,9 +1259,9 @@
 
 ## Review
 
-- 新增 [`NLSDD/scripts/nlsdd-launch-active-set.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-launch-active-set.cjs) 與 `npm run nlsdd:launch`，讓 coordinator 用一個指令就能拿到 `completed lanes`、`promoted lanes`、`idle slots` 與每條 promoted lane 的 handoff message。
-- [`NLSDD/scripts/nlsdd-lib.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-lib.cjs) 的 lane plan parser 現在會保留 `Ownership family`，避免 assignment bundle 只能回 generic scope。
-- regression 在 [tests/nlsdd-automation.test.js](/home/jethro/repo/side-projects/codex-account-switcher/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-launch-active-set.cjs --execution plot-mode --json --dry-run` 已通過。
+- 新增 [`NLSDD/scripts/nlsdd-launch-active-set.cjs`](/path/to/workspace/agent-switch/NLSDD/scripts/nlsdd-launch-active-set.cjs) 與 `npm run nlsdd:launch`，讓 coordinator 用一個指令就能拿到 `completed lanes`、`promoted lanes`、`idle slots` 與每條 promoted lane 的 handoff message。
+- [`NLSDD/scripts/nlsdd-lib.cjs`](/path/to/workspace/agent-switch/NLSDD/scripts/nlsdd-lib.cjs) 的 lane plan parser 現在會保留 `Ownership family`，避免 assignment bundle 只能回 generic scope。
+- regression 在 [tests/nlsdd-automation.test.js](/path/to/workspace/agent-switch/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-launch-active-set.cjs --execution plot-mode --json --dry-run` 已通過。
 
 # 2026-03-21 NLSDD review-loop driver
 
@@ -1271,9 +1271,9 @@
 
 ## Review
 
-- 新增 [`NLSDD/scripts/nlsdd-drive-review-loop.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-drive-review-loop.cjs) 與 `npm run nlsdd:review`，讓 coordinator 不必逐條掃 lane docs/journal，就能拿到下一步 review action。
+- 新增 [`NLSDD/scripts/nlsdd-drive-review-loop.cjs`](/path/to/workspace/agent-switch/NLSDD/scripts/nlsdd-drive-review-loop.cjs) 與 `npm run nlsdd:review`，讓 coordinator 不必逐條掃 lane docs/journal，就能拿到下一步 review action。
 - helper 目前會優先吃 lane journal phase，再回退到 runtime/tracked scoreboard phase，並重用既有的 `spec-review`、`quality-review`、`correction-loop` 模板；若 lane 已進 `coordinator-commit-pending`，則輸出 commit intake bundle。
-- regression 在 [tests/nlsdd-automation.test.js](/home/jethro/repo/side-projects/codex-account-switcher/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-drive-review-loop.cjs --execution plot-mode --json` 已通過。
+- regression 在 [tests/nlsdd-automation.test.js](/path/to/workspace/agent-switch/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-drive-review-loop.cjs --execution plot-mode --json` 已通過。
 
 # 2026-03-21 NLSDD READY_TO_COMMIT intake helper
 
@@ -1283,9 +1283,9 @@
 
 ## Review
 
-- [`NLSDD/scripts/nlsdd-record-lane-state.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-record-lane-state.cjs) 現在支援 `--commit-title` 與 `--commit-body`，讓 `READY_TO_COMMIT` handoff 不只剩 phase 與 note。
-- 新增 [`NLSDD/scripts/nlsdd-intake-ready-to-commit.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-intake-ready-to-commit.cjs) 與 `npm run nlsdd:intake`，可直接列出目前可由 coordinator 收單提交的 lanes。
-- [`NLSDD/scripts/nlsdd-drive-review-loop.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-drive-review-loop.cjs) 的 `coordinator-commit-needed` 輸出也會帶 proposed commit title/body，避免 review helper 和 intake helper 出現兩套 commit 資訊。
+- [`NLSDD/scripts/nlsdd-record-lane-state.cjs`](/path/to/workspace/agent-switch/NLSDD/scripts/nlsdd-record-lane-state.cjs) 現在支援 `--commit-title` 與 `--commit-body`，讓 `READY_TO_COMMIT` handoff 不只剩 phase 與 note。
+- 新增 [`NLSDD/scripts/nlsdd-intake-ready-to-commit.cjs`](/path/to/workspace/agent-switch/NLSDD/scripts/nlsdd-intake-ready-to-commit.cjs) 與 `npm run nlsdd:intake`，可直接列出目前可由 coordinator 收單提交的 lanes。
+- [`NLSDD/scripts/nlsdd-drive-review-loop.cjs`](/path/to/workspace/agent-switch/NLSDD/scripts/nlsdd-drive-review-loop.cjs) 的 `coordinator-commit-needed` 輸出也會帶 proposed commit title/body，避免 review helper 和 intake helper 出現兩套 commit 資訊。
 
 # 2026-03-21 NLSDD coordinator autopilot loop
 
@@ -1295,9 +1295,9 @@
 
 ## Review
 
-- 新增 [`NLSDD/scripts/nlsdd-run-coordinator-loop.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-run-coordinator-loop.cjs) 與 `npm run nlsdd:autopilot`，讓 coordinator 可一次取得整輪 deterministic 狀態摘要。
+- 新增 [`NLSDD/scripts/nlsdd-run-coordinator-loop.cjs`](/path/to/workspace/agent-switch/NLSDD/scripts/nlsdd-run-coordinator-loop.cjs) 與 `npm run nlsdd:autopilot`，讓 coordinator 可一次取得整輪 deterministic 狀態摘要。
 - autopilot 目前是 assistive automation：它會執行 cycle/launch 的狀態收斂，並彙整 review/intake 結果，但不直接代 main agent 呼叫 subagent 工具。
-- regression 在 [tests/nlsdd-automation.test.js](/home/jethro/repo/side-projects/codex-account-switcher/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-run-coordinator-loop.cjs --execution plot-mode --json` 已通過。
+- regression 在 [tests/nlsdd-automation.test.js](/path/to/workspace/agent-switch/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-run-coordinator-loop.cjs --execution plot-mode --json` 已通過。
 
 # 2026-03-21 NLSDD dispatch plan helper
 
@@ -1307,9 +1307,9 @@
 
 ## Review
 
-- 新增 [`NLSDD/scripts/nlsdd-build-dispatch-plan.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-build-dispatch-plan.cjs) 與 `npm run nlsdd:dispatch-plan`，讓 main agent 可直接取得本輪 action queue。
-- helper 不重新計算 lane truth，而是直接吃 [`NLSDD/scripts/nlsdd-run-coordinator-loop.cjs`](/home/jethro/repo/side-projects/codex-account-switcher/NLSDD/scripts/nlsdd-run-coordinator-loop.cjs) 的輸出，避免再引入第四套 state。
-- regression 在 [tests/nlsdd-automation.test.js](/home/jethro/repo/side-projects/codex-account-switcher/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-build-dispatch-plan.cjs --execution plot-mode --json` 已通過。
+- 新增 [`NLSDD/scripts/nlsdd-build-dispatch-plan.cjs`](/path/to/workspace/agent-switch/NLSDD/scripts/nlsdd-build-dispatch-plan.cjs) 與 `npm run nlsdd:dispatch-plan`，讓 main agent 可直接取得本輪 action queue。
+- helper 不重新計算 lane truth，而是直接吃 [`NLSDD/scripts/nlsdd-run-coordinator-loop.cjs`](/path/to/workspace/agent-switch/NLSDD/scripts/nlsdd-run-coordinator-loop.cjs) 的輸出，避免再引入第四套 state。
+- regression 在 [tests/nlsdd-automation.test.js](/path/to/workspace/agent-switch/tests/nlsdd-automation.test.js)；驗證上 `node --test tests/nlsdd-automation.test.js` 與 `node NLSDD/scripts/nlsdd-build-dispatch-plan.cjs --execution plot-mode --json` 已通過。
 
 # 2026-03-21 NLSDD honest next-item rewrite
 

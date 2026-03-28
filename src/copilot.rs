@@ -346,15 +346,15 @@ mod tests {
     #[test]
     fn parse_copilot_config_extracts_login_and_token() {
         let raw = r#"{
-            "logged_in_users": [{"host": "https://github.com", "login": "teamt5-it"}],
-            "last_logged_in_user": {"host": "https://github.com", "login": "teamt5-it"},
+            "logged_in_users": [{"host": "https://github.com", "login": "acme-corp-dev"}],
+            "last_logged_in_user": {"host": "https://github.com", "login": "acme-corp-dev"},
             "copilot_tokens": {
-                "https://github.com:teamt5-it": "gho_businesstoken"
+                "https://github.com:acme-corp-dev": "gho_example-oauth-token"
             }
         }"#;
         let creds = parse_copilot_config(raw).unwrap();
-        assert_eq!(creds.login, "teamt5-it");
-        assert_eq!(creds.oauth_token, "gho_businesstoken");
+        assert_eq!(creds.login, "acme-corp-dev");
+        assert_eq!(creds.oauth_token, "gho_example-oauth-token");
     }
 
     #[test]
@@ -366,7 +366,7 @@ mod tests {
     #[test]
     fn map_copilot_usage_response_handles_business_quota_snapshots() {
         let r = CopilotUserResponse {
-            login: Some("teamt5-it".to_string()),
+            login: Some("acme-corp-dev".to_string()),
             copilot_plan: Some("business".to_string()),
             monthly_quotas: None,
             limited_user_quotas: None,
