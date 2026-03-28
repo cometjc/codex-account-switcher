@@ -69,3 +69,16 @@ test('legacy Node product entrypoints are gone', () => {
   assert.equal(fs.existsSync(repoPath('src/commands')), false);
   assert.equal(fs.existsSync(repoPath('bin/agent-switch-dev.cjs')), false);
 });
+
+test('package.json exposes test, lint, and audit scripts for local dev', () => {
+  const packageJson = require(repoPath('package.json'));
+  const { scripts } = packageJson;
+
+  assert.match(scripts.test, /cargo test/);
+  assert.match(scripts.test, /node --test/);
+  assert.match(scripts['lint:rust'], /clippy/);
+  assert.match(scripts['audit:rust'], /cargo audit/);
+  assert.match(scripts.check, /lint:rust/);
+  assert.match(scripts.check, /npm test/);
+  assert.match(scripts.check, /audit:rust/);
+});

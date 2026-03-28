@@ -65,7 +65,11 @@ fn parse_headers(headers_block: &str) -> HashMap<String, String> {
     m
 }
 
-fn read_http_request(stream: &mut TcpStream, max_body: usize) -> std::io::Result<Option<(String, String, HashMap<String, String>, Vec<u8>)>> {
+#[allow(clippy::type_complexity)]
+fn read_http_request(
+    stream: &mut TcpStream,
+    max_body: usize,
+) -> std::io::Result<Option<(String, String, HashMap<String, String>, Vec<u8>)>> {
     let mut buf = Vec::new();
     let mut tmp = [0u8; 1024];
     loop {

@@ -1212,7 +1212,7 @@ impl App {
 
     fn render_left_pane(&self, frame: &mut Frame, area: Rect) {
         let indices = self.filtered_profile_indices();
-        let list_lines = (indices.len().max(3).min(10) + 2) as u16;
+        let list_lines = (indices.len().clamp(3, 10) + 2) as u16;
         let refresh_lines = render_refresh_tasks(
             &self.cron_status,
             self.status_message.as_deref(),
@@ -1736,7 +1736,7 @@ fn auto_y_lower(profiles: &[ProfileEntry]) -> f64 {
                 .seven_day_points
                 .iter()
                 .map(|pt| pt.y)
-                .chain(profile.chart_data.five_hour_subframe.lower_y.into_iter())
+                .chain(profile.chart_data.five_hour_subframe.lower_y)
         })
         .fold(f64::INFINITY, f64::min);
     if min_y.is_infinite() {

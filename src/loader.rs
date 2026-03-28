@@ -18,6 +18,7 @@ pub struct ProfileLoadReport {
     pub refresh_errors: Vec<String>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn load_profiles(
     store: &AccountStore,
     usage_service: &UsageService,
@@ -41,6 +42,7 @@ pub fn load_profiles(
     .profiles)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn load_profiles_with_report(
     store: &AccountStore,
     usage_service: &UsageService,
@@ -360,6 +362,7 @@ fn load_claude_profiles(
     Ok((profiles, refresh_errors))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_saved_entry(
     store: &AccountStore,
     profile: SavedProfile,
@@ -429,6 +432,7 @@ fn build_saved_entry(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn read_usage_for_profile(
     service_label: &str,
     profile_label: &str,

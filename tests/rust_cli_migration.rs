@@ -17,11 +17,10 @@ fn temp_dir(label: &str) -> PathBuf {
     path
 }
 
-#[test]
-fn account_store_roundtrip_save_use_rename_delete_tracks_current_name() {
+fn account_store_roundtrip_save_use_rename_delete_tracks_current_name(platform: StorePlatform) {
     let root = temp_dir("store");
     let paths = AppPaths::from_codex_dir(root.join(".codex"));
-    let store = AccountStore::new(paths.clone(), StorePlatform::Symlink);
+    let store = AccountStore::new(paths.clone(), platform);
 
     fs::create_dir_all(paths.codex_dir()).expect("codex dir");
     fs::write(
@@ -49,6 +48,19 @@ fn account_store_roundtrip_save_use_rename_delete_tracks_current_name() {
 
     store.delete_account("beta").expect("delete account");
     assert!(store.list_account_names().expect("list names").is_empty());
+}
+
+/// Exercises real `std::os::unix::fs::symlink` in `AccountStore::use_account`.
+#[cfg(unix)]
+#[test]
+fn account_store_roundtrip_symlink_unix() {
+    account_store_roundtrip_save_use_rename_delete_tracks_current_name(StorePlatform::Symlink);
+}
+
+/// Same flow as Windows `StorePlatform::detect()` copy path; runnable on Linux CI.
+#[test]
+fn account_store_roundtrip_copy_all_platforms() {
+    account_store_roundtrip_save_use_rename_delete_tracks_current_name(StorePlatform::Copy);
 }
 
 #[test]

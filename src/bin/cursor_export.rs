@@ -157,7 +157,7 @@ fn map_cdp_cookie_to_playwright(c: &Value) -> Option<Value> {
 }
 
 fn build_storage_state(cookies: &[Value]) -> Value {
-    let mapped: Vec<Value> = cookies.iter().filter_map(|c| map_cdp_cookie_to_playwright(c)).collect();
+    let mapped: Vec<Value> = cookies.iter().filter_map(map_cdp_cookie_to_playwright).collect();
     json!({
         "cookies": mapped,
         "origins": [],

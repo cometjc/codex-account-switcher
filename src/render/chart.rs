@@ -68,11 +68,10 @@ pub fn render_chart<State: RenderState>(frame: &mut Frame, context: &RenderConte
         Some(label) => format!("[{}] · ", label),
         None => String::new(),
     };
-    let hint_line = if chart_state.fullscreen {
-        format!("{}W:{} · ←→=pan · =/- zoom-x · ↑↓=pan-y · [/]=zoom-y · z=reset · 1/3/7=snap", view_prefix, window_label)
-    } else {
-        format!("{}W:{} · ←→=pan · =/- zoom-x · ↑↓=pan-y · [/]=zoom-y · z=reset · 1/3/7=snap", view_prefix, window_label)
-    };
+    let hint_line = format!(
+        "{}W:{} · ←→=pan · =/- zoom-x · ↑↓=pan-y · [/]=zoom-y · z=reset · 1/3/7=snap",
+        view_prefix, window_label
+    );
     let band_summary = Paragraph::new(Text::from(vec![Line::from(hint_line)]))
         .wrap(Wrap { trim: true });
     frame.render_widget(band_summary, band_area);

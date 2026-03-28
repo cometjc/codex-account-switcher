@@ -359,7 +359,9 @@ pub fn parse_rfc3339_unix(s: &str) -> Option<i64> {
     let t = s.find('T')?;
     let date = &s[..t];
     let rest = &s[t + 1..];
-    let time_end = rest.find(|c| c == '.' || c == '+' || c == 'Z').unwrap_or(rest.len());
+    let time_end = rest
+        .find(|c| ['.', '+', 'Z'].contains(&c))
+        .unwrap_or(rest.len());
     let time = &rest[..time_end];
 
     let dp: Vec<i64> = date.split('-').map(|p| p.parse().ok()).collect::<Option<_>>()?;
@@ -375,7 +377,9 @@ pub fn parse_rfc3339_unix(s: &str) -> Option<i64> {
 
 /// Compute days since Unix epoch (1970-01-01) for a Gregorian date.
 fn days_since_epoch(year: i64, month: i64, day: i64) -> Option<i64> {
-    if month < 1 || month > 12 || day < 1 || day > 31 { return None; }
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
     // Algorithm: days_from_civil from http://howardhinnant.github.io/date_algorithms.html
     let y = if month <= 2 { year - 1 } else { year };
     let m = if month <= 2 { month + 9 } else { month - 3 };
@@ -573,6 +577,27 @@ fn is_debug_mode_enabled() -> bool {
         .is_some_and(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
 }
 
+/// Shorten identifiers in stderr debug lines (not security-critical, but reduces log sensitivity).
+fn format_debug_identifier(value: &str) -> String {
+    const PREFIX: usize = 4;
+    const SUFFIX: usize = 4;
+    const MAX_BEFORE_TRUNC: usize = 24;
+    if value.chars().count() <= MAX_BEFORE_TRUNC {
+        return value.to_string();
+    }
+    let chars: Vec<char> = value.chars().collect();
+    let prefix: String = chars.iter().take(PREFIX).collect();
+    let suffix: String = chars
+        .iter()
+        .rev()
+        .take(SUFFIX)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("{prefix}…{suffix}")
+}
+
 fn debug_print_claude_usage_payload(account_id: &str, subscription_type: &str, raw: &Value) {
     if !is_debug_mode_enabled() {
         return;
@@ -585,8 +610,11 @@ fn debug_print_claude_usage_payload(account_id: &str, subscription_type: &str, r
     let raw_shape = serde_json::to_string_pretty(&safe_payload).unwrap_or_else(|_| "<unable to render payload>".to_string());
 
     eprintln!("[debug] Claude usage response shape mismatch");
-    eprintln!("  account_id: {account_id}");
-    eprintln!("  subscription: {subscription_type}");
+    eprintln!("  account_id: {}", format_debug_identifier(account_id));
+    eprintln!(
+        "  subscription: {}",
+        format_debug_identifier(subscription_type)
+    );
     eprintln!("  top_level_keys: {top_level_keys:?}");
     eprintln!("  five_hour_present: {}", five_hour_keys.is_some());
     eprintln!("  seven_day_present: {}", seven_day_keys.is_some());
@@ -871,6 +899,22 @@ mod tests {
         assert_eq!(sanitized["seven_day"]["nested"]["refreshToken"], serde_json::json!("[redacted]"));
         assert_eq!(sanitized["auth"]["authorization"], serde_json::json!("[redacted]"));
         assert_eq!(sanitized["auth"]["api_key"], serde_json::json!("[redacted]"));
+    }
+
+    #[test]
+    fn format_debug_identifier_passes_through_short_strings() {
+        assert_eq!(super::format_debug_identifier("short"), "short");
+        assert_eq!(super::format_debug_identifier(""), "");
+    }
+
+    #[test]
+    fn format_debug_identifier_truncates_long_strings() {
+        let s = "abcdefghijklmnopqrstuvwxyz0123456789";
+        let out = super::format_debug_identifier(s);
+        assert!(out.contains('…'), "{out}");
+        assert!(out.starts_with("abcd"), "{out}");
+        assert!(out.ends_with("6789"), "{out}");
+        assert!(!out.contains("efghijk"), "{out}");
     }
 
     #[test]
