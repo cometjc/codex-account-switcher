@@ -3,6 +3,7 @@
 @ai-rules/shared-baseline-sync-and-local-adoption.md
 @ai-rules/shared-rules-entry-and-thin-adapters.md
 @ai-rules/commit-each-minimum-viable-change.md
+@ai-rules/before-new-mvc-assess-existing-dirty-tree.md
 @ai-rules/choose-agents-skill-script-or-runbook.md
 @ai-rules/verify-third-party-module-interface-before-integration.md
 @ai-rules/distinguish-rule-suggestions-from-established-process-state.md

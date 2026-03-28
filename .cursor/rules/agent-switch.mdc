@@ -8,6 +8,7 @@ description: Governance index + shared baseline chapters for this repo
 @[file](../../ai-rules/shared-baseline-sync-and-local-adoption.md)
 @[file](../../ai-rules/shared-rules-entry-and-thin-adapters.md)
 @[file](../../ai-rules/commit-each-minimum-viable-change.md)
+@[file](../../ai-rules/before-new-mvc-assess-existing-dirty-tree.md)
 @[file](../../ai-rules/choose-agents-skill-script-or-runbook.md)
 @[file](../../ai-rules/verify-third-party-module-interface-before-integration.md)
 @[file](../../ai-rules/distinguish-rule-suggestions-from-established-process-state.md)

@@ -8,6 +8,7 @@
 - 若剩餘變更中還能拆出新的 Minimum Viable Change，應先整理並提交該單位，而不是把多個已成立的變更長時間混在同一工作樹中。
 - 若剩餘變更還無法形成新的 Minimum Viable Change，應明確回報未提交部分與下一個 Minimum Viable Change 之間仍待補完的差距。
 - 若使用者明確要求不要 commit、延後 commit，或目前工作樹含有不應代為處理的他人變更，應先遵從限制並改為回報狀態。
+- 著手**下一個** MVC 之前，若工作樹仍有未提交變更，應先依 [before-new-mvc-assess-existing-dirty-tree.md](before-new-mvc-assess-existing-dirty-tree.md) 釐清（含不明來源變更時之評鑑與是否 commit）。
 
 ## 為什麼需要這條規則
 
