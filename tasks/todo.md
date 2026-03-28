@@ -2,4 +2,4 @@
 
 此檔保留**當前迭代**的核取清單與簡短備註。
 
-歷史已完成區塊、長篇 Review 與舊條目見 [todo-archive.md](todo-archive.md)（以 `# 日期` 標題分段，可用搜尋定位）。
+歷史里程碑精簡索引見 [todo-archive.md](todo-archive.md)（細節已刪減，完整敘述請用 `git` 追溯舊版歸檔）。
