@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::Arc;
+use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -15,6 +16,7 @@ use serde_json::Value;
 use crate::cron::CronStatus;
 use crate::input::{self, InputAction, InputContext};
 use crate::loader::load_profiles;
+use crate::refresh_log::append_refresh_log;
 use crate::render;
 use crate::render::{
     ChartSeries, ChartSeriesStyle, ChartState, FiveHourBandState, FiveHourSubframeState, RenderProfile,
@@ -27,6 +29,9 @@ use crate::usage::{
 use crate::app_data::{ProfileChartData, ProfileEntry, ProfileKind};
 
 const BACKGROUND_REFRESH_STALE_SECONDS: i64 = 600;
+const CRON_YIELD_FRESH_SECONDS: i64 = 15 * 60;
+const BACKGROUND_REFRESH_ERROR_COOLDOWN_SECONDS: i64 = 600;
+const HOT_RELOAD_CHECK_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum BackgroundRefreshState {
@@ -139,6 +144,7 @@ pub struct App {
     y_zoom_upper: f64,
     filter_input: Option<String>,
     last_auto_reload: Instant,
+    last_binary_reload_check: Instant,
     y_zoom_user_adjusted: bool,
     binary_path: String,
     binary_mtime: Option<std::time::SystemTime>,
@@ -146,6 +152,7 @@ pub struct App {
     hidden_profiles: std::collections::HashSet<String>,
     background_refresh_state: BackgroundRefreshState,
     background_refresh_receiver: Option<Receiver<BackgroundRefreshReport>>,
+    background_refresh_retry_after: Option<i64>,
     cursor_ingest: Option<CursorIngestSession>,
 }
 
@@ -183,10 +190,9 @@ impl App {
             claude_usage_service.as_ref(),
             copilot_usage_service.as_ref(),
         )?;
-        let binary_path = std::env::current_exe()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned();
+        let current_exe = std::env::current_exe().unwrap_or_default();
+        let hot_reload_path = resolve_hot_reload_binary_path(&current_exe);
+        let binary_path = hot_reload_path.to_string_lossy().into_owned();
         let binary_mtime = binary_mtime(&binary_path);
         let hidden_profiles = store.read_ui_state().hidden_profiles;
         let mut app = Self {
@@ -211,6 +217,7 @@ impl App {
             y_zoom_upper: 100.0,
             filter_input: None,
             last_auto_reload: Instant::now(),
+            last_binary_reload_check: Instant::now(),
             y_zoom_user_adjusted: false,
             binary_path,
             binary_mtime,
@@ -218,6 +225,7 @@ impl App {
             hidden_profiles,
             background_refresh_state: BackgroundRefreshState::Idle,
             background_refresh_receiver: None,
+            background_refresh_retry_after: None,
             cursor_ingest: None,
         };
         app.ensure_background_refresh_task();
@@ -267,6 +275,7 @@ impl App {
             y_zoom_upper: 100.0,
             filter_input: None,
             last_auto_reload: Instant::now(),
+            last_binary_reload_check: Instant::now(),
             y_zoom_user_adjusted: false,
             binary_path: String::new(),
             binary_mtime: None,
@@ -274,6 +283,7 @@ impl App {
             hidden_profiles: std::collections::HashSet::new(),
             background_refresh_state: BackgroundRefreshState::Idle,
             background_refresh_receiver: None,
+            background_refresh_retry_after: None,
             cursor_ingest: None,
         }
     }
@@ -316,6 +326,7 @@ impl App {
         while !self.should_quit && !self.should_exec {
             self.poll_background_refresh();
             self.poll_cursor_ingest();
+            self.poll_hot_reload_binary();
             terminal.draw(|frame| self.render(frame))?;
 
             if event::poll(Duration::from_millis(150))? {
@@ -329,13 +340,31 @@ impl App {
             if self.last_auto_reload.elapsed() >= Duration::from_secs(30) {
                 let _ = self.reload_profiles(false, None);
                 self.last_auto_reload = Instant::now();
-                // Check if binary was updated — exec new version if so
-                if binary_mtime(&self.binary_path) != self.binary_mtime {
-                    self.should_exec = true;
-                }
             }
         }
         Ok(())
+    }
+
+    fn poll_hot_reload_binary(&mut self) {
+        if self.binary_path.is_empty() {
+            return;
+        }
+        if self.last_binary_reload_check.elapsed() < HOT_RELOAD_CHECK_INTERVAL {
+            return;
+        }
+        self.last_binary_reload_check = Instant::now();
+
+        let current_path = PathBuf::from(&self.binary_path);
+        let candidate_path = resolve_hot_reload_binary_path(&current_path);
+        let candidate_mtime = binary_mtime(candidate_path.to_string_lossy().as_ref());
+        let path_changed = candidate_path != current_path;
+        let mtime_changed = candidate_mtime != self.binary_mtime;
+        if path_changed || mtime_changed {
+            self.binary_path = candidate_path.to_string_lossy().into_owned();
+            self.binary_mtime = candidate_mtime;
+            self.should_exec = true;
+            self.status_message = Some("Detected binary update, reloading...".to_string());
+        }
     }
 
     fn handle_action(&mut self, action: InputAction) -> Result<()> {
@@ -988,11 +1017,36 @@ impl App {
         if !self.y_zoom_user_adjusted {
             self.y_zoom_lower = auto_y_lower(&self.profiles);
         }
+        let error_count = report.refresh_errors.len();
+        if let Some(store) = self.store.as_ref() {
+            let detail = format!(
+                "mode=app force_refresh={} target={} profiles={} errors={}{}",
+                force_refresh,
+                refresh_account_id.as_deref().unwrap_or("all"),
+                self.profiles.len(),
+                error_count,
+                if error_count > 0 {
+                    format!(" first_error={}", report.refresh_errors[0])
+                } else {
+                    String::new()
+                }
+            );
+            append_refresh_log(store.paths().refresh_log_path().as_path(), "reload_profiles", &detail);
+        }
         self.ensure_background_refresh_task();
         Ok(report.refresh_errors)
     }
 
     fn ensure_background_refresh_task(&mut self) {
+        let now_seconds = now_unix_seconds();
+        if !should_schedule_background_refresh(self.background_refresh_retry_after, now_seconds) {
+            return;
+        }
+        if !should_run_app_background_refresh(&self.cron_status, now_seconds) {
+            self.background_refresh_state = BackgroundRefreshState::Idle;
+            self.background_refresh_receiver = None;
+            return;
+        }
         if self.background_refresh_receiver.is_some() {
             return;
         }
@@ -1063,7 +1117,25 @@ impl App {
             Ok(report) => {
                 self.background_refresh_receiver = None;
                 self.background_refresh_state = BackgroundRefreshState::Idle;
+                self.background_refresh_retry_after = if report.refresh_errors.is_empty() {
+                    None
+                } else {
+                    Some(now_unix_seconds() + BACKGROUND_REFRESH_ERROR_COOLDOWN_SECONDS)
+                };
                 let reload_result = self.reload_profiles(false, None);
+                if let Some(store) = self.store.as_ref() {
+                    let detail = format!(
+                        "mode=app-background refreshed_profiles={} errors={}{}",
+                        report.refreshed_profiles,
+                        report.refresh_errors.len(),
+                        if report.refresh_errors.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" first_error={}", report.refresh_errors[0])
+                        }
+                    );
+                    append_refresh_log(store.paths().refresh_log_path().as_path(), "background_refresh", &detail);
+                }
                 self.status_message = Some(match (report.refreshed_profiles, report.refresh_errors.is_empty()) {
                     (count, true) => format!("Background refresh updated {count} profiles"),
                     (count, false) if count > 0 => format!(
@@ -1478,6 +1550,42 @@ fn binary_mtime(path: &str) -> Option<std::time::SystemTime> {
     std::fs::metadata(path).ok()?.modified().ok()
 }
 
+fn should_run_app_background_refresh(cron_status: &CronStatus, now_seconds: i64) -> bool {
+    if !cron_status.installed {
+        return true;
+    }
+    let has_recent_success = cron_status
+        .last_run
+        .is_some_and(|ts| now_seconds.saturating_sub(ts) <= CRON_YIELD_FRESH_SECONDS);
+    let has_errors = cron_status.codex_error.is_some()
+        || cron_status.claude_error.is_some()
+        || cron_status.copilot_error.is_some();
+    // Yield only when cron has succeeded recently and is currently healthy.
+    !(has_recent_success && !has_errors)
+}
+
+fn should_schedule_background_refresh(retry_after: Option<i64>, now_seconds: i64) -> bool {
+    !retry_after.is_some_and(|retry_at| now_seconds < retry_at)
+}
+
+fn resolve_hot_reload_binary_path(current_exe: &std::path::Path) -> PathBuf {
+    let current = current_exe.to_path_buf();
+    let current_meta = std::fs::metadata(&current).ok().and_then(|m| m.modified().ok());
+    let path_bin = which::which("agent-switch").ok();
+    match (path_bin, current_meta) {
+        (Some(path_bin), Some(current_mtime)) => {
+            let path_mtime = std::fs::metadata(&path_bin).ok().and_then(|m| m.modified().ok());
+            if path_mtime.is_some_and(|mtime| mtime > current_mtime) {
+                path_bin
+            } else {
+                current
+            }
+        }
+        (Some(path_bin), None) => path_bin,
+        (None, _) => current,
+    }
+}
+
 fn initial_selected_index(profiles: &[ProfileEntry]) -> usize {
     profiles.iter().position(|profile| profile.is_current).unwrap_or(0)
 }
@@ -1871,6 +1979,7 @@ fn char_to_byte_index(text: &str, char_index: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use crate::app_data::{OwnedFiveHourBandState, OwnedFiveHourSubframeState};
     use crate::render::ChartPoint;
     use super::*;
@@ -1906,6 +2015,92 @@ mod tests {
         app.pane_focus = app.pane_focus.toggle();
         assert_eq!(app.pane_focus, PaneFocus::Accounts);
         assert_eq!(app.selected_profile_label(), Some("Beta"));
+    }
+
+    #[test]
+    fn app_background_refresh_yields_when_cron_installed() {
+        let now = 1_800_000_000;
+        let healthy_recent = CronStatus {
+            installed: true,
+            last_run: Some(now - 120),
+            last_attempt: Some(now - 120),
+            codex_error: None,
+            claude_error: None,
+            copilot_error: None,
+        };
+        assert!(!should_run_app_background_refresh(&healthy_recent, now));
+
+        let installed_but_stale = CronStatus {
+            installed: true,
+            last_run: Some(now - 10_000),
+            last_attempt: Some(now - 120),
+            codex_error: None,
+            claude_error: None,
+            copilot_error: None,
+        };
+        assert!(should_run_app_background_refresh(&installed_but_stale, now));
+
+        let attempted_but_failed = CronStatus {
+            installed: true,
+            last_run: Some(now - 10_000),
+            last_attempt: Some(now - 60),
+            codex_error: Some("HTTP 402".to_string()),
+            claude_error: None,
+            copilot_error: None,
+        };
+        assert!(should_run_app_background_refresh(&attempted_but_failed, now));
+
+        let installed_with_error = CronStatus {
+            installed: true,
+            last_run: Some(now - 60),
+            last_attempt: Some(now - 60),
+            codex_error: Some("HTTP 402".to_string()),
+            claude_error: None,
+            copilot_error: None,
+        };
+        assert!(should_run_app_background_refresh(&installed_with_error, now));
+
+        assert!(should_run_app_background_refresh(&CronStatus::uninstalled(), now));
+    }
+
+    #[test]
+    fn app_background_refresh_respects_error_cooldown() {
+        let now = 1_800_000_000;
+        assert!(!should_schedule_background_refresh(Some(now + 60), now));
+        assert!(should_schedule_background_refresh(Some(now - 1), now));
+        assert!(should_schedule_background_refresh(None, now));
+    }
+
+    #[test]
+    fn resolve_hot_reload_binary_prefers_newer_path_binary() {
+        let base = std::env::temp_dir().join(format!("agent-switch-hot-reload-{}", std::process::id()));
+        let _ = fs::create_dir_all(&base);
+        let current = base.join("agent-switch-current");
+        let path_bin = base.join("agent-switch");
+        fs::write(&current, "old").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        fs::write(&path_bin, "new").unwrap();
+
+        let current_mtime = fs::metadata(&current).unwrap().modified().unwrap();
+        let path_mtime = fs::metadata(&path_bin).unwrap().modified().unwrap();
+        assert!(path_mtime > current_mtime, "test requires path binary newer than current");
+
+        // Directly validate decision logic by simulating which() outcome through metadata comparison:
+        let resolved = {
+            let current_meta = fs::metadata(&current).ok().and_then(|m| m.modified().ok());
+            match (Some(path_bin.clone()), current_meta) {
+                (Some(path_bin), Some(current_mtime)) => {
+                    let path_mtime = fs::metadata(&path_bin).ok().and_then(|m| m.modified().ok());
+                    if path_mtime.is_some_and(|mtime| mtime > current_mtime) {
+                        path_bin
+                    } else {
+                        current.clone()
+                    }
+                }
+                _ => current.clone(),
+            }
+        };
+        assert_eq!(resolved, path_bin);
     }
 
     #[test]

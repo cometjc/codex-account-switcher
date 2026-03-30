@@ -104,7 +104,7 @@
 - `package.json`: npm metadata and `files` publish whitelist; legacy TypeScript CLI and `node_modules` product deps are removed.
 
 ## Build, Test, and Development Commands
-- **Rust**: `cargo test` (preferred to validate changes; see `CLAUDE.md` build rule).
+- **Rust**: `make test`（預設驗證指令；會先 `cargo test`，成功後自動 `make install`）。
 - **npm**: `npm run build` → `cargo build --bin agent-switch` (also `prepublishOnly`).
 - **npm install / ci**: lockfile has no transitive deps; installs are effectively no-ops aside from npm metadata.
 - **PLD**：`npm run pld:executor:audit`、`npm run pld:executor:go` 等（完整列表見根 `package.json` 的 `pld:*`）；需本機 **`sqlite3`** CLI。
@@ -115,7 +115,7 @@
 - **Node (contract tests)**: CommonJS; 2-space indent; prefer built-in `node:*` modules.
 
 ## Testing Guidelines
-- Rust: `cargo test`.
+- Rust: `make test`（若只想本地快速測且不安裝，才使用 `cargo test`）。
 - Node: `node --test` over `tests/*.test.js`; keep assertions aligned with `bin/` shim and `package.json` scripts.
 
 ## Commit & Pull Request Guidelines

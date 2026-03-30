@@ -12,7 +12,8 @@ build:
 	cargo build
 
 test:
-	cargo test
+	@echo "cargo test ..."; \
+	cargo test && $(MAKE) install
 
 # Run tests, then release-build agent-switch + cursor-export for Windows.
 # Requires: rustup, mingw linker (see .cargo/config.toml).

@@ -422,6 +422,7 @@ impl UsageService {
         let five_hour_window = pick_five_hour_window(usage);
         self.mutate_history_cache(|history| {
             let entry = history.by_account_id.entry(account_id.to_string()).or_default();
+            let previous_observations = entry.observations.clone();
             if let Some(window) = weekly_window {
                 entry.weekly_reset_at = Some(window.reset_at);
                 entry.weekly_window_seconds = window.limit_window_seconds;
@@ -438,7 +439,11 @@ impl UsageService {
                 five_hour_window.map(|w| w.used_percent),
             );
             entry.observations.sort_by_key(|obs| obs.observed_at_local);
-            prune_profile_observations_to_active_windows(entry);
+            prune_profile_observations_to_active_windows(entry, (self.clock)());
+            if entry.observations.is_empty() && !previous_observations.is_empty() {
+                // Guard against destructive refresh writes (e.g. reset/window boundary skew).
+                entry.observations = previous_observations;
+            }
             Ok(true)
         })
     }
@@ -673,28 +678,25 @@ fn upsert_profile_observation(
     });
 }
 
-fn prune_profile_observations_to_active_windows(history: &mut ProfileUsageHistory) {
-    let weekly_start = history
-        .weekly_reset_at
-        .map(|reset| reset - history.weekly_window_seconds);
-    let weekly_end = history.weekly_reset_at;
-    let five_start = history
-        .five_hour_reset_at
-        .map(|reset| reset - history.five_hour_window_seconds);
-    let five_end = history.five_hour_reset_at;
+fn prune_profile_observations_to_active_windows(history: &mut ProfileUsageHistory, now_seconds: i64) {
+    let anchor_seconds = history
+        .observations
+        .iter()
+        .map(|obs| obs.observed_at_local)
+        .max()
+        .unwrap_or(now_seconds)
+        .max(now_seconds);
+    let weekly_start = anchor_seconds - history.weekly_window_seconds;
+    let five_start = anchor_seconds - history.five_hour_window_seconds;
 
     history.observations.retain(|obs| {
-        let in_weekly = match (weekly_start, weekly_end, obs.weekly_used_percent) {
-            (Some(start), Some(end), Some(_)) => {
-                obs.observed_at_local > start && obs.observed_at_local <= end
-            }
-            _ => false,
+        let in_weekly = match obs.weekly_used_percent {
+            Some(_) => obs.observed_at_local > weekly_start && obs.observed_at_local <= anchor_seconds,
+            None => false,
         };
-        let in_five_hour = match (five_start, five_end, obs.five_hour_used_percent) {
-            (Some(start), Some(end), Some(_)) => {
-                obs.observed_at_local > start && obs.observed_at_local <= end
-            }
-            _ => false,
+        let in_five_hour = match obs.five_hour_used_percent {
+            Some(_) => obs.observed_at_local > five_start && obs.observed_at_local <= anchor_seconds,
+            None => false,
         };
         in_weekly || in_five_hour
     });
@@ -1294,6 +1296,198 @@ mod tests {
         let expected_start_exclusive = expected_end - 604_800;
         assert!(history.observations.first().is_some_and(|o| o.observed_at_local > expected_start_exclusive));
         assert!(history.observations.last().is_some_and(|o| o.observed_at_local == expected_end));
+    }
+
+    #[test]
+    fn record_usage_snapshot_does_not_drop_existing_observations_to_empty() {
+        let cache_path = temp_file("history-non-destructive-cache.json");
+        let history_path = temp_file("history-non-destructive.json");
+        let account = "acct-alpha";
+
+        let seed_service =
+            UsageService::new(cache_path.clone(), history_path.clone(), 300).with_now_seconds(1_001);
+        let seed_usage = UsageResponse {
+            email: None,
+            plan_type: None,
+            rate_limit: Some(UsageRateLimit {
+                primary_window: Some(UsageWindow {
+                    used_percent: 0.0,
+                    limit_window_seconds: 18_000,
+                    reset_after_seconds: 18_000,
+                    reset_at: 19_000,
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: 1.0,
+                    limit_window_seconds: 604_800,
+                    reset_after_seconds: 604_800,
+                    reset_at: 605_800,
+                }),
+            }),
+        };
+        seed_service
+            .record_usage_snapshot(
+                Some(account),
+                &UsageReadResult {
+                    usage: Some(seed_usage),
+                    source: UsageSource::Api,
+                    fetched_at: Some(1_001),
+                    stale: false,
+                },
+            )
+            .unwrap();
+
+        let service = UsageService::new(cache_path, history_path, 300).with_now_seconds(2_000);
+        let skewed_usage = UsageResponse {
+            email: None,
+            plan_type: None,
+            rate_limit: Some(UsageRateLimit {
+                primary_window: Some(UsageWindow {
+                    used_percent: 0.0,
+                    limit_window_seconds: 18_000,
+                    reset_after_seconds: 18_000,
+                    reset_at: 20_000,
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: 2.0,
+                    limit_window_seconds: 604_800,
+                    reset_after_seconds: 604_800,
+                    // weekly start = 2_000, while observed_at=2_000 is excluded by lower-bound rule
+                    reset_at: 606_800,
+                }),
+            }),
+        };
+        service
+            .record_usage_snapshot(
+                Some(account),
+                &UsageReadResult {
+                    usage: Some(skewed_usage),
+                    source: UsageSource::Api,
+                    fetched_at: Some(2_000),
+                    stale: false,
+                },
+            )
+            .unwrap();
+
+        let history = service.profile_history(Some(account)).unwrap();
+        assert!(
+            !history.observations.is_empty(),
+            "refresh must not destructively wipe existing observations"
+        );
+    }
+
+    #[test]
+    fn concurrent_app_and_cron_writers_do_not_clobber_history() {
+        use std::thread;
+
+        let cache_path = temp_file("history-concurrent-cache.json");
+        let history_path = temp_file("history-concurrent.json");
+        let account = "acct-concurrent";
+        let base = 1_800_000_000_i64;
+        let iterations = 80_i64;
+
+        let app_history_path = history_path.clone();
+        let app_cache_path = cache_path.clone();
+        let app = thread::spawn(move || {
+            for i in 0..iterations {
+                let now = base + i * 30;
+                let service = UsageService::new(
+                    app_cache_path.clone(),
+                    app_history_path.clone(),
+                    300,
+                )
+                .with_now_seconds(now);
+                let usage = UsageResponse {
+                    email: None,
+                    plan_type: None,
+                    rate_limit: Some(UsageRateLimit {
+                        primary_window: Some(UsageWindow {
+                            used_percent: (i % 100) as f64,
+                            limit_window_seconds: 18_000,
+                            reset_after_seconds: 18_000,
+                            reset_at: now + 18_000,
+                        }),
+                        secondary_window: Some(UsageWindow {
+                            used_percent: (i % 100) as f64,
+                            limit_window_seconds: 604_800,
+                            reset_after_seconds: 604_800,
+                            reset_at: now + 604_800,
+                        }),
+                    }),
+                };
+                let read = UsageReadResult {
+                    usage: Some(usage),
+                    source: UsageSource::Api,
+                    fetched_at: Some(now),
+                    stale: false,
+                };
+                service.record_usage_snapshot(Some(account), &read).unwrap();
+            }
+        });
+
+        let cron_history_path = history_path.clone();
+        let cron_cache_path = cache_path.clone();
+        let cron = thread::spawn(move || {
+            for i in 0..iterations {
+                // Offset by 15s so app/cron observations do not dedupe by timestamp.
+                let now = base + i * 600 + 15;
+                let service = UsageService::new(
+                    cron_cache_path.clone(),
+                    cron_history_path.clone(),
+                    300,
+                )
+                .with_now_seconds(now);
+                let usage = UsageResponse {
+                    email: None,
+                    plan_type: None,
+                    rate_limit: Some(UsageRateLimit {
+                        primary_window: Some(UsageWindow {
+                            used_percent: (i % 100) as f64,
+                            limit_window_seconds: 18_000,
+                            reset_after_seconds: 18_000,
+                            reset_at: now + 18_000,
+                        }),
+                        secondary_window: Some(UsageWindow {
+                            used_percent: ((i + 10) % 100) as f64,
+                            limit_window_seconds: 604_800,
+                            reset_after_seconds: 604_800,
+                            reset_at: now + 604_800,
+                        }),
+                    }),
+                };
+                let read = UsageReadResult {
+                    usage: Some(usage),
+                    source: UsageSource::Api,
+                    fetched_at: Some(now),
+                    stale: false,
+                };
+                service.record_usage_snapshot(Some(account), &read).unwrap();
+            }
+        });
+
+        app.join().unwrap();
+        cron.join().unwrap();
+
+        let verify = UsageService::new(cache_path, history_path, 300).with_now_seconds(base + 604_790);
+        let history = verify.profile_history(Some(account)).unwrap();
+        let weekly_points = history
+            .observations
+            .iter()
+            .filter(|obs| obs.weekly_used_percent.is_some())
+            .count();
+        let five_hour_points = history
+            .observations
+            .iter()
+            .filter(|obs| obs.five_hour_used_percent.is_some())
+            .count();
+
+        assert!(
+            weekly_points >= 120,
+            "concurrent writers should preserve appended weekly observations (got {weekly_points})"
+        );
+        assert!(
+            five_hour_points >= 120,
+            "concurrent writers should preserve appended 5h observations (got {five_hour_points})"
+        );
     }
 
     #[test]

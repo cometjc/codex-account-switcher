@@ -63,6 +63,10 @@ impl AppPaths {
         &self.cron_status_path
     }
 
+    pub fn refresh_log_path(&self) -> PathBuf {
+        self.codex_dir.join("agent-switch-refresh.log")
+    }
+
     /// Playwright `storageState` JSON files for Cursor dashboard sessions (one file per profile name).
     /// Stored under the app config dir (not `~/.codex`, which is Codex-only).
     pub fn cursor_profiles_dir(&self) -> PathBuf {

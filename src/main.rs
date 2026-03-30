@@ -2,6 +2,7 @@ use anyhow::{Result, bail};
 use agent_switch::app::App;
 use agent_switch::cron;
 use agent_switch::paths::AppPaths;
+use agent_switch::refresh_log::append_refresh_log;
 use agent_switch::store::{AccountStore, StorePlatform};
 use agent_switch::usage::UsageService;
 use agent_switch::claude::{ClaudePaths, ClaudeStore, ClaudeCredentials};
@@ -59,6 +60,7 @@ fn main() -> Result<()> {
 /// Cron mode: refresh usage for all saved profiles and write the success timestamp.
 fn run_refresh_all() -> Result<()> {
     let paths = AppPaths::detect();
+    let refresh_log_path = paths.refresh_log_path();
     let store = AccountStore::new(paths.clone(), StorePlatform::detect());
     let usage = UsageService::new(
         paths.limit_cache_path().to_path_buf(),
@@ -81,6 +83,8 @@ fn run_refresh_all() -> Result<()> {
     });
     let current_name = store.get_current_account_name().ok().flatten();
     let mut current_saved = false;
+    let mut codex_ok = 0usize;
+    let mut codex_failed = 0usize;
     for profile in &saved {
         let saved_account_id = profile.snapshot
             .get("tokens")
@@ -100,9 +104,31 @@ fn run_refresh_all() -> Result<()> {
             profile.file_path.as_path()
         };
         if let Err(error) = refresh_codex_usage_snapshot(&usage, auth_path, effective_account_id) {
+            codex_failed += 1;
             codex_errors.push(format!("saved {}: {error:#}", profile.name));
+            append_refresh_log(
+                &refresh_log_path,
+                "cron_profile",
+                &format!(
+                    "service=codex profile={} result=error error={:#}",
+                    profile.name, error
+                ),
+            );
         } else if use_current_auth {
+            codex_ok += 1;
             let _ = store.update_account(&profile.name);
+            append_refresh_log(
+                &refresh_log_path,
+                "cron_profile",
+                &format!("service=codex profile={} result=ok", profile.name),
+            );
+        } else {
+            codex_ok += 1;
+            append_refresh_log(
+                &refresh_log_path,
+                "cron_profile",
+                &format!("service=codex profile={} result=ok", profile.name),
+            );
         }
     }
 
@@ -113,7 +139,20 @@ fn run_refresh_all() -> Result<()> {
                 .and_then(|t| t.get("account_id"))
                 .and_then(|v| v.as_str());
             if let Err(error) = refresh_codex_usage_snapshot(&usage, paths.auth_path(), account_id) {
+                codex_failed += 1;
                 codex_errors.push(format!("current: {error:#}"));
+                append_refresh_log(
+                    &refresh_log_path,
+                    "cron_profile",
+                    &format!("service=codex profile=current result=error error={:#}", error),
+                );
+            } else {
+                codex_ok += 1;
+                append_refresh_log(
+                    &refresh_log_path,
+                    "cron_profile",
+                    "service=codex profile=current result=ok",
+                );
             }
         }
     }
@@ -131,6 +170,8 @@ fn run_refresh_all() -> Result<()> {
         let current_account_id = current_creds.as_ref().map(|creds| creds.account_id());
         let current_name = cl_store.get_current_account_name().ok().flatten();
         let mut current_saved = false;
+        let mut claude_ok = 0usize;
+        let mut claude_failed = 0usize;
 
         if let Ok(saved) = cl_store.list_saved_profiles() {
             for profile in saved {
@@ -154,9 +195,31 @@ fn run_refresh_all() -> Result<()> {
                         Some(composite_id.as_str()),
                         Some(effective_creds.access_token()),
                     ) {
+                        claude_failed += 1;
                         claude_errors.push(format!("saved {}: {error:#}", profile.name));
+                        append_refresh_log(
+                            &refresh_log_path,
+                            "cron_profile",
+                            &format!(
+                                "service=claude profile={} result=error error={:#}",
+                                profile.name, error
+                            ),
+                        );
                     } else if use_current_credentials {
+                        claude_ok += 1;
                         let _ = cl_store.update_account(&profile.name);
+                        append_refresh_log(
+                            &refresh_log_path,
+                            "cron_profile",
+                            &format!("service=claude profile={} result=ok", profile.name),
+                        );
+                    } else {
+                        claude_ok += 1;
+                        append_refresh_log(
+                            &refresh_log_path,
+                            "cron_profile",
+                            &format!("service=claude profile={} result=ok", profile.name),
+                        );
                     }
                 }
             }
@@ -170,10 +233,28 @@ fn run_refresh_all() -> Result<()> {
                     Some(composite_id.as_str()),
                     Some(creds.access_token()),
                 ) {
+                    claude_failed += 1;
                     claude_errors.push(format!("current: {error:#}"));
+                    append_refresh_log(
+                        &refresh_log_path,
+                        "cron_profile",
+                        &format!("service=claude profile=current result=error error={:#}", error),
+                    );
+                } else {
+                    claude_ok += 1;
+                    append_refresh_log(
+                        &refresh_log_path,
+                        "cron_profile",
+                        "service=claude profile=current result=ok",
+                    );
                 }
             }
         }
+        append_refresh_log(
+            &refresh_log_path,
+            "cron_service_summary",
+            &format!("service=claude ok={} failed={}", claude_ok, claude_failed),
+        );
     }
 
     // Refresh Copilot usage
@@ -187,6 +268,17 @@ fn run_refresh_all() -> Result<()> {
         let account_id = creds.account_id();
         if let Err(error) = refresh_usage_snapshot(&copilot_usage, Some(account_id.as_str()), Some(creds.oauth_token.as_str())) {
             copilot_errors.push(format!("{error:#}"));
+            append_refresh_log(
+                &refresh_log_path,
+                "cron_profile",
+                &format!("service=copilot profile={} result=error error={:#}", creds.login, error),
+            );
+        } else {
+            append_refresh_log(
+                &refresh_log_path,
+                "cron_profile",
+                &format!("service=copilot profile={} result=ok", creds.login),
+            );
         }
     }
 
@@ -197,6 +289,18 @@ fn run_refresh_all() -> Result<()> {
         copilot_error: summarize_client_errors("Copilot", &copilot_errors),
     };
     cron::write_run_report(paths.cron_status_path(), &report)?;
+    append_refresh_log(
+        &refresh_log_path,
+        "cron_run_summary",
+        &format!(
+            "codex_ok={} codex_failed={} codex_errors={} claude_errors={} copilot_errors={}",
+            codex_ok,
+            codex_failed,
+            codex_errors.len(),
+            claude_errors.len(),
+            copilot_errors.len()
+        ),
+    );
     if report.has_errors() {
         bail!(
             "{}",
@@ -215,7 +319,10 @@ fn refresh_usage_snapshot(
     account_id: Option<&str>,
     access_token: Option<&str>,
 ) -> Result<()> {
-    let result = usage.read_usage(account_id, access_token, true, false)?;
+    let result = match usage.read_usage(account_id, access_token, true, false) {
+        Ok(view) => view,
+        Err(_error) => usage.read_usage(account_id, access_token, false, false)?,
+    };
     usage.record_usage_snapshot(account_id, &result)
 }
 
@@ -224,7 +331,10 @@ fn refresh_codex_usage_snapshot(
     auth_path: &std::path::Path,
     account_id: Option<&str>,
 ) -> Result<()> {
-    let result = usage.read_codex_usage(auth_path, true, false)?;
+    let result = match usage.read_codex_usage(auth_path, true, false) {
+        Ok(view) => view,
+        Err(_error) => usage.read_codex_usage(auth_path, false, false)?,
+    };
     usage.record_usage_snapshot(account_id, &result)
 }
 
@@ -251,22 +361,137 @@ fn current_unix_seconds() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_switch::usage::{UsageCache, UsageRateLimit, UsageResponse, UsageWindow};
+    use std::fs;
 
     #[test]
-    fn refresh_usage_snapshot_surfaces_force_refresh_errors() {
+    fn refresh_usage_snapshot_degrades_gracefully_when_force_refresh_fails_without_cache() {
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
         let cache_path = std::env::temp_dir().join(format!(
-            "agent-switch-main-refresh-cache-{}",
-            std::process::id()
+            "agent-switch-main-refresh-cache-{}-{}",
+            std::process::id(),
+            suffix
         ));
         let history_path = std::env::temp_dir().join(format!(
-            "agent-switch-main-refresh-history-{}",
-            std::process::id()
+            "agent-switch-main-refresh-history-{}-{}",
+            std::process::id(),
+            suffix
         ));
-        let usage = UsageService::new(cache_path, history_path, 300)
+        let usage = UsageService::new(cache_path.clone(), history_path.clone(), 300)
             .with_fetcher(|_, _| Err(anyhow::anyhow!("fetch failed")));
 
         let result = refresh_usage_snapshot(&usage, Some("acct-alpha"), Some("token"));
 
-        assert!(result.is_err(), "refresh helper should not swallow fetch failures");
+        assert!(
+            result.is_ok(),
+            "refresh helper should gracefully degrade when force refresh fails"
+        );
+        let _ = fs::remove_file(cache_path);
+        let _ = fs::remove_file(history_path);
+    }
+
+    #[test]
+    fn refresh_usage_snapshot_falls_back_to_cache_when_api_fails() {
+        let cache_path = std::env::temp_dir().join(format!(
+            "agent-switch-main-refresh-cache-fallback-{}",
+            std::process::id()
+        ));
+        let history_path = std::env::temp_dir().join(format!(
+            "agent-switch-main-refresh-history-fallback-{}",
+            std::process::id()
+        ));
+        let usage_payload = UsageResponse {
+            email: Some("demo@example.com".to_string()),
+            plan_type: Some("plus".to_string()),
+            rate_limit: Some(UsageRateLimit {
+                primary_window: Some(UsageWindow {
+                    used_percent: 10.0,
+                    limit_window_seconds: 18_000,
+                    reset_after_seconds: 1800,
+                    reset_at: 2_000_000_000,
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: 20.0,
+                    limit_window_seconds: 604_800,
+                    reset_after_seconds: 3600,
+                    reset_at: 2_000_000_000,
+                }),
+            }),
+        };
+        let cache = UsageCache::from_entries([(
+            "acct-alpha".to_string(),
+            1_900_000_000,
+            usage_payload,
+        )]);
+        fs::write(
+            &cache_path,
+            format!("{}\n", serde_json::to_string_pretty(&cache).unwrap()),
+        )
+        .unwrap();
+
+        let usage = UsageService::new(cache_path.clone(), history_path.clone(), 300)
+            .with_fetcher(|_, _| Err(anyhow::anyhow!("fetch failed")));
+        let result = refresh_usage_snapshot(&usage, Some("acct-alpha"), Some("token"));
+        assert!(result.is_ok(), "cache fallback should keep refresh successful");
+
+        let _ = fs::remove_file(cache_path);
+        let _ = fs::remove_file(history_path);
+    }
+
+    #[test]
+    fn refresh_codex_usage_snapshot_falls_back_to_cache_when_api_fails() {
+        let base = std::env::temp_dir().join(format!(
+            "agent-switch-main-codex-fallback-{}",
+            std::process::id()
+        ));
+        let _ = fs::create_dir_all(&base);
+        let cache_path = base.join("cache.json");
+        let history_path = base.join("history.json");
+        let auth_path = base.join("auth.json");
+        fs::write(
+            &auth_path,
+            r#"{"tokens":{"account_id":"acct-alpha","access_token":"token-alpha"}}"#,
+        )
+        .unwrap();
+        let usage_payload = UsageResponse {
+            email: Some("demo@example.com".to_string()),
+            plan_type: Some("plus".to_string()),
+            rate_limit: Some(UsageRateLimit {
+                primary_window: Some(UsageWindow {
+                    used_percent: 10.0,
+                    limit_window_seconds: 18_000,
+                    reset_after_seconds: 1800,
+                    reset_at: 2_000_000_000,
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: 20.0,
+                    limit_window_seconds: 604_800,
+                    reset_after_seconds: 3600,
+                    reset_at: 2_000_000_000,
+                }),
+            }),
+        };
+        let cache = UsageCache::from_entries([(
+            "acct-alpha".to_string(),
+            1_900_000_000,
+            usage_payload,
+        )]);
+        fs::write(
+            &cache_path,
+            format!("{}\n", serde_json::to_string_pretty(&cache).unwrap()),
+        )
+        .unwrap();
+        let usage = UsageService::new(cache_path.clone(), history_path.clone(), 300)
+            .with_fetcher(|_, _| Err(anyhow::anyhow!("fetch failed")));
+
+        let result = refresh_codex_usage_snapshot(&usage, &auth_path, Some("acct-alpha"));
+        assert!(result.is_ok(), "codex cache fallback should keep refresh successful");
+
+        let _ = fs::remove_file(cache_path);
+        let _ = fs::remove_file(history_path);
+        let _ = fs::remove_file(auth_path);
     }
 }

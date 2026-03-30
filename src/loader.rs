@@ -485,24 +485,21 @@ fn build_profile_chart_data(
     usage: Option<&UsageResponse>,
     usage_service: &UsageService,
 ) -> Result<ProfileChartData> {
-    let Some(usage) = usage else {
-        return Ok(ProfileChartData::empty("no usage data"));
-    };
     let Some(account_id) = account_id else {
         return Ok(ProfileChartData::empty("no account id"));
     };
 
     let history = usage_service.profile_history(Some(account_id))?;
-    let weekly_window_live = pick_weekly_window(usage);
-    let five_hour_window_live = pick_five_hour_window(usage);
+    let weekly_window_live = usage.and_then(pick_weekly_window);
+    let five_hour_window_live = usage.and_then(pick_five_hour_window);
     let weekly_window_fallback = history.weekly_reset_at.map(|reset_at| UsageWindow {
-        used_percent: 0.0,
+        used_percent: latest_weekly_used_percent(&history),
         limit_window_seconds: history.weekly_window_seconds,
         reset_after_seconds: 0,
         reset_at,
     });
     let five_hour_window_fallback = history.five_hour_reset_at.map(|reset_at| UsageWindow {
-        used_percent: 0.0,
+        used_percent: latest_five_hour_used_percent(&history),
         limit_window_seconds: history.five_hour_window_seconds,
         reset_after_seconds: 0,
         reset_at,
@@ -535,12 +532,31 @@ fn build_profile_chart_data(
     })
 }
 
+fn latest_weekly_used_percent(history: &ProfileUsageHistory) -> f64 {
+    history
+        .observations
+        .iter()
+        .rev()
+        .find_map(|obs| obs.weekly_used_percent)
+        .unwrap_or(0.0)
+}
+
+fn latest_five_hour_used_percent(history: &ProfileUsageHistory) -> f64 {
+    history
+        .observations
+        .iter()
+        .rev()
+        .find_map(|obs| obs.five_hour_used_percent)
+        .unwrap_or(0.0)
+}
+
 fn project_weekly_points_from_profile_observations(
     window: &UsageWindow,
     observations: &[crate::usage::ProfileUsageObservation],
 ) -> Vec<ChartPoint> {
-    let start_at = window.reset_at - window.limit_window_seconds;
-    let end_at = window.reset_at;
+    let now_seconds = current_unix_seconds();
+    let end_at = window.reset_at.min(now_seconds);
+    let start_at = end_at - window.limit_window_seconds;
     let total = (end_at - start_at) as f64;
     if total <= 0.0 {
         return Vec::new();
@@ -569,8 +585,9 @@ fn build_weekly_history_from_profile_observations(
     window: &UsageWindow,
     observations: &[crate::usage::ProfileUsageObservation],
 ) -> UsageWindowHistory {
-    let start_at = window.reset_at - window.limit_window_seconds;
-    let end_at = window.reset_at;
+    let now_seconds = current_unix_seconds();
+    let end_at = window.reset_at.min(now_seconds);
+    let start_at = end_at - window.limit_window_seconds;
     let mut obs = observations
         .iter()
         .filter_map(|obs| {
@@ -591,6 +608,13 @@ fn build_weekly_history_from_profile_observations(
         end_at,
         observations: obs,
     }
+}
+
+fn current_unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
 fn build_weekly_histories_from_profile_observations(
@@ -1121,6 +1145,57 @@ mod tests {
         let _ = std::fs::remove_file(history_path);
     }
 
+    #[test]
+    fn chart_uses_history_when_live_usage_temporarily_missing() {
+        use crate::usage::{UsageRateLimit, UsageResponse, UsageWindow};
+
+        let cache_path = PathBuf::from("dummy_cache_history_fallback.json");
+        let history_path =
+            std::env::temp_dir().join(format!("test_history_fallback_{}.json", std::process::id()));
+        let usage_service = UsageService::new(cache_path, history_path.clone(), 300);
+        let now = 1_700_000_000;
+        let usage = UsageResponse {
+            email: None,
+            plan_type: Some("pro".to_string()),
+            rate_limit: Some(UsageRateLimit {
+                primary_window: Some(UsageWindow {
+                    used_percent: 40.0,
+                    limit_window_seconds: 18_000,
+                    reset_at: now + 3_600,
+                    reset_after_seconds: 3_600,
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: 18.0,
+                    limit_window_seconds: 604_800,
+                    reset_at: now + 300_000,
+                    reset_after_seconds: 300_000,
+                }),
+            }),
+        };
+        let account_id = "claude-fallback|pro";
+        usage_service
+            .clone()
+            .with_now_seconds(now)
+            .record_usage_snapshot(
+                Some(account_id),
+                &crate::usage::UsageReadResult {
+                    usage: Some(usage),
+                    source: crate::usage::UsageSource::Api,
+                    fetched_at: Some(now),
+                    stale: false,
+                },
+            )
+            .unwrap();
+
+        let chart_data = build_profile_chart_data(Some(account_id), None, &usage_service).unwrap();
+        assert!(
+            !chart_data.seven_day_points.is_empty(),
+            "history fallback should keep chart visible when live usage is missing"
+        );
+
+        let _ = std::fs::remove_file(history_path);
+    }
+
     fn unique_temp_dir(prefix: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "{prefix}-{}-{}",
@@ -1609,16 +1684,17 @@ mod tests {
 
     #[test]
     fn chart_projects_only_last_7d_points_from_profile_observations() {
-        let end_at = 1999_i64 * 600;
+        let end_at = current_unix_seconds();
         let weekly = UsageWindow {
             used_percent: 50.0,
             limit_window_seconds: 604_800,
             reset_after_seconds: 0,
-            reset_at: end_at,
+            // Reset can be in the future; projection should still use rolling-now end.
+            reset_at: end_at + 300_000,
         };
-        let observations = (0..2000)
+        let observations = (0..2000_i64)
             .map(|i| crate::usage::ProfileUsageObservation {
-                observed_at_local: i * 600,
+                observed_at_local: end_at - ((1999 - i) * 600),
                 weekly_used_percent: Some((i % 100) as f64),
                 five_hour_used_percent: Some((i % 50) as f64),
             })
@@ -1627,5 +1703,114 @@ mod tests {
         let points = project_weekly_points_from_profile_observations(&weekly, &observations);
         assert_eq!(points.len(), 1008);
         assert!(points.iter().all(|point| point.x >= 0.0 && point.x <= 7.0));
+    }
+
+    #[test]
+    fn chart_remains_visible_after_concurrent_app_cron_writes() {
+        let cache_path = PathBuf::from("dummy_cache_concurrent.json");
+        let history_path = std::env::temp_dir().join(format!(
+            "test_concurrent_visibility_{}.json",
+            std::process::id()
+        ));
+        let account_id = "acct-concurrent-chart";
+        let base_now = current_unix_seconds() - 7_200;
+
+        let app_service = UsageService::new(cache_path.clone(), history_path.clone(), 300);
+        let cron_service = UsageService::new(cache_path, history_path.clone(), 300);
+
+        for i in 0..36_i64 {
+            let app_now = base_now + i * 120;
+            let cron_now = app_now + 30;
+            let app_usage = UsageResponse {
+                email: None,
+                plan_type: Some("plus".to_string()),
+                rate_limit: Some(UsageRateLimit {
+                    primary_window: Some(UsageWindow {
+                        used_percent: 12.0,
+                        limit_window_seconds: 18_000,
+                        reset_after_seconds: 18_000,
+                        reset_at: app_now + 18_000,
+                    }),
+                    secondary_window: Some(UsageWindow {
+                        used_percent: 22.0,
+                        limit_window_seconds: 604_800,
+                        reset_after_seconds: 604_800,
+                        reset_at: app_now + 604_800,
+                    }),
+                }),
+            };
+            let cron_usage = UsageResponse {
+                email: None,
+                plan_type: Some("plus".to_string()),
+                rate_limit: Some(UsageRateLimit {
+                    primary_window: Some(UsageWindow {
+                        used_percent: 13.0,
+                        limit_window_seconds: 18_000,
+                        reset_after_seconds: 18_000,
+                        reset_at: cron_now + 18_000,
+                    }),
+                    secondary_window: Some(UsageWindow {
+                        used_percent: 23.0,
+                        limit_window_seconds: 604_800,
+                        reset_after_seconds: 604_800,
+                        reset_at: cron_now + 604_800,
+                    }),
+                }),
+            };
+
+            app_service
+                .clone()
+                .with_now_seconds(app_now)
+                .record_usage_snapshot(
+                    Some(account_id),
+                    &UsageReadResult {
+                        usage: Some(app_usage),
+                        source: crate::usage::UsageSource::Api,
+                        fetched_at: Some(app_now),
+                        stale: false,
+                    },
+                )
+                .unwrap();
+            cron_service
+                .clone()
+                .with_now_seconds(cron_now)
+                .record_usage_snapshot(
+                    Some(account_id),
+                    &UsageReadResult {
+                        usage: Some(cron_usage),
+                        source: crate::usage::UsageSource::Api,
+                        fetched_at: Some(cron_now),
+                        stale: false,
+                    },
+                )
+                .unwrap();
+        }
+
+        let latest_usage = UsageResponse {
+            email: None,
+            plan_type: Some("plus".to_string()),
+            rate_limit: Some(UsageRateLimit {
+                primary_window: Some(UsageWindow {
+                    used_percent: 15.0,
+                    limit_window_seconds: 18_000,
+                    reset_after_seconds: 18_000,
+                    reset_at: current_unix_seconds() + 18_000,
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: 25.0,
+                    limit_window_seconds: 604_800,
+                    reset_after_seconds: 604_800,
+                    reset_at: current_unix_seconds() + 604_800,
+                }),
+            }),
+        };
+        let chart_data = build_profile_chart_data(Some(account_id), Some(&latest_usage), &app_service).unwrap();
+        assert!(
+            chart_data.seven_day_points.len() >= 20,
+            "chart should keep visible points after concurrent app/cron appends"
+        );
+        assert!(chart_data.seven_day_points.iter().all(|p| p.x >= 0.0 && p.x <= 7.0));
+
+        let _ = std::fs::remove_file(history_path);
     }
 }

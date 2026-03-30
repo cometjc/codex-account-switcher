@@ -9,5 +9,6 @@ pub mod loader;
 pub mod model;
 pub mod paths;
 pub mod render;
+pub mod refresh_log;
 pub mod store;
 pub mod usage;
