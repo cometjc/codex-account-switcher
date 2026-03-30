@@ -9,8 +9,8 @@ use crate::app_data::{
 use crate::render::ChartPoint;
 use crate::store::{AccountStore, SavedProfile};
 use crate::usage::{
-    pick_five_hour_window, pick_weekly_window, UsageResponse, UsageService, UsageWindow,
-    UsageWindowHistory, UsageReadResult,
+    pick_five_hour_window, pick_weekly_window, ProfileUsageHistory, UsageObservation, UsageReadResult,
+    UsageResponse, UsageService, UsageWindow, UsageWindowHistory,
 };
 
 pub struct ProfileLoadReport {
@@ -493,20 +493,39 @@ fn build_profile_chart_data(
     };
 
     let history = usage_service.profile_history(Some(account_id))?;
-    let weekly_window = pick_weekly_window(usage);
-    let five_hour_window = pick_five_hour_window(usage);
-    let weekly_history =
-        weekly_window.and_then(|window| find_matching_window(&history.weekly_windows, window));
-    let seven_day_points = weekly_history
-        .map(project_history_points)
+    let weekly_window_live = pick_weekly_window(usage);
+    let five_hour_window_live = pick_five_hour_window(usage);
+    let weekly_window_fallback = history.weekly_reset_at.map(|reset_at| UsageWindow {
+        used_percent: 0.0,
+        limit_window_seconds: history.weekly_window_seconds,
+        reset_after_seconds: 0,
+        reset_at,
+    });
+    let five_hour_window_fallback = history.five_hour_reset_at.map(|reset_at| UsageWindow {
+        used_percent: 0.0,
+        limit_window_seconds: history.five_hour_window_seconds,
+        reset_after_seconds: 0,
+        reset_at,
+    });
+    let weekly_window = weekly_window_live.or(weekly_window_fallback.as_ref());
+    let five_hour_window = five_hour_window_live.or(five_hour_window_fallback.as_ref());
+
+    let seven_day_points = weekly_window
+        .map(|window| {
+            project_weekly_points_from_profile_observations(window, &history.observations)
+        })
         .unwrap_or_default();
+    let weekly_history = weekly_window
+        .map(|window| build_weekly_history_from_profile_observations(window, &history.observations));
+    let five_hour_histories = build_five_hour_histories_from_profile_observations(&history);
+    let weekly_histories = build_weekly_histories_from_profile_observations(&history);
     let five_hour_band = build_five_hour_band(weekly_window, five_hour_window);
     let five_hour_subframe = build_five_hour_subframe(
         weekly_window,
         five_hour_window,
-        weekly_history,
-        &history.five_hour_windows,
-        &history.weekly_windows,
+        weekly_history.as_ref(),
+        &five_hour_histories,
+        &weekly_histories,
     );
 
     Ok(ProfileChartData {
@@ -514,6 +533,112 @@ fn build_profile_chart_data(
         five_hour_band,
         five_hour_subframe,
     })
+}
+
+fn project_weekly_points_from_profile_observations(
+    window: &UsageWindow,
+    observations: &[crate::usage::ProfileUsageObservation],
+) -> Vec<ChartPoint> {
+    let start_at = window.reset_at - window.limit_window_seconds;
+    let end_at = window.reset_at;
+    let total = (end_at - start_at) as f64;
+    if total <= 0.0 {
+        return Vec::new();
+    }
+    let mut points = observations
+        .iter()
+        .filter_map(|obs| {
+            let y = obs.weekly_used_percent?;
+            if obs.observed_at_local <= start_at || obs.observed_at_local > end_at {
+                return None;
+            }
+            Some(ChartPoint {
+                x: (((obs.observed_at_local - start_at) as f64 / total) * 7.0).clamp(0.0, 7.0),
+                y: y.clamp(0.0, 100.0),
+            })
+        })
+        .collect::<Vec<_>>();
+    points.sort_by(|left, right| left.x.total_cmp(&right.x));
+    points.dedup_by(|left, right| {
+        (left.x - right.x).abs() < f64::EPSILON && (left.y - right.y).abs() < f64::EPSILON
+    });
+    points
+}
+
+fn build_weekly_history_from_profile_observations(
+    window: &UsageWindow,
+    observations: &[crate::usage::ProfileUsageObservation],
+) -> UsageWindowHistory {
+    let start_at = window.reset_at - window.limit_window_seconds;
+    let end_at = window.reset_at;
+    let mut obs = observations
+        .iter()
+        .filter_map(|obs| {
+            let y = obs.weekly_used_percent?;
+            if obs.observed_at_local <= start_at || obs.observed_at_local > end_at {
+                return None;
+            }
+            Some(UsageObservation {
+                observed_at: obs.observed_at_local,
+                used_percent: y.clamp(0.0, 100.0),
+            })
+        })
+        .collect::<Vec<_>>();
+    obs.sort_by_key(|o| o.observed_at);
+    UsageWindowHistory {
+        limit_window_seconds: window.limit_window_seconds,
+        start_at,
+        end_at,
+        observations: obs,
+    }
+}
+
+fn build_weekly_histories_from_profile_observations(
+    history: &ProfileUsageHistory,
+) -> Vec<UsageWindowHistory> {
+    let Some(reset_at) = history.weekly_reset_at else {
+        return Vec::new();
+    };
+    let window = UsageWindow {
+        used_percent: 0.0,
+        limit_window_seconds: history.weekly_window_seconds,
+        reset_after_seconds: 0,
+        reset_at,
+    };
+    vec![build_weekly_history_from_profile_observations(
+        &window,
+        &history.observations,
+    )]
+}
+
+fn build_five_hour_histories_from_profile_observations(
+    history: &ProfileUsageHistory,
+) -> Vec<UsageWindowHistory> {
+    let Some(reset_at) = history.five_hour_reset_at else {
+        return Vec::new();
+    };
+    let start_at = reset_at - history.five_hour_window_seconds;
+    let mut obs = history
+        .observations
+        .iter()
+        .filter_map(|obs| {
+            let y = obs.five_hour_used_percent?;
+            if obs.observed_at_local < start_at || obs.observed_at_local > reset_at {
+                return None;
+            }
+            Some(UsageObservation {
+                observed_at: obs.observed_at_local,
+                used_percent: y.clamp(0.0, 100.0),
+            })
+        })
+        .collect::<Vec<_>>();
+    obs.sort_by_key(|o| o.observed_at);
+    vec![UsageWindowHistory {
+        limit_window_seconds: history.five_hour_window_seconds,
+        start_at,
+        end_at: reset_at,
+        observations: obs,
+    }]
 }
 
 fn build_five_hour_band(
@@ -717,6 +842,7 @@ fn interp_weekly_at(win: &UsageWindowHistory, t: i64) -> f64 {
     before.used_percent + (after.used_percent - before.used_percent) * ratio
 }
 
+#[allow(dead_code)]
 fn find_matching_window<'a>(
     windows: &'a [UsageWindowHistory],
     window: &UsageWindow,
@@ -729,6 +855,7 @@ fn find_matching_window<'a>(
     })
 }
 
+#[allow(dead_code)]
 fn project_history_points(window: &UsageWindowHistory) -> Vec<ChartPoint> {
     let total = (window.end_at - window.start_at) as f64;
     if total <= 0.0 {
@@ -744,6 +871,36 @@ fn project_history_points(window: &UsageWindowHistory) -> Vec<ChartPoint> {
             y: observation.used_percent.clamp(0.0, 100.0),
         })
         .collect::<Vec<_>>();
+    points.sort_by(|left, right| left.x.total_cmp(&right.x));
+    points.dedup_by(|left, right| {
+        (left.x - right.x).abs() < f64::EPSILON && (left.y - right.y).abs() < f64::EPSILON
+    });
+    points
+}
+
+#[allow(dead_code)]
+fn project_weekly_points_for_window_range(
+    window: &UsageWindow,
+    weekly_windows: &[UsageWindowHistory],
+) -> Vec<ChartPoint> {
+    let start_at = window.reset_at - window.limit_window_seconds;
+    let end_at = window.reset_at;
+    let total = (end_at - start_at) as f64;
+    if total <= 0.0 {
+        return Vec::new();
+    }
+
+    let mut points = weekly_windows
+        .iter()
+        .filter(|w| w.limit_window_seconds == window.limit_window_seconds)
+        .flat_map(|w| w.observations.iter())
+        .filter(|obs| obs.observed_at >= start_at && obs.observed_at <= end_at)
+        .map(|obs| ChartPoint {
+            x: (((obs.observed_at - start_at) as f64 / total) * 7.0).clamp(0.0, 7.0),
+            y: obs.used_percent.clamp(0.0, 100.0),
+        })
+        .collect::<Vec<_>>();
+
     points.sort_by(|left, right| left.x.total_cmp(&right.x));
     points.dedup_by(|left, right| {
         (left.x - right.x).abs() < f64::EPSILON && (left.y - right.y).abs() < f64::EPSILON
@@ -1276,6 +1433,7 @@ mod tests {
                         used_percent: 55.0,
                     }],
                 }],
+                ..ProfileUsageHistory::default()
             },
         );
         fs::write(
@@ -1306,17 +1464,21 @@ mod tests {
             .expect("current history entry");
         assert!(
             current_entry
-                .weekly_windows
+                .observations
                 .iter()
-                .flat_map(|window| window.observations.iter())
-                .any(|observation| observation.observed_at == 123 && (observation.used_percent - 45.0).abs() < f64::EPSILON)
+                .any(|observation| {
+                    observation.observed_at_local == 123
+                        && observation.weekly_used_percent == Some(45.0)
+                })
         );
         assert!(
             current_entry
-                .five_hour_windows
+                .observations
                 .iter()
-                .flat_map(|window| window.observations.iter())
-                .any(|observation| observation.observed_at == 15 && (observation.used_percent - 55.0).abs() < f64::EPSILON)
+                .any(|observation| {
+                    observation.observed_at_local == 15
+                        && observation.five_hour_used_percent == Some(55.0)
+                })
         );
         assert!(!merged_history.by_account_id.contains_key(&stale_comp_id));
     }
@@ -1392,5 +1554,78 @@ mod tests {
             .refresh_errors
             .iter()
             .any(|error| error.contains("Claude")));
+    }
+
+    #[test]
+    fn weekly_points_project_from_window_range_includes_observations_across_nearby_windows() {
+        // Target weekly window: [start_at, end_at] mapped to 0..7.
+        let weekly = UsageWindow {
+            used_percent: 10.0,
+            limit_window_seconds: 604_800,
+            reset_after_seconds: 0,
+            reset_at: 10_000,
+        };
+        let start_at = weekly.reset_at - weekly.limit_window_seconds;
+        let end_at = weekly.reset_at;
+        assert_eq!(end_at - start_at, 604_800);
+
+        // Simulate API jitter: history windows have slightly different start/end, but observations
+        // still land inside the target [start_at, end_at] range.
+        let history_windows = vec![
+            UsageWindowHistory {
+                limit_window_seconds: weekly.limit_window_seconds,
+                start_at: start_at + 60,
+                end_at: end_at - 60,
+                observations: vec![
+                    UsageObservation {
+                        observed_at: start_at + 100,
+                        used_percent: 12.0,
+                    },
+                    UsageObservation {
+                        observed_at: end_at - 100,
+                        used_percent: 18.0,
+                    },
+                ],
+            },
+            UsageWindowHistory {
+                limit_window_seconds: weekly.limit_window_seconds,
+                start_at: start_at - 120,
+                end_at: end_at + 120,
+                observations: vec![UsageObservation {
+                    observed_at: (start_at + end_at) / 2,
+                    used_percent: 24.0,
+                }],
+            },
+        ];
+
+        let points = project_weekly_points_for_window_range(&weekly, &history_windows);
+        // All 3 observations should be projected into the 0..7 axis.
+        assert_eq!(points.len(), 3);
+        assert!(points.iter().any(|p| (p.y - 12.0).abs() < f64::EPSILON));
+        assert!(points.iter().any(|p| (p.y - 24.0).abs() < f64::EPSILON));
+        assert!(points.iter().any(|p| (p.y - 18.0).abs() < f64::EPSILON));
+        assert!(points.iter().all(|p| p.x >= 0.0 && p.x <= 7.0));
+    }
+
+    #[test]
+    fn chart_projects_only_last_7d_points_from_profile_observations() {
+        let end_at = 1999_i64 * 600;
+        let weekly = UsageWindow {
+            used_percent: 50.0,
+            limit_window_seconds: 604_800,
+            reset_after_seconds: 0,
+            reset_at: end_at,
+        };
+        let observations = (0..2000)
+            .map(|i| crate::usage::ProfileUsageObservation {
+                observed_at_local: i * 600,
+                weekly_used_percent: Some((i % 100) as f64),
+                five_hour_used_percent: Some((i % 50) as f64),
+            })
+            .collect::<Vec<_>>();
+
+        let points = project_weekly_points_from_profile_observations(&weekly, &observations);
+        assert_eq!(points.len(), 1008);
+        assert!(points.iter().all(|point| point.x >= 0.0 && point.x <= 7.0));
     }
 }

@@ -1,11 +1,13 @@
 use std::collections::BTreeMap;
 use std::fs;
+use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
+use fs2::FileExt;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -51,6 +53,13 @@ pub struct UsageObservation {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProfileUsageObservation {
+    pub observed_at_local: i64,
+    pub weekly_used_percent: Option<f64>,
+    pub five_hour_used_percent: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct UsageWindowHistory {
     pub limit_window_seconds: i64,
     pub start_at: i64,
@@ -61,6 +70,17 @@ pub struct UsageWindowHistory {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct ProfileUsageHistory {
     #[serde(default)]
+    pub observations: Vec<ProfileUsageObservation>,
+    #[serde(default)]
+    pub weekly_reset_at: Option<i64>,
+    #[serde(default)]
+    pub five_hour_reset_at: Option<i64>,
+    #[serde(default = "default_weekly_window_seconds")]
+    pub weekly_window_seconds: i64,
+    #[serde(default = "default_five_hour_window_seconds")]
+    pub five_hour_window_seconds: i64,
+    // Legacy fields kept for backward compatibility with old cache files.
+    #[serde(default)]
     pub weekly_windows: Vec<UsageWindowHistory>,
     #[serde(default)]
     pub five_hour_windows: Vec<UsageWindowHistory>,
@@ -70,6 +90,14 @@ pub struct ProfileUsageHistory {
 pub struct UsageHistoryCache {
     #[serde(rename = "byAccountId")]
     pub by_account_id: BTreeMap<String, ProfileUsageHistory>,
+}
+
+fn default_weekly_window_seconds() -> i64 {
+    604_800
+}
+
+fn default_five_hour_window_seconds() -> i64 {
+    18_000
 }
 
 impl UsageCache {
@@ -381,76 +409,52 @@ impl UsageService {
         let Some(usage) = read.usage.as_ref() else {
             return Ok(());
         };
-        let Some(rate_limit) = usage.rate_limit.as_ref() else {
+        if usage.rate_limit.is_none() {
             return Ok(());
-        };
+        }
 
-        let mut history = self.read_history_cache()?;
-        let entry = history.by_account_id.entry(account_id.to_string()).or_default();
         let observed_at = match read.source {
             UsageSource::None => return Ok(()),
             UsageSource::Api => (self.clock)(),
             UsageSource::Cache => read.fetched_at.unwrap_or_else(|| (self.clock)()),
         };
-
-        for window in [&rate_limit.primary_window, &rate_limit.secondary_window]
-            .into_iter()
-            .flatten()
-        {
-            let start_at = window.reset_at - window.limit_window_seconds;
-            let target_windows = match window.limit_window_seconds {
-                604_800 => &mut entry.weekly_windows,
-                18_000 => &mut entry.five_hour_windows,
-                _ => continue,
-            };
-            let target = target_windows
-                .iter_mut()
-                .find(|candidate| {
-                    candidate.limit_window_seconds == window.limit_window_seconds
-                        && candidate.start_at == start_at
-                        && candidate.end_at == window.reset_at
-                });
-
-            let observation = UsageObservation {
-                observed_at,
-                used_percent: window.used_percent.clamp(0.0, 100.0),
-            };
-            if let Some(target) = target {
-                let duplicate = target
-                    .observations
-                    .last()
-                    .is_some_and(|last| last.observed_at == observation.observed_at && (last.used_percent - observation.used_percent).abs() < f64::EPSILON);
-                if !duplicate {
-                    target.observations.push(observation);
-                }
-            } else {
-                target_windows.push(UsageWindowHistory {
-                    limit_window_seconds: window.limit_window_seconds,
-                    start_at,
-                    end_at: window.reset_at,
-                    observations: vec![observation],
-                });
+        let weekly_window = pick_weekly_window(usage);
+        let five_hour_window = pick_five_hour_window(usage);
+        self.mutate_history_cache(|history| {
+            let entry = history.by_account_id.entry(account_id.to_string()).or_default();
+            if let Some(window) = weekly_window {
+                entry.weekly_reset_at = Some(window.reset_at);
+                entry.weekly_window_seconds = window.limit_window_seconds;
             }
-            let max_count = match window.limit_window_seconds {
-                604_800 => 3,
-                18_000 => 34,
-                _ => 6,
-            };
-            trim_history_windows(target_windows, max_count);
-        }
+            if let Some(window) = five_hour_window {
+                entry.five_hour_reset_at = Some(window.reset_at);
+                entry.five_hour_window_seconds = window.limit_window_seconds;
+            }
 
-        self.write_history_cache(&history)
+            upsert_profile_observation(
+                &mut entry.observations,
+                observed_at,
+                weekly_window.map(|w| w.used_percent),
+                five_hour_window.map(|w| w.used_percent),
+            );
+            entry.observations.sort_by_key(|obs| obs.observed_at_local);
+            prune_profile_observations_to_active_windows(entry);
+            Ok(true)
+        })
     }
 
     pub fn profile_history(&self, account_id: Option<&str>) -> Result<ProfileUsageHistory> {
         let Some(account_id) = account_id.filter(|value| !value.trim().is_empty()) else {
             return Ok(ProfileUsageHistory::default());
         };
+        // Keep on-disk schema normalized before serving history to callers.
+        self.mutate_history_cache(|_| Ok(false))?;
         let history = self.read_history_cache()?;
         Ok(history
             .by_account_id
             .get(account_id)
             .cloned()
+            .map(|entry| normalize_profile_history(entry).0)
             .unwrap_or_default())
     }
 
@@ -464,27 +468,25 @@ impl UsageService {
         else {
             return Ok(());
         };
-        let mut history = self.read_history_cache()?;
-        let mut changed = false;
-        for alias_account_id in alias_account_ids
-            .into_iter()
-            .map(str::trim)
-            .filter(|value| !value.is_empty() && *value != canonical_account_id)
-        {
-            let Some(alias_history) = history.by_account_id.remove(alias_account_id) else {
-                continue;
-            };
-            let canonical_history = history
-                .by_account_id
-                .entry(canonical_account_id.to_string())
-                .or_default();
-            merge_profile_usage_history(canonical_history, alias_history);
-            changed = true;
-        }
-        if changed {
-            self.write_history_cache(&history)?;
-        }
-        Ok(())
+        self.mutate_history_cache(|history| {
+            let mut changed = false;
+            for alias_account_id in alias_account_ids
+                .into_iter()
+                .map(str::trim)
+                .filter(|value| !value.is_empty() && *value != canonical_account_id)
+            {
+                let Some(alias_history) = history.by_account_id.remove(alias_account_id) else {
+                    continue;
+                };
+                let canonical_history = history
+                    .by_account_id
+                    .entry(canonical_account_id.to_string())
+                    .or_default();
+                merge_profile_usage_history(canonical_history, alias_history);
+                changed = true;
+            }
+            Ok(changed)
+        })
     }
 
     fn read_cache(&self) -> Result<UsageCache> {
@@ -509,7 +511,7 @@ impl UsageService {
 
     fn read_history_cache(&self) -> Result<UsageHistoryCache> {
         match fs::read_to_string(&self.history_path) {
-            Ok(raw) => serde_json::from_str(&raw).or(Ok(UsageHistoryCache::default())),
+            Ok(raw) => Ok(serde_json::from_str::<UsageHistoryCache>(&raw).unwrap_or_default()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(UsageHistoryCache::default()),
             Err(error) => Err(error).with_context(|| format!("read {}", self.history_path.display())),
         }
@@ -526,6 +528,47 @@ impl UsageService {
         )
         .with_context(|| format!("write {}", self.history_path.display()))
     }
+
+    fn mutate_history_cache<F>(&self, mutator: F) -> Result<()>
+    where
+        F: FnOnce(&mut UsageHistoryCache) -> Result<bool>,
+    {
+        let _lock = self.lock_history_file()?;
+        let mut history = self.read_history_cache()?;
+        let mut changed = false;
+        for value in history.by_account_id.values_mut() {
+            let (normalized, entry_changed) = normalize_profile_history(std::mem::take(value));
+            *value = normalized;
+            changed |= entry_changed;
+        }
+        changed |= mutator(&mut history)?;
+        if changed {
+            self.write_history_cache(&history)?;
+        }
+        Ok(())
+    }
+
+    fn lock_history_file(&self) -> Result<std::fs::File> {
+        let lock_path = self.history_path.with_extension(format!(
+            "{}.lock",
+            self.history_path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("json")
+        ));
+        if let Some(parent) = lock_path.parent() {
+            fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+        }
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .with_context(|| format!("open {}", lock_path.display()))?;
+        file.lock_exclusive()
+            .with_context(|| format!("lock {}", lock_path.display()))?;
+        Ok(file)
+    }
 }
 
 fn trim_history_windows(windows: &mut Vec<UsageWindowHistory>, max_count: usize) {
@@ -541,9 +584,180 @@ fn trim_history_windows(windows: &mut Vec<UsageWindowHistory>, max_count: usize)
     }
 }
 
+const WEEKLY_WINDOW_SECONDS: i64 = 604_800;
+const WEEKLY_JITTER_TOLERANCE_SECONDS: i64 = 120;
+
+fn is_weekly_window(window: &UsageWindowHistory) -> bool {
+    window.limit_window_seconds == WEEKLY_WINDOW_SECONDS
+}
+
+fn windows_match_with_weekly_jitter(
+    existing: &UsageWindowHistory,
+    incoming: &UsageWindowHistory,
+) -> bool {
+    if existing.limit_window_seconds != incoming.limit_window_seconds {
+        return false;
+    }
+    if existing.start_at == incoming.start_at && existing.end_at == incoming.end_at {
+        return true;
+    }
+    if !is_weekly_window(existing) {
+        return false;
+    }
+    (existing.end_at - incoming.end_at).abs() <= WEEKLY_JITTER_TOLERANCE_SECONDS
+}
+
+fn canonicalize_weekly_window(existing: &mut UsageWindowHistory, incoming: &UsageWindowHistory) {
+    if !is_weekly_window(existing) {
+        return;
+    }
+    let canonical_end = existing.end_at.max(incoming.end_at);
+    existing.end_at = canonical_end;
+    existing.start_at = canonical_end - existing.limit_window_seconds;
+}
+
 fn merge_profile_usage_history(target: &mut ProfileUsageHistory, source: ProfileUsageHistory) {
+    target.observations.extend(source.observations);
+    target.observations.sort_by_key(|obs| obs.observed_at_local);
+    target.observations.dedup_by(|right, left| {
+        right.observed_at_local == left.observed_at_local
+            && right.weekly_used_percent == left.weekly_used_percent
+            && right.five_hour_used_percent == left.five_hour_used_percent
+    });
+    target.weekly_reset_at = match (target.weekly_reset_at, source.weekly_reset_at) {
+        (Some(left), Some(right)) => Some(left.max(right)),
+        (Some(left), None) => Some(left),
+        (None, Some(right)) => Some(right),
+        (None, None) => None,
+    };
+    target.five_hour_reset_at = match (target.five_hour_reset_at, source.five_hour_reset_at) {
+        (Some(left), Some(right)) => Some(left.max(right)),
+        (Some(left), None) => Some(left),
+        (None, Some(right)) => Some(right),
+        (None, None) => None,
+    };
+    if target.weekly_window_seconds <= 0 {
+        target.weekly_window_seconds = default_weekly_window_seconds();
+    }
+    if target.five_hour_window_seconds <= 0 {
+        target.five_hour_window_seconds = default_five_hour_window_seconds();
+    }
+
+    // Merge legacy windows for backward compatibility migration.
     merge_usage_window_histories(&mut target.weekly_windows, source.weekly_windows, 3);
     merge_usage_window_histories(&mut target.five_hour_windows, source.five_hour_windows, 34);
+}
+
+fn upsert_profile_observation(
+    observations: &mut Vec<ProfileUsageObservation>,
+    observed_at_local: i64,
+    weekly_used_percent: Option<f64>,
+    five_hour_used_percent: Option<f64>,
+) {
+    if let Some(existing) = observations
+        .iter_mut()
+        .find(|obs| obs.observed_at_local == observed_at_local)
+    {
+        if let Some(value) = weekly_used_percent {
+            existing.weekly_used_percent = Some(value.clamp(0.0, 100.0));
+        }
+        if let Some(value) = five_hour_used_percent {
+            existing.five_hour_used_percent = Some(value.clamp(0.0, 100.0));
+        }
+        return;
+    }
+    observations.push(ProfileUsageObservation {
+        observed_at_local,
+        weekly_used_percent: weekly_used_percent.map(|v| v.clamp(0.0, 100.0)),
+        five_hour_used_percent: five_hour_used_percent.map(|v| v.clamp(0.0, 100.0)),
+    });
+}
+
+fn prune_profile_observations_to_active_windows(history: &mut ProfileUsageHistory) {
+    let weekly_start = history
+        .weekly_reset_at
+        .map(|reset| reset - history.weekly_window_seconds);
+    let weekly_end = history.weekly_reset_at;
+    let five_start = history
+        .five_hour_reset_at
+        .map(|reset| reset - history.five_hour_window_seconds);
+    let five_end = history.five_hour_reset_at;
+
+    history.observations.retain(|obs| {
+        let in_weekly = match (weekly_start, weekly_end, obs.weekly_used_percent) {
+            (Some(start), Some(end), Some(_)) => {
+                obs.observed_at_local > start && obs.observed_at_local <= end
+            }
+            _ => false,
+        };
+        let in_five_hour = match (five_start, five_end, obs.five_hour_used_percent) {
+            (Some(start), Some(end), Some(_)) => {
+                obs.observed_at_local > start && obs.observed_at_local <= end
+            }
+            _ => false,
+        };
+        in_weekly || in_five_hour
+    });
+}
+
+fn normalize_profile_history(mut history: ProfileUsageHistory) -> (ProfileUsageHistory, bool) {
+    let before = history.clone();
+    if history.weekly_window_seconds <= 0 {
+        history.weekly_window_seconds = default_weekly_window_seconds();
+    }
+    if history.five_hour_window_seconds <= 0 {
+        history.five_hour_window_seconds = default_five_hour_window_seconds();
+    }
+
+    // Legacy migration: fold per-window observations into profile-level observations.
+    for window in &history.weekly_windows {
+        if window.limit_window_seconds == history.weekly_window_seconds {
+            history.weekly_reset_at = Some(
+                history
+                    .weekly_reset_at
+                    .unwrap_or(window.end_at)
+                    .max(window.end_at),
+            );
+            for obs in &window.observations {
+                upsert_profile_observation(
+                    &mut history.observations,
+                    obs.observed_at,
+                    Some(obs.used_percent),
+                    None,
+                );
+            }
+        }
+    }
+    for window in &history.five_hour_windows {
+        if window.limit_window_seconds == history.five_hour_window_seconds {
+            history.five_hour_reset_at = Some(
+                history
+                    .five_hour_reset_at
+                    .unwrap_or(window.end_at)
+                    .max(window.end_at),
+            );
+            for obs in &window.observations {
+                upsert_profile_observation(
+                    &mut history.observations,
+                    obs.observed_at,
+                    None,
+                    Some(obs.used_percent),
+                );
+            }
+        }
+    }
+
+    history.observations.sort_by_key(|obs| obs.observed_at_local);
+    history.observations.dedup_by(|right, left| {
+        right.observed_at_local == left.observed_at_local
+            && right.weekly_used_percent == left.weekly_used_percent
+            && right.five_hour_used_percent == left.five_hour_used_percent
+    });
+    // Old fields are no longer authoritative after migration.
+    history.weekly_windows.clear();
+    history.five_hour_windows.clear();
+    let changed = history != before;
+    (history, changed)
 }
 
 fn merge_usage_window_histories(
@@ -552,12 +766,12 @@ fn merge_usage_window_histories(
     max_count: usize,
 ) {
     for mut source_window in source {
-        if let Some(existing) = target.iter_mut().find(|candidate| {
-            candidate.limit_window_seconds == source_window.limit_window_seconds
-                && candidate.start_at == source_window.start_at
-                && candidate.end_at == source_window.end_at
-        }) {
+        if let Some(existing) = target
+            .iter_mut()
+            .find(|candidate| windows_match_with_weekly_jitter(candidate, &source_window))
+        {
             existing.observations.append(&mut source_window.observations);
+            canonicalize_weekly_window(existing, &source_window);
             dedupe_observations(&mut existing.observations);
         } else {
             dedupe_observations(&mut source_window.observations);
@@ -930,12 +1144,12 @@ mod tests {
             .unwrap();
 
         let history = service.profile_history(Some("acct-alpha")).unwrap();
-        assert_eq!(history.weekly_windows.len(), 1);
-        assert_eq!(history.five_hour_windows.len(), 1);
-        assert_eq!(history.weekly_windows[0].observations.len(), 1);
-        assert_eq!(history.weekly_windows[0].observations[0].observed_at, 500);
-        assert_eq!(history.weekly_windows[0].observations[0].used_percent, 41.0);
-        assert_eq!(history.five_hour_windows[0].start_at, 0);
+        assert_eq!(history.weekly_reset_at, Some(604_800));
+        assert_eq!(history.five_hour_reset_at, Some(18_000));
+        assert_eq!(history.observations.len(), 1);
+        assert_eq!(history.observations[0].observed_at_local, 500);
+        assert_eq!(history.observations[0].weekly_used_percent, Some(41.0));
+        assert_eq!(history.observations[0].five_hour_used_percent, Some(12.0));
     }
 
     #[test]
@@ -953,7 +1167,7 @@ mod tests {
         service.record_usage_snapshot(Some("acct-alpha"), &read).unwrap();
         let history = service.profile_history(Some("acct-alpha")).unwrap();
         assert_eq!(
-            history.weekly_windows[0].observations[0].observed_at,
+            history.observations[0].observed_at_local,
             5_000,
             "cached usage must stamp observations at fetched_at, not current clock"
         );
@@ -975,7 +1189,10 @@ mod tests {
     fn usage_history_separates_reset_windows() {
         let cache_path = temp_file("cache-b.json");
         let history_path = temp_file("history-b.json");
-        let service = UsageService::new(cache_path, history_path, 300).with_now_seconds(750);
+        let service_before = UsageService::new(cache_path.clone(), history_path.clone(), 300)
+            .with_now_seconds(604_790);
+        let service_after =
+            UsageService::new(cache_path, history_path, 300).with_now_seconds(1_209_590);
 
         let usage_before_reset = UsageResponse {
             email: None,
@@ -1016,17 +1233,67 @@ mod tests {
             fetched_at: Some(750),
             stale: false,
         };
-        service
+        service_before
             .record_usage_snapshot(Some("acct-alpha"), &read_before)
             .unwrap();
-        service
+        service_after
             .record_usage_snapshot(Some("acct-alpha"), &read_after)
             .unwrap();
 
-        let history = service.profile_history(Some("acct-alpha")).unwrap();
-        assert_eq!(history.weekly_windows.len(), 2);
-        assert_eq!(history.weekly_windows[0].start_at, 0);
-        assert_eq!(history.weekly_windows[1].start_at, 604_800);
+        let history = service_after.profile_history(Some("acct-alpha")).unwrap();
+        assert_eq!(history.weekly_reset_at, Some(1_209_600));
+        assert_eq!(history.observations.len(), 1);
+        assert_eq!(history.observations[0].weekly_used_percent, Some(4.0));
+    }
+
+    #[test]
+    fn record_usage_snapshot_keeps_last_7d_window_with_10min_samples() {
+        let cache_path = temp_file("history-2000-cache.json");
+        let history_path = temp_file("history-2000.json");
+        let account = "acct-alpha";
+
+        for i in 0..2000 {
+            let now = i as i64 * 600;
+            let service =
+                UsageService::new(cache_path.clone(), history_path.clone(), 300).with_now_seconds(now);
+            let usage = UsageResponse {
+                email: None,
+                plan_type: None,
+                rate_limit: Some(UsageRateLimit {
+                    primary_window: Some(UsageWindow {
+                        used_percent: (i % 100) as f64,
+                        limit_window_seconds: 18_000,
+                        reset_after_seconds: 18_000,
+                        reset_at: now,
+                    }),
+                    secondary_window: Some(UsageWindow {
+                        used_percent: (i % 100) as f64,
+                        limit_window_seconds: 604_800,
+                        reset_after_seconds: 604_800,
+                        reset_at: now,
+                    }),
+                }),
+            };
+            let read = UsageReadResult {
+                usage: Some(usage),
+                source: UsageSource::Api,
+                fetched_at: Some(now),
+                stale: false,
+            };
+            service.record_usage_snapshot(Some(account), &read).unwrap();
+        }
+
+        let service = UsageService::new(cache_path, history_path, 300).with_now_seconds(0);
+        let history = service.profile_history(Some(account)).unwrap();
+        assert_eq!(
+            history.observations.len(),
+            1008,
+            "7d * 24h * 6 points/hour = 1008 when lower bound is exclusive",
+        );
+        let expected_end = (1999_i64) * 600;
+        let expected_start_exclusive = expected_end - 604_800;
+        assert!(history.observations.first().is_some_and(|o| o.observed_at_local > expected_start_exclusive));
+        assert!(history.observations.last().is_some_and(|o| o.observed_at_local == expected_end));
     }
 
     #[test]
@@ -1078,6 +1345,77 @@ mod tests {
     }
 
     #[test]
+    fn merge_usage_window_histories_merges_weekly_windows_with_small_reset_jitter() {
+        let mut target = vec![UsageWindowHistory {
+            limit_window_seconds: WEEKLY_WINDOW_SECONDS,
+            start_at: 100,
+            end_at: 100 + WEEKLY_WINDOW_SECONDS,
+            observations: vec![UsageObservation {
+                observed_at: 200,
+                used_percent: 10.0,
+            }],
+        }];
+        let source = vec![UsageWindowHistory {
+            limit_window_seconds: WEEKLY_WINDOW_SECONDS,
+            start_at: 102,
+            end_at: 102 + WEEKLY_WINDOW_SECONDS,
+            observations: vec![
+                UsageObservation {
+                    observed_at: 300,
+                    used_percent: 20.0,
+                },
+                UsageObservation {
+                    observed_at: 300,
+                    used_percent: 20.0,
+                },
+            ],
+        }];
+
+        merge_usage_window_histories(&mut target, source, 3);
+
+        assert_eq!(target.len(), 1, "weekly jitter windows should merge");
+        assert_eq!(
+            target[0].end_at,
+            102 + WEEKLY_WINDOW_SECONDS,
+            "merged weekly window uses latest canonical end"
+        );
+        assert_eq!(
+            target[0].start_at,
+            target[0].end_at - WEEKLY_WINDOW_SECONDS,
+            "start_at should be derived from canonical weekly end"
+        );
+        assert_eq!(
+            target[0].observations.len(),
+            2,
+            "observations should merge and dedupe"
+        );
+    }
+
+    #[test]
+    fn merge_usage_window_histories_keeps_distinct_weekly_windows_when_beyond_jitter() {
+        let mut target = vec![UsageWindowHistory {
+            limit_window_seconds: WEEKLY_WINDOW_SECONDS,
+            start_at: 0,
+            end_at: WEEKLY_WINDOW_SECONDS,
+            observations: vec![],
+        }];
+        let source = vec![UsageWindowHistory {
+            limit_window_seconds: WEEKLY_WINDOW_SECONDS,
+            start_at: 500,
+            end_at: WEEKLY_WINDOW_SECONDS + 500,
+            observations: vec![],
+        }];
+
+        merge_usage_window_histories(&mut target, source, 3);
+
+        assert_eq!(
+            target.len(),
+            2,
+            "weekly windows outside jitter tolerance should stay separate"
+        );
+    }
+
+    #[test]
     fn merge_profile_history_aliases_moves_alias_history_into_canonical_key() {
         let cache_path = temp_file("merge-history-cache.json");
         let history_path = temp_file("merge-history.json");
@@ -1096,6 +1434,7 @@ mod tests {
                     }],
                 }],
                 five_hour_windows: vec![],
+                ..ProfileUsageHistory::default()
             },
         );
         history.by_account_id.insert(
@@ -1125,6 +1464,7 @@ mod tests {
                         used_percent: 30.0,
                     }],
                 }],
+                ..ProfileUsageHistory::default()
             },
         );
         service.write_history_cache(&history).unwrap();
@@ -1135,11 +1475,69 @@ mod tests {
 
         let canonical = service.profile_history(Some("canonical")).unwrap();
         let alias = service.profile_history(Some("alias")).unwrap();
-        assert_eq!(canonical.weekly_windows.len(), 1);
-        assert_eq!(canonical.weekly_windows[0].observations.len(), 2);
-        assert_eq!(canonical.five_hour_windows.len(), 1);
+        assert_eq!(canonical.weekly_windows.len(), 0);
+        assert_eq!(canonical.five_hour_windows.len(), 0);
+        assert!(canonical.weekly_reset_at.is_some());
+        assert!(canonical.five_hour_reset_at.is_some());
+        assert!(canonical.observations.len() >= 2);
         assert!(alias.weekly_windows.is_empty());
         assert!(alias.five_hour_windows.is_empty());
+    }
+
+    #[test]
+    fn profile_history_migrates_legacy_window_buckets_to_observation_rows_and_resets() {
+        let cache_path = temp_file("legacy-migrate-cache.json");
+        let history_path = temp_file("legacy-migrate-history.json");
+        let service = UsageService::new(cache_path, history_path.clone(), 300);
+        let legacy = serde_json::json!({
+            "byAccountId": {
+                "acct-alpha": {
+                    "weekly_windows": [{
+                        "limit_window_seconds": 604800,
+                        "start_at": 0,
+                        "end_at": 604800,
+                        "observations": [
+                            {"observed_at": 100, "used_percent": 10.0},
+                            {"observed_at": 200, "used_percent": 20.0}
+                        ]
+                    }],
+                    "five_hour_windows": [{
+                        "limit_window_seconds": 18000,
+                        "start_at": 10,
+                        "end_at": 18010,
+                        "observations": [
+                            {"observed_at": 200, "used_percent": 30.0}
+                        ]
+                    }]
+                }
+            }
+        });
+        write_json(&history_path, &legacy).unwrap();
+
+        let migrated = service.profile_history(Some("acct-alpha")).unwrap();
+        assert_eq!(migrated.weekly_reset_at, Some(604_800));
+        assert_eq!(migrated.five_hour_reset_at, Some(18_010));
+        assert_eq!(migrated.weekly_windows.len(), 0);
+        assert_eq!(migrated.five_hour_windows.len(), 0);
+        assert!(migrated.observations.iter().any(|obs| {
+            obs.observed_at_local == 100
+                && obs.weekly_used_percent == Some(10.0)
+                && obs.five_hour_used_percent.is_none()
+        }));
+        assert!(migrated.observations.iter().any(|obs| {
+            obs.observed_at_local == 200
+                && obs.weekly_used_percent == Some(20.0)
+                && obs.five_hour_used_percent == Some(30.0)
+        }));
+
+        let migrated_raw = std::fs::read_to_string(&history_path).unwrap();
+        let migrated_json: serde_json::Value = serde_json::from_str(&migrated_raw).unwrap();
+        let acct = &migrated_json["byAccountId"]["acct-alpha"];
+        assert!(acct["weekly_windows"].as_array().is_some_and(|list| list.is_empty()));
+        assert!(acct["five_hour_windows"].as_array().is_some_and(|list| list.is_empty()));
+        assert_eq!(acct["weekly_reset_at"], serde_json::json!(604800));
+        assert_eq!(acct["five_hour_reset_at"], serde_json::json!(18010));
+        assert!(acct["observations"].as_array().is_some_and(|list| !list.is_empty()));
     }
 
     #[test]
