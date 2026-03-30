@@ -152,7 +152,7 @@ fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_stat
     let x_label_mid = format!("{:.1}d", x_bounds[0] + x_range * 0.5);
     let x_label_q3  = format!("{:.1}d", x_bounds[0] + x_range * 0.75);
     let x_label_hi  = if (x_bounds[1] - 7.0).abs() < 0.01 {
-        "now".to_string()
+        "reset".to_string()
     } else {
         format!("{:.1}d ago", 7.0 - x_bounds[1])
     };
@@ -293,6 +293,7 @@ fn render_end_labels(
     anchors.sort_by_key(|anchor| anchor.y);
 
     for label in layout_end_labels(&anchors, graph_area, occupied_cells, blocked_cells) {
+        draw_label_connector(frame, &label, graph_area);
         frame
             .buffer_mut()
             .set_string(label.x, label.y, label.text, Style::default().fg(label.color));
@@ -375,6 +376,8 @@ struct PlacedLabel {
     color: Color,
     x: u16,
     y: u16,
+    anchor_x: u16,
+    anchor_y: u16,
 }
 
 fn layout_end_labels(
@@ -385,6 +388,8 @@ fn layout_end_labels(
 ) -> Vec<PlacedLabel> {
     let mut placed = Vec::new();
     let mut reserved = HashSet::new();
+    const PREFERRED_LABEL_OFFSET: u16 = 3;
+    const FALLBACK_LABEL_OFFSET: u16 = 1;
 
     for anchor in anchors {
         let width = anchor.text.chars().count() as u16;
@@ -402,25 +407,41 @@ fn layout_end_labels(
                     continue;
                 }
                 let y = y as u16;
-                let right_x = anchor.x.saturating_add(1);
-                if right_x + width <= graph_area.right() {
-                    candidates.push((right_x, y));
-                }
-                let left_x = anchor.x.saturating_sub(width);
-                if left_x >= graph_area.left() && left_x + width <= graph_area.right() {
-                    candidates.push((left_x, y));
+                for offset in [PREFERRED_LABEL_OFFSET, FALLBACK_LABEL_OFFSET] {
+                    let right_x = anchor.x.saturating_add(offset);
+                    if right_x + width <= graph_area.right() {
+                        candidates.push((right_x, y));
+                    }
+                    let left_x = anchor
+                        .x
+                        .saturating_sub(width.saturating_add(offset.saturating_sub(1)));
+                    if left_x >= graph_area.left() && left_x + width <= graph_area.right() {
+                        candidates.push((left_x, y));
+                    }
                 }
             }
         }
 
         if let Some((x, y)) = candidates.into_iter().find(|(x, y)| {
-            (0..width).all(|dx| {
+            let label_cells_ok = (0..width).all(|dx| {
                 let cell = (x + dx, *y);
                 !occupied_cells.contains(&cell)
                     && !blocked_cells.contains(&cell)
                     && !reserved.contains(&cell)
-            })
+            });
+            if !label_cells_ok {
+                return false;
+            }
+            connector_cells(*x, *y, width, anchor.x, anchor.y, graph_area)
+                .into_iter()
+                .all(|cell| {
+                    !blocked_cells.contains(&cell) && !reserved.contains(&cell)
+                })
         }) {
+            let connector = connector_cells(x, y, width, anchor.x, anchor.y, graph_area);
+            for cell in connector {
+                reserved.insert(cell);
+            }
             for dx in 0..width {
                 reserved.insert((x + dx, y));
             }
@@ -429,11 +450,74 @@ fn layout_end_labels(
                 color: anchor.color,
                 x,
                 y,
+                anchor_x: anchor.x,
+                anchor_y: anchor.y,
             });
         }
     }
 
     placed
+}
+
+fn connector_cells(
+    label_x: u16,
+    label_y: u16,
+    label_width: u16,
+    anchor_x: u16,
+    anchor_y: u16,
+    graph_area: Rect,
+) -> Vec<(u16, u16)> {
+    let mut cells = Vec::new();
+    let label_on_right = label_x > anchor_x;
+    let elbow_x = if label_on_right {
+        label_x.saturating_sub(1)
+    } else {
+        label_x.saturating_add(label_width)
+    };
+
+    for x in anchor_x.min(elbow_x)..=anchor_x.max(elbow_x) {
+        if x == anchor_x || x < graph_area.left() || x >= graph_area.right() {
+            continue;
+        }
+        cells.push((x, anchor_y));
+    }
+    for y in anchor_y.min(label_y)..=anchor_y.max(label_y) {
+        if y == anchor_y || y < graph_area.top() || y >= graph_area.bottom() {
+            continue;
+        }
+        cells.push((elbow_x, y));
+    }
+    cells
+}
+
+fn draw_label_connector(frame: &mut Frame, label: &PlacedLabel, graph_area: Rect) {
+    let label_width = label.text.chars().count() as u16;
+    let label_on_right = label.x > label.anchor_x;
+    let elbow_x = if label_on_right {
+        label.x.saturating_sub(1)
+    } else {
+        label.x.saturating_add(label_width)
+    };
+    let style = Style::default().fg(label.color).add_modifier(Modifier::DIM);
+
+    for x in label.anchor_x.min(elbow_x)..=label.anchor_x.max(elbow_x) {
+        if x == label.anchor_x || x < graph_area.left() || x >= graph_area.right() {
+            continue;
+        }
+        let cell = &mut frame.buffer_mut()[(x, label.anchor_y)];
+        if cell.symbol() == " " {
+            cell.set_symbol("-").set_style(style);
+        }
+    }
+    for y in label.anchor_y.min(label.y)..=label.anchor_y.max(label.y) {
+        if y == label.anchor_y || y < graph_area.top() || y >= graph_area.bottom() {
+            continue;
+        }
+        let cell = &mut frame.buffer_mut()[(elbow_x, y)];
+        if cell.symbol() == " " {
+            cell.set_symbol("|").set_style(style);
+        }
+    }
 }
 
 
@@ -657,7 +741,7 @@ mod tests {
         assert!(joined.contains("[codex] Alpha 76%/40%"));
         assert!(joined.contains("0.0d"));
         assert!(joined.contains("3.5d"));
-        assert!(joined.contains("now"));
+        assert!(joined.contains("reset"));
         assert!(joined.contains("100%"));
         assert!(!joined.contains("▪"));
         assert!(!joined.contains("pending Canvas plot"));

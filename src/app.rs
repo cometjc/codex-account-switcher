@@ -6,6 +6,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use crossterm::event;
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::prelude::*;
 use ratatui::style::Stylize;
@@ -32,6 +33,8 @@ const BACKGROUND_REFRESH_STALE_SECONDS: i64 = 600;
 const CRON_YIELD_FRESH_SECONDS: i64 = 15 * 60;
 const BACKGROUND_REFRESH_ERROR_COOLDOWN_SECONDS: i64 = 600;
 const HOT_RELOAD_CHECK_INTERVAL: Duration = Duration::from_secs(2);
+const PROFILE_RELOAD_FALLBACK_INTERVAL: Duration = Duration::from_secs(600);
+const FILE_CHANGE_RELOAD_DEBOUNCE: Duration = Duration::from_millis(800);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum BackgroundRefreshState {
@@ -153,6 +156,9 @@ pub struct App {
     background_refresh_state: BackgroundRefreshState,
     background_refresh_receiver: Option<Receiver<BackgroundRefreshReport>>,
     background_refresh_retry_after: Option<i64>,
+    file_change_receiver: Option<Receiver<()>>,
+    file_change_watcher: Option<RecommendedWatcher>,
+    file_change_pending_since: Option<Instant>,
     cursor_ingest: Option<CursorIngestSession>,
 }
 
@@ -226,8 +232,12 @@ impl App {
             background_refresh_state: BackgroundRefreshState::Idle,
             background_refresh_receiver: None,
             background_refresh_retry_after: None,
+            file_change_receiver: None,
+            file_change_watcher: None,
+            file_change_pending_since: None,
             cursor_ingest: None,
         };
+        app.setup_file_change_watcher();
         app.ensure_background_refresh_task();
         Ok(app)
     }
@@ -284,6 +294,9 @@ impl App {
             background_refresh_state: BackgroundRefreshState::Idle,
             background_refresh_receiver: None,
             background_refresh_retry_after: None,
+            file_change_receiver: None,
+            file_change_watcher: None,
+            file_change_pending_since: None,
             cursor_ingest: None,
         }
     }
@@ -327,6 +340,7 @@ impl App {
             self.poll_background_refresh();
             self.poll_cursor_ingest();
             self.poll_hot_reload_binary();
+            self.poll_file_change_reload();
             terminal.draw(|frame| self.render(frame))?;
 
             if event::poll(Duration::from_millis(150))? {
@@ -336,8 +350,8 @@ impl App {
                 }
             }
 
-            // Auto-reload every 30s to pick up cron-refreshed usage data
-            if self.last_auto_reload.elapsed() >= Duration::from_secs(30) {
+            // Fallback poll in case file events are unavailable on this platform.
+            if self.last_auto_reload.elapsed() >= PROFILE_RELOAD_FALLBACK_INTERVAL {
                 let _ = self.reload_profiles(false, None);
                 self.last_auto_reload = Instant::now();
             }
@@ -364,6 +378,84 @@ impl App {
             self.binary_mtime = candidate_mtime;
             self.should_exec = true;
             self.status_message = Some("Detected binary update, reloading...".to_string());
+        }
+    }
+
+    fn setup_file_change_watcher(&mut self) {
+        let Some(store) = self.store.as_ref() else {
+            return;
+        };
+        let (tx, rx) = mpsc::channel::<()>();
+        let refresh_log_path = store.paths().refresh_log_path();
+        let mut watcher = match notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+            let Ok(event) = result else {
+                return;
+            };
+            if event.paths.iter().any(|path| path == &refresh_log_path) {
+                return;
+            }
+            if event
+                .paths
+                .iter()
+                .any(|path| path.extension().and_then(|ext| ext.to_str()) == Some("lock"))
+            {
+                return;
+            }
+            let should_reload = !matches!(event.kind, EventKind::Access(_));
+            if should_reload {
+                let _ = tx.send(());
+            }
+        }) {
+            Ok(w) => w,
+            Err(_) => return,
+        };
+
+        let mut watch_paths = vec![store.paths().codex_dir().to_path_buf()];
+        if let Some(claude_store) = self.claude_store.as_ref() {
+            watch_paths.push(claude_store.paths().claude_dir().to_path_buf());
+        }
+        let copilot_paths = crate::copilot::CopilotPaths::detect();
+        if let Some(parent) = copilot_paths.usage_history_path().parent() {
+            watch_paths.push(parent.to_path_buf());
+        }
+
+        for path in watch_paths {
+            if path.exists() {
+                let _ = watcher.watch(path.as_path(), RecursiveMode::NonRecursive);
+            }
+        }
+
+        self.file_change_receiver = Some(rx);
+        self.file_change_watcher = Some(watcher);
+    }
+
+    fn poll_file_change_reload(&mut self) {
+        let Some(receiver) = self.file_change_receiver.as_ref() else {
+            return;
+        };
+        let mut saw_change = false;
+        loop {
+            match receiver.try_recv() {
+                Ok(_) => saw_change = true,
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    self.file_change_receiver = None;
+                    self.file_change_watcher = None;
+                    self.file_change_pending_since = None;
+                    break;
+                }
+            }
+        }
+        if saw_change {
+            self.file_change_pending_since = Some(Instant::now());
+        }
+        if self
+            .file_change_pending_since
+            .is_some_and(|since| since.elapsed() >= FILE_CHANGE_RELOAD_DEBOUNCE)
+        {
+            let _ = self.reload_profiles(false, None);
+            self.last_auto_reload = Instant::now();
+            self.file_change_pending_since = None;
         }
     }
 

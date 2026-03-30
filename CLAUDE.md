@@ -26,4 +26,5 @@ plan[1..n] -> split to lanes[1..m] -> 4a parallel-lane flow（`plugins/parallel-
 
 ### Build Rule
 
-Always use `cargo test` instead of `cargo build` to verify Rust changes — it compiles and runs all tests in one step.
+Always use `make test` as the default verification command for Rust changes.  
+Use `cargo test` only for explicit quick local checks or when the user explicitly requests it.

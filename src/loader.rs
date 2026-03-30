@@ -554,8 +554,7 @@ fn project_weekly_points_from_profile_observations(
     window: &UsageWindow,
     observations: &[crate::usage::ProfileUsageObservation],
 ) -> Vec<ChartPoint> {
-    let now_seconds = current_unix_seconds();
-    let end_at = window.reset_at.min(now_seconds);
+    let end_at = window.reset_at;
     let start_at = end_at - window.limit_window_seconds;
     let total = (end_at - start_at) as f64;
     if total <= 0.0 {
@@ -585,8 +584,7 @@ fn build_weekly_history_from_profile_observations(
     window: &UsageWindow,
     observations: &[crate::usage::ProfileUsageObservation],
 ) -> UsageWindowHistory {
-    let now_seconds = current_unix_seconds();
-    let end_at = window.reset_at.min(now_seconds);
+    let end_at = window.reset_at;
     let start_at = end_at - window.limit_window_seconds;
     let mut obs = observations
         .iter()
@@ -610,6 +608,7 @@ fn build_weekly_history_from_profile_observations(
     }
 }
 
+#[cfg(test)]
 fn current_unix_seconds() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1689,8 +1688,8 @@ mod tests {
             used_percent: 50.0,
             limit_window_seconds: 604_800,
             reset_after_seconds: 0,
-            // Reset can be in the future; projection should still use rolling-now end.
-            reset_at: end_at + 300_000,
+            // x=0 maps to reset_at-7d and x=7 maps to reset_at.
+            reset_at: end_at,
         };
         let observations = (0..2000_i64)
             .map(|i| crate::usage::ProfileUsageObservation {
@@ -1714,6 +1713,7 @@ mod tests {
         ));
         let account_id = "acct-concurrent-chart";
         let base_now = current_unix_seconds() - 7_200;
+        let weekly_reset_at = base_now + 604_800;
 
         let app_service = UsageService::new(cache_path.clone(), history_path.clone(), 300);
         let cron_service = UsageService::new(cache_path, history_path.clone(), 300);
@@ -1735,7 +1735,7 @@ mod tests {
                         used_percent: 22.0,
                         limit_window_seconds: 604_800,
                         reset_after_seconds: 604_800,
-                        reset_at: app_now + 604_800,
+                        reset_at: weekly_reset_at,
                     }),
                 }),
             };
@@ -1753,7 +1753,7 @@ mod tests {
                         used_percent: 23.0,
                         limit_window_seconds: 604_800,
                         reset_after_seconds: 604_800,
-                        reset_at: cron_now + 604_800,
+                        reset_at: weekly_reset_at,
                     }),
                 }),
             };
@@ -1800,7 +1800,7 @@ mod tests {
                     used_percent: 25.0,
                     limit_window_seconds: 604_800,
                     reset_after_seconds: 604_800,
-                    reset_at: current_unix_seconds() + 604_800,
+                    reset_at: weekly_reset_at,
                 }),
             }),
         };

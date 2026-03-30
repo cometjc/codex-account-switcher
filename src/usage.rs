@@ -422,6 +422,7 @@ impl UsageService {
         let five_hour_window = pick_five_hour_window(usage);
         self.mutate_history_cache(|history| {
             let entry = history.by_account_id.entry(account_id.to_string()).or_default();
+            let before = entry.clone();
             let previous_observations = entry.observations.clone();
             if let Some(window) = weekly_window {
                 entry.weekly_reset_at = Some(window.reset_at);
@@ -444,7 +445,7 @@ impl UsageService {
                 // Guard against destructive refresh writes (e.g. reset/window boundary skew).
                 entry.observations = previous_observations;
             }
-            Ok(true)
+            Ok(*entry != before)
         })
     }
 
