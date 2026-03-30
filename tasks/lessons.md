@@ -18,6 +18,7 @@
 - Lane 4 做 docs/tests/tracking 收口時，若 Lane 2/3/5 還在改共享檔，不要急著把 README 或 Node regression tests 一次寫死；先把可先定義的 tracking truth 寫入 todo/lessons，並保留後續 cherry-pick 空位。
 - 多 lane reviewer 若共享 dirty worktree，極易把其他 lane 或既有 WIP 誤判成當前 task 的 scope violation；parallel-lane 流程下 reviewer 必須只看 lane-item commit diff。
 - implementer 不應順手更新 `tasks/todo.md`、lane checklist 或 roadmap 追蹤檔；這些追蹤更新預設由 coordinator 統一回寫。
+- 若使用者指出「記錄點一直無法維持、總是很短」，下一次回覆必須用較長格式補齊記錄：包含日期（或 commit/執行時間）、變更摘要、關鍵驗證命令與結果；必要時用 rolling window 簡化，但不刪除最近的可追溯記錄。
 - 若某個 lane 的可見輸出其實依賴另一條 lane 的 boundary，應先把 boundary 擴張切成依賴 lane item，再執行可見輸出 lane，不要在 implementer 執行中臨時擴 scope。
 - parallel-lane 執行中若 sub-agent 反覆只回 `IN_PROGRESS`，不要只盯 thread 訊號；要直接檢查 lane worktree 的 `HEAD`、source diff 與 lane-local 驗證，避免漏掉其實已完成但未正常回報的 commit。
 - 做多 lane workflow 噪音治理時，先分清楚是「未忽略的 build outputs」還是「已經被 git 追蹤的 artifacts」；前者靠 `.gitignore`，後者還要做 lane-local 的去追蹤清理，不能只加 ignore 就以為會安靜下來。
