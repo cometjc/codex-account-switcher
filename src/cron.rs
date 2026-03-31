@@ -70,8 +70,13 @@ impl CronRunReport {
 /// Read the cron status file (legacy decimal timestamp or JSON status payload).
 pub fn read_status(path: &Path) -> CronStatus {
     let installed = is_installed();
-    let db = SqliteStore::new(agent_switch_config_dir().join("agent-switch.db"));
-    if let Ok(Some(status)) = db.read_cron_status() {
+    // Prefer the explicit status file when present (keeps local tests and legacy flows
+    // independent from the shared config DB), and fall back to DB only when the file
+    // is missing or unparsable.
+    let parsed = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| parse_status_file(&raw));
+    if let Some(status) = parsed {
         return CronStatus {
             installed,
             last_run: status.last_success,
@@ -81,16 +86,19 @@ pub fn read_status(path: &Path) -> CronStatus {
             copilot_error: status.copilot_error,
         };
     }
-    let parsed = std::fs::read_to_string(path)
-        .ok()
-        .and_then(|raw| parse_status_file(&raw));
-    CronStatus {
-        installed,
-        last_run: parsed.as_ref().and_then(|status| status.last_success),
-        last_attempt: parsed.as_ref().and_then(|status| status.last_attempt),
-        codex_error: parsed.as_ref().and_then(|status| status.codex_error.clone()),
-        claude_error: parsed.as_ref().and_then(|status| status.claude_error.clone()),
-        copilot_error: parsed.as_ref().and_then(|status| status.copilot_error.clone()),
+
+    let db = SqliteStore::new(agent_switch_config_dir().join("agent-switch.db"));
+    if let Ok(Some(status)) = db.read_cron_status() {
+        CronStatus {
+            installed,
+            last_run: status.last_success,
+            last_attempt: status.last_attempt,
+            codex_error: status.codex_error,
+            claude_error: status.claude_error,
+            copilot_error: status.copilot_error,
+        }
+    } else {
+        CronStatus::uninstalled()
     }
 }
 

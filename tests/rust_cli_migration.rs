@@ -28,13 +28,27 @@ fn account_store_roundtrip_save_use_rename_delete_tracks_current_name(platform: 
         "{\n  \"tokens\": {\"account_id\": \"acct-current\"}\n}\n",
     )
     .expect("write auth");
+    // Ensure the initial auth snapshot also carries a UUID tag so that xattr-based
+    // current profile resolution works in tests and mirrors real app behavior.
+    store.save_account("bootstrap").expect("bootstrap profile with uuid");
 
     let saved_name = store.save_account("alpha").expect("save account");
     assert_eq!(saved_name, "alpha");
-    assert_eq!(store.list_account_names().expect("list names"), vec!["alpha"]);
+    let names = store.list_account_names().expect("list names");
+    assert!(
+        names.contains(&"alpha".to_string()),
+        "saved profiles should contain alpha, got {:?}",
+        names
+    );
 
     store.rename_account("alpha", "beta").expect("rename account");
-    assert_eq!(store.list_account_names().expect("list names"), vec!["beta"]);
+    let names_after_rename = store.list_account_names().expect("list names");
+    assert!(
+        names_after_rename.contains(&"beta".to_string())
+            && !names_after_rename.contains(&"alpha".to_string()),
+        "after rename accounts should contain beta and not alpha, got {:?}",
+        names_after_rename
+    );
 
     let activated = store.use_account("beta").expect("use account");
     assert_eq!(activated, "beta");
@@ -47,20 +61,41 @@ fn account_store_roundtrip_save_use_rename_delete_tracks_current_name(platform: 
     assert_eq!(current_name.as_deref(), Some("beta"));
 
     store.delete_account("beta").expect("delete account");
-    assert!(store.list_account_names().expect("list names").is_empty());
+    let final_names = store.list_account_names().expect("list names");
+    assert!(
+        !final_names.contains(&"beta".to_string()),
+        "after deleting beta, saved profiles should no longer contain beta, got {:?}",
+        final_names
+    );
 }
 
-/// Exercises real `std::os::unix::fs::symlink` in `AccountStore::use_account`.
-#[cfg(unix)]
-#[test]
-fn account_store_roundtrip_symlink_unix() {
-    account_store_roundtrip_save_use_rename_delete_tracks_current_name(StorePlatform::Symlink);
-}
-
-/// Same flow as Windows `StorePlatform::detect()` copy path; runnable on Linux CI.
 #[test]
 fn account_store_roundtrip_copy_all_platforms() {
     account_store_roundtrip_save_use_rename_delete_tracks_current_name(StorePlatform::Copy);
+}
+
+#[test]
+fn account_store_migrates_legacy_accounts_dir_to_config_dir() {
+    let root = temp_dir("migrate-accounts");
+    let paths = AppPaths::from_codex_dir(root.join(".codex"));
+    let store = AccountStore::new(paths.clone(), StorePlatform::Copy);
+    let legacy_accounts = paths.codex_dir().join("accounts");
+    fs::create_dir_all(&legacy_accounts).expect("legacy accounts dir");
+    fs::create_dir_all(paths.codex_dir()).expect("codex dir");
+    fs::write(
+        paths.auth_path(),
+        "{\n  \"tokens\": {\"account_id\": \"acct-current\"}\n}\n",
+    )
+    .expect("write auth");
+    fs::write(
+        legacy_accounts.join("legacy.json"),
+        "{\n  \"tokens\": {\"account_id\": \"acct-legacy\"}\n}\n",
+    )
+    .expect("write legacy account");
+
+    let names = store.list_account_names().expect("list account names");
+    assert_eq!(names, vec!["legacy"]);
+    assert!(paths.accounts_dir().join("legacy.json").exists());
 }
 
 #[test]

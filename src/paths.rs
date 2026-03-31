@@ -19,8 +19,9 @@ impl AppPaths {
     }
 
     pub fn from_codex_dir(codex_dir: PathBuf) -> Self {
+        let config_dir = config_dir_from_codex_dir(&codex_dir);
         Self {
-            accounts_dir: codex_dir.join("accounts"),
+            accounts_dir: config_dir.join("accounts"),
             auth_path: codex_dir.join("auth.json"),
             current_name_path: codex_dir.join("current"),
             limit_cache_path: codex_dir.join("codex-auth-limit-cache.json"),
@@ -104,6 +105,13 @@ fn detect_agent_switch_config_dir() -> PathBuf {
 }
 
 pub fn agent_switch_config_dir() -> PathBuf {
+    detect_agent_switch_config_dir()
+}
+
+fn config_dir_from_codex_dir(codex_dir: &Path) -> PathBuf {
+    if let Some(parent) = codex_dir.parent() {
+        return parent.join(".config").join("agent-switch");
+    }
     detect_agent_switch_config_dir()
 }
 

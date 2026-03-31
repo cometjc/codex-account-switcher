@@ -57,7 +57,7 @@ pub fn load_profiles_with_report(
     let current_snapshot = store.get_current_snapshot().ok();
     let current_account_id = current_snapshot.as_ref().and_then(read_account_id);
     let current_access_token = current_snapshot.as_ref().and_then(read_access_token);
-    // Name-based fallback: survives broken symlinks and renames (current file is updated by rename_account)
+    // Current profile identity is resolved by store-level xattr UUID mapping.
     let current_codex_name = store.get_current_account_name().ok().flatten();
     let mut refresh_errors = Vec::new();
 
@@ -417,9 +417,7 @@ fn build_saved_entry(
     let chart_data =
         build_profile_chart_data(effective_account_id.as_deref(), usage_view.usage.as_ref(), usage_service)?;
 
-    // Match by account_id (from auth.json content) OR by name (from ~/.codex/current file).
-    // Name-based match survives broken symlinks and renames; account_id match handles the
-    // case where the current file is absent but auth.json is readable.
+    // Match by account_id OR by current profile name resolved from auth/profile UUID tags.
     Ok(ProfileEntry {
         kind: ProfileKind::Codex,
         saved_name: Some(profile.name.clone()),

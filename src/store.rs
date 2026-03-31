@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use uuid::Uuid;
+use xattr::{get as get_xattr, set as set_xattr};
 
 use crate::db::SqliteStore;
 use crate::paths::AppPaths;
@@ -17,17 +19,12 @@ pub struct UiState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StorePlatform {
-    Symlink,
     Copy,
 }
 
 impl StorePlatform {
     pub fn detect() -> Self {
-        if cfg!(windows) {
-            Self::Copy
-        } else {
-            Self::Symlink
-        }
+        Self::Copy
     }
 }
 
@@ -76,6 +73,7 @@ impl AccountStore {
     }
 
     pub fn list_account_names(&self) -> Result<Vec<String>> {
+        self.ensure_accounts_dir()?;
         if !self.paths.accounts_dir().exists() {
             return Ok(Vec::new());
         }
@@ -119,6 +117,9 @@ impl AccountStore {
     }
 
     pub fn get_current_account_name(&self) -> Result<Option<String>> {
+        // Prefer the explicit current-name file when present; this keeps existing flows
+        // and tests stable while xattr-based resolution becomes the primary path when
+        // no current-name hint is available.
         if let Some(name) = self.read_current_name_file()? {
             return Ok(Some(name));
         }
@@ -126,43 +127,33 @@ impl AccountStore {
         if !self.paths.auth_path().exists() {
             return Ok(None);
         }
+        self.ensure_accounts_dir()?;
+        let active_uuid = read_profile_uuid(self.paths.auth_path())
+            .with_context(|| format!("read auth uuid from {}", self.paths.auth_path().display()))?;
 
-        let metadata = fs::symlink_metadata(self.paths.auth_path())
-            .with_context(|| format!("stat {}", self.paths.auth_path().display()))?;
-        if !metadata.file_type().is_symlink() {
-            return Ok(None);
+        let mut matched_name: Option<String> = None;
+        for name in self.list_account_names()? {
+            let profile_path = self.account_file_path(&name);
+            let profile_uuid = read_profile_uuid(&profile_path)
+                .with_context(|| format!("read profile uuid from {}", profile_path.display()))?;
+            if profile_uuid == active_uuid {
+                if matched_name.is_some() {
+                    bail!("multiple profiles match auth uuid {}", active_uuid);
+                }
+                matched_name = Some(name);
+            }
         }
-
-        let raw_target = fs::read_link(self.paths.auth_path())
-            .with_context(|| format!("read link {}", self.paths.auth_path().display()))?;
-        let resolved_target = self
-            .paths
-            .auth_path()
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join(raw_target)
-            .canonicalize()
-            .with_context(|| format!("canonicalize {}", self.paths.auth_path().display()))?;
-        let accounts_root = self
-            .paths
-            .accounts_dir()
-            .canonicalize()
-            .with_context(|| format!("canonicalize {}", self.paths.accounts_dir().display()))?;
-        if !resolved_target.starts_with(&accounts_root) {
-            return Ok(None);
-        }
-        Ok(resolved_target
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .map(ToOwned::to_owned))
+        matched_name.context("no saved profile matches auth uuid").map(Some)
     }
 
     pub fn save_account(&self, raw_name: &str) -> Result<String> {
         let name = normalize_account_name(raw_name)?;
         self.ensure_auth_file_exists()?;
         self.ensure_accounts_dir()?;
-        fs::copy(self.paths.auth_path(), self.account_file_path(&name))
-            .with_context(|| format!("copy auth to {}", self.account_file_path(&name).display()))?;
+        let target = self.account_file_path(&name);
+        fs::copy(self.paths.auth_path(), &target)
+            .with_context(|| format!("copy auth to {}", target.display()))?;
+        ensure_profile_uuid(&target)?;
         Ok(name)
     }
 
@@ -174,6 +165,7 @@ impl AccountStore {
             bail!("saved profile already exists: {}", name);
         }
         write_json(&destination, snapshot)?;
+        ensure_profile_uuid(&destination)?;
         Ok(name)
     }
 
@@ -182,8 +174,10 @@ impl AccountStore {
         let name = normalize_account_name(raw_name)?;
         self.ensure_auth_file_exists()?;
         self.ensure_accounts_dir()?;
-        fs::copy(self.paths.auth_path(), self.account_file_path(&name))
+        let target = self.account_file_path(&name);
+        fs::copy(self.paths.auth_path(), &target)
             .with_context(|| format!("update saved profile {}", name))?;
+        ensure_profile_uuid(&target)?;
         Ok(name)
     }
 
@@ -197,23 +191,9 @@ impl AccountStore {
         fs::create_dir_all(self.paths.codex_dir())
             .with_context(|| format!("create {}", self.paths.codex_dir().display()))?;
 
-        match self.platform {
-            StorePlatform::Copy => {
-                fs::copy(&source, self.paths.auth_path())
-                    .with_context(|| format!("copy {} -> {}", source.display(), self.paths.auth_path().display()))?;
-            }
-            StorePlatform::Symlink => {
-                if self.paths.auth_path().exists() {
-                    let _ = fs::remove_file(self.paths.auth_path());
-                }
-                #[cfg(unix)]
-                std::os::unix::fs::symlink(&source, self.paths.auth_path())
-                    .with_context(|| format!("symlink {} -> {}", self.paths.auth_path().display(), source.display()))?;
-                #[cfg(not(unix))]
-                fs::copy(&source, self.paths.auth_path())
-                    .with_context(|| format!("copy {} -> {}", source.display(), self.paths.auth_path().display()))?;
-            }
-        }
+        let profile_uuid = read_profile_uuid(&source)
+            .with_context(|| format!("read profile uuid from {}", source.display()))?;
+        replace_auth_atomically_with_uuid(&source, self.paths.auth_path(), &profile_uuid)?;
 
         fs::write(self.paths.current_name_path(), format!("{name}\n"))
             .with_context(|| format!("write {}", self.paths.current_name_path().display()))?;
@@ -248,11 +228,14 @@ impl AccountStore {
             fs::rename(&current_path, &next_path).with_context(|| {
                 format!("rename {} -> {}", current_path.display(), next_path.display())
             })?;
+            ensure_profile_uuid(&next_path)?;
         }
 
-        if self.get_current_account_name()?.as_deref() == Some(current.as_str()) {
-            fs::write(self.paths.current_name_path(), format!("{next}\n"))
-                .with_context(|| format!("write {}", self.paths.current_name_path().display()))?;
+        if let Ok(Some(active)) = self.get_current_account_name() {
+            if active == current {
+                fs::write(self.paths.current_name_path(), format!("{next}\n"))
+                    .with_context(|| format!("write {}", self.paths.current_name_path().display()))?;
+            }
         }
 
         Ok(next)
@@ -266,8 +249,19 @@ impl AccountStore {
     }
 
     fn ensure_accounts_dir(&self) -> Result<()> {
+        self.migrate_legacy_accounts_dir()?;
         fs::create_dir_all(self.paths.accounts_dir())
-            .with_context(|| format!("create {}", self.paths.accounts_dir().display()))
+            .with_context(|| format!("create {}", self.paths.accounts_dir().display()))?;
+        for entry in fs::read_dir(self.paths.accounts_dir())
+            .with_context(|| format!("read {}", self.paths.accounts_dir().display()))?
+        {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+                ensure_profile_uuid(&path)?;
+            }
+        }
+        Ok(())
     }
 
     fn account_file_path(&self, name: &str) -> PathBuf {
@@ -292,6 +286,86 @@ impl AccountStore {
                 .with_context(|| format!("read {}", self.paths.current_name_path().display())),
         }
     }
+
+    fn migrate_legacy_accounts_dir(&self) -> Result<()> {
+        let legacy_accounts_dir = self
+            .paths
+            .codex_dir()
+            .join("accounts");
+        if !legacy_accounts_dir.exists() {
+            return Ok(());
+        }
+        fs::create_dir_all(self.paths.accounts_dir())
+            .with_context(|| format!("create {}", self.paths.accounts_dir().display()))?;
+        for entry in fs::read_dir(&legacy_accounts_dir)
+            .with_context(|| format!("read {}", legacy_accounts_dir.display()))?
+        {
+            let entry = entry?;
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let Some(file_name) = path.file_name() else {
+                continue;
+            };
+            let destination = self.paths.accounts_dir().join(file_name);
+            if destination.exists() {
+                continue;
+            }
+            fs::rename(&path, &destination).with_context(|| {
+                format!("migrate account {} -> {}", path.display(), destination.display())
+            })?;
+        }
+        Ok(())
+    }
+}
+
+const PROFILE_UUID_XATTR: &str = "user.agent-switch.profile-uuid";
+
+fn ensure_profile_uuid(path: &Path) -> Result<String> {
+    match read_profile_uuid(path) {
+        Ok(existing) => Ok(existing),
+        Err(_) => {
+            let uuid = Uuid::new_v4().to_string();
+            write_profile_uuid(path, &uuid)?;
+            Ok(uuid)
+        }
+    }
+}
+
+fn read_profile_uuid(path: &Path) -> Result<String> {
+    let raw = get_xattr(path, PROFILE_UUID_XATTR)
+        .with_context(|| format!("xattr get {} on {}", PROFILE_UUID_XATTR, path.display()))?
+        .context(format!("missing {} on {}", PROFILE_UUID_XATTR, path.display()))?;
+    let value = String::from_utf8(raw)
+        .with_context(|| format!("invalid UTF-8 xattr on {}", path.display()))?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        bail!("empty {} on {}", PROFILE_UUID_XATTR, path.display());
+    }
+    Uuid::parse_str(trimmed).with_context(|| {
+        format!("invalid UUID {} on {}", trimmed, path.display())
+    })?;
+    Ok(trimmed.to_string())
+}
+
+fn write_profile_uuid(path: &Path, uuid: &str) -> Result<()> {
+    Uuid::parse_str(uuid).with_context(|| format!("invalid UUID value {}", uuid))?;
+    set_xattr(path, PROFILE_UUID_XATTR, uuid.as_bytes())
+        .with_context(|| format!("xattr set {} on {}", PROFILE_UUID_XATTR, path.display()))
+}
+
+fn replace_auth_atomically_with_uuid(source: &Path, auth_path: &Path, uuid: &str) -> Result<()> {
+    if let Some(parent) = auth_path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    let tmp_path = auth_path.with_extension("json.tmp");
+    fs::copy(source, &tmp_path)
+        .with_context(|| format!("copy {} -> {}", source.display(), tmp_path.display()))?;
+    write_profile_uuid(&tmp_path, uuid)
+        .with_context(|| format!("write auth uuid to {}", tmp_path.display()))?;
+    fs::rename(&tmp_path, auth_path)
+        .with_context(|| format!("rename {} -> {}", tmp_path.display(), auth_path.display()))
 }
 
 fn write_json(path: &Path, value: &Value) -> Result<()> {
