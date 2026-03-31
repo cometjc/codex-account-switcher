@@ -6,6 +6,7 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::db::SqliteStore;
 use crate::paths::AppPaths;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -53,6 +54,10 @@ impl AccountStore {
     }
 
     pub fn read_ui_state(&self) -> UiState {
+        let db = SqliteStore::new(self.paths.database_path());
+        if let Ok(Some(text)) = db.read_ui_state_value("hidden_profiles") {
+            return serde_json::from_str(&text).unwrap_or_default();
+        }
         let Ok(text) = fs::read_to_string(self.paths.ui_state_path()) else {
             return UiState::default();
         };
@@ -60,6 +65,9 @@ impl AccountStore {
     }
 
     pub fn write_ui_state(&self, state: &UiState) -> Result<()> {
+        let db = SqliteStore::new(self.paths.database_path());
+        db.write_ui_state_value("hidden_profiles", &serde_json::to_string(state)?)
+            .context("write ui_state to sqlite")?;
         fs::write(
             self.paths.ui_state_path(),
             serde_json::to_string_pretty(state)?,
@@ -287,8 +295,17 @@ impl AccountStore {
 }
 
 fn write_json(path: &Path, value: &Value) -> Result<()> {
-    fs::write(path, format!("{}\n", serde_json::to_string_pretty(value)?))
-        .with_context(|| format!("write {}", path.display()))
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    let serialized = format!("{}\n", serde_json::to_string_pretty(value)?);
+    let tmp_path = path.with_extension(format!(
+        "{}.tmp",
+        path.extension().and_then(|ext| ext.to_str()).unwrap_or("json")
+    ));
+    fs::write(&tmp_path, serialized).with_context(|| format!("write {}", tmp_path.display()))?;
+    fs::rename(&tmp_path, path)
+        .with_context(|| format!("rename {} -> {}", tmp_path.display(), path.display()))
 }
 
 fn normalize_account_name(raw_name: &str) -> Result<String> {

@@ -4,6 +4,7 @@ pub mod claude;
 pub mod copilot;
 pub mod cursor_ingest;
 pub mod cron;
+pub mod db;
 pub mod input;
 pub mod loader;
 pub mod model;

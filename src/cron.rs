@@ -3,6 +3,8 @@ use std::process::Command;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use crate::db::{CronStatusRow, SqliteStore};
+use crate::paths::agent_switch_config_dir;
 
 /// Status of the cron tracker job.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +70,17 @@ impl CronRunReport {
 /// Read the cron status file (legacy decimal timestamp or JSON status payload).
 pub fn read_status(path: &Path) -> CronStatus {
     let installed = is_installed();
+    let db = SqliteStore::new(agent_switch_config_dir().join("agent-switch.db"));
+    if let Ok(Some(status)) = db.read_cron_status() {
+        return CronStatus {
+            installed,
+            last_run: status.last_success,
+            last_attempt: status.last_attempt,
+            codex_error: status.codex_error,
+            claude_error: status.claude_error,
+            copilot_error: status.copilot_error,
+        };
+    }
     let parsed = std::fs::read_to_string(path)
         .ok()
         .and_then(|raw| parse_status_file(&raw));
@@ -87,6 +100,21 @@ pub fn write_last_run_success(path: &Path) -> Result<()> {
 }
 
 pub fn write_run_report(path: &Path, report: &CronRunReport) -> Result<()> {
+    let db = SqliteStore::new(agent_switch_config_dir().join("agent-switch.db"));
+    let previous = db.read_cron_status()?;
+    let status = CronStatusRow {
+        last_attempt: Some(report.attempted_at),
+        last_success: if report.has_errors() {
+            previous.and_then(|status| status.last_success)
+        } else {
+            Some(report.attempted_at)
+        },
+        codex_error: report.codex_error.clone(),
+        claude_error: report.claude_error.clone(),
+        copilot_error: report.copilot_error.clone(),
+    };
+    db.write_cron_status(&status)?;
+
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

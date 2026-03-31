@@ -11,6 +11,8 @@ use fs2::FileExt;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use crate::db::{ProfileWindowRow, SqliteStore, UsageCacheRow, UsageObservationRow};
+use crate::paths::agent_switch_config_dir;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct UsageWindow {
@@ -161,6 +163,8 @@ type Clock = dyn Fn() -> i64 + Send + Sync;
 pub struct UsageService {
     cache_path: PathBuf,
     history_path: PathBuf,
+    db: SqliteStore,
+    service_namespace: String,
     ttl_seconds: i64,
     clock: Arc<Clock>,
     fetcher: Arc<Fetcher>,
@@ -168,9 +172,12 @@ pub struct UsageService {
 
 impl UsageService {
     pub fn new(cache_path: PathBuf, history_path: PathBuf, ttl_seconds: i64) -> Self {
+        let db_path = resolve_usage_db_path(&history_path);
         Self {
+            service_namespace: service_namespace_from_cache_path(&cache_path),
             cache_path,
             history_path,
+            db: SqliteStore::new(db_path),
             ttl_seconds,
             clock: Arc::new(default_now_seconds),
             fetcher: Arc::new(fetch_usage_from_api),
@@ -496,41 +503,64 @@ impl UsageService {
     }
 
     fn read_cache(&self) -> Result<UsageCache> {
-        match fs::read_to_string(&self.cache_path) {
-            Ok(raw) => serde_json::from_str(&raw).or(Ok(UsageCache::default())),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(UsageCache::default()),
-            Err(error) => Err(error).with_context(|| format!("read {}", self.cache_path.display())),
+        if should_backfill_from_legacy(&self.cache_path, self.db.path()) {
+            self.backfill_cache_from_legacy_json()?;
         }
+        self.read_cache_from_db()
     }
 
     fn write_cache(&self, cache: &UsageCache) -> Result<()> {
-        if let Some(parent) = self.cache_path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("create {}", parent.display()))?;
-        }
-        fs::write(
-            &self.cache_path,
-            format!("{}\n", serde_json::to_string_pretty(cache)?),
-        )
-        .with_context(|| format!("write {}", self.cache_path.display()))
+        let rows = cache
+            .by_account_id
+            .iter()
+            .map(|(account_key, record)| UsageCacheRow {
+                account_key: account_key.clone(),
+                fetched_at: record.fetched_at,
+                payload_json: serde_json::to_string(&record.usage).unwrap_or_else(|_| "{}".to_string()),
+            })
+            .collect::<Vec<_>>();
+        self.db.write_usage_cache_rows(&self.service_namespace, &rows)
     }
 
     fn read_history_cache(&self) -> Result<UsageHistoryCache> {
-        match fs::read_to_string(&self.history_path) {
-            Ok(raw) => Ok(serde_json::from_str::<UsageHistoryCache>(&raw).unwrap_or_default()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(UsageHistoryCache::default()),
-            Err(error) => Err(error).with_context(|| format!("read {}", self.history_path.display())),
+        if should_backfill_from_legacy(&self.history_path, self.db.path()) {
+            self.backfill_history_from_legacy_json()?;
         }
+        self.read_history_from_db()
     }
 
     fn write_history_cache(&self, history: &UsageHistoryCache) -> Result<()> {
-        if let Some(parent) = self.history_path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("create {}", parent.display()))?;
+        let mut windows = Vec::new();
+        let mut observations = Vec::new();
+        let mut normalized_by_account = BTreeMap::new();
+        for (account_key, entry) in &history.by_account_id {
+            let (normalized, _) = normalize_profile_history(entry.clone());
+            normalized_by_account.insert(account_key.clone(), normalized.clone());
+            windows.push(ProfileWindowRow {
+                account_key: account_key.clone(),
+                weekly_reset_at: normalized.weekly_reset_at,
+                weekly_window_seconds: normalized.weekly_window_seconds,
+                five_hour_reset_at: normalized.five_hour_reset_at,
+                five_hour_window_seconds: normalized.five_hour_window_seconds,
+            });
+            observations.extend(normalized.observations.iter().map(|obs| UsageObservationRow {
+                account_key: account_key.clone(),
+                observed_at: obs.observed_at_local,
+                weekly_used_percent: obs.weekly_used_percent,
+                five_hour_used_percent: obs.five_hour_used_percent,
+            }));
         }
+        self.db
+            .upsert_usage_history(&self.service_namespace, &windows, &observations)?;
+        if let Some(parent) = self.history_path.parent() {
+            fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+        }
+        let legacy = UsageHistoryCache {
+            by_account_id: normalized_by_account,
+        };
         fs::write(
             &self.history_path,
-            format!("{}\n", serde_json::to_string_pretty(history)?),
+            format!("{}\n", serde_json::to_string_pretty(&legacy)?),
         )
         .with_context(|| format!("write {}", self.history_path.display()))
     }
@@ -574,6 +604,83 @@ impl UsageService {
         file.lock_exclusive()
             .with_context(|| format!("lock {}", lock_path.display()))?;
         Ok(file)
+    }
+
+    fn read_cache_from_db(&self) -> Result<UsageCache> {
+        let rows = self.db.read_usage_cache(&self.service_namespace)?;
+        let mut by_account_id = BTreeMap::new();
+        for row in rows {
+            let usage = serde_json::from_str::<UsageResponse>(&row.payload_json).unwrap_or(UsageResponse {
+                email: None,
+                plan_type: None,
+                rate_limit: None,
+            });
+            by_account_id.insert(
+                row.account_key,
+                UsageCacheRecord {
+                    fetched_at: row.fetched_at,
+                    usage,
+                },
+            );
+        }
+        Ok(UsageCache { by_account_id })
+    }
+
+    fn read_history_from_db(&self) -> Result<UsageHistoryCache> {
+        let (observations, windows) = self.db.read_usage_history(&self.service_namespace)?;
+        let mut by_account_id = BTreeMap::<String, ProfileUsageHistory>::new();
+        for window in windows {
+            let entry = by_account_id
+                .entry(window.account_key)
+                .or_insert_with(default_profile_usage_history_entry);
+            entry.weekly_reset_at = window.weekly_reset_at;
+            entry.weekly_window_seconds = window.weekly_window_seconds;
+            entry.five_hour_reset_at = window.five_hour_reset_at;
+            entry.five_hour_window_seconds = window.five_hour_window_seconds;
+        }
+        for obs in observations {
+            let entry = by_account_id
+                .entry(obs.account_key)
+                .or_insert_with(default_profile_usage_history_entry);
+            entry.observations.push(ProfileUsageObservation {
+                observed_at_local: obs.observed_at,
+                weekly_used_percent: obs.weekly_used_percent,
+                five_hour_used_percent: obs.five_hour_used_percent,
+            });
+        }
+        for entry in by_account_id.values_mut() {
+            entry.observations.sort_by_key(|o| o.observed_at_local);
+        }
+        Ok(UsageHistoryCache { by_account_id })
+    }
+
+    fn backfill_cache_from_legacy_json(&self) -> Result<()> {
+        let cache = match fs::read_to_string(&self.cache_path) {
+            Ok(raw) => serde_json::from_str::<UsageCache>(&raw).unwrap_or_default(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => UsageCache::default(),
+            Err(error) => return Err(error).with_context(|| format!("read {}", self.cache_path.display())),
+        };
+        self.write_cache(&cache)?;
+        Ok(())
+    }
+
+    fn backfill_history_from_legacy_json(&self) -> Result<()> {
+        let mut history = match fs::read_to_string(&self.history_path) {
+            Ok(raw) => serde_json::from_str::<UsageHistoryCache>(&raw).unwrap_or_default(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => UsageHistoryCache::default(),
+            Err(error) => return Err(error).with_context(|| format!("read {}", self.history_path.display())),
+        };
+        for value in history.by_account_id.values_mut() {
+            let (normalized, _) = normalize_profile_history(std::mem::take(value));
+            *value = normalized;
+        }
+        self.write_history_cache(&history)?;
+        fs::write(
+            &self.history_path,
+            format!("{}\n", serde_json::to_string_pretty(&history)?),
+        )
+        .with_context(|| format!("write {}", self.history_path.display()))?;
+        Ok(())
     }
 }
 
@@ -1005,8 +1112,14 @@ fn write_json(path: &Path, value: &Value) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
-    fs::write(path, format!("{}\n", serde_json::to_string_pretty(value)?))
-        .with_context(|| format!("write {}", path.display()))
+    let serialized = format!("{}\n", serde_json::to_string_pretty(value)?);
+    let tmp_path = path.with_extension(format!(
+        "{}.tmp",
+        path.extension().and_then(|ext| ext.to_str()).unwrap_or("json")
+    ));
+    fs::write(&tmp_path, serialized).with_context(|| format!("write {}", tmp_path.display()))?;
+    fs::rename(&tmp_path, path)
+        .with_context(|| format!("rename {} -> {}", tmp_path.display(), path.display()))
 }
 
 fn default_now_seconds() -> i64 {
@@ -1014,6 +1127,56 @@ fn default_now_seconds() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("time drift")
         .as_secs() as i64
+}
+
+fn service_namespace_from_cache_path(cache_path: &Path) -> String {
+    cache_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "usage".to_string())
+}
+
+fn resolve_usage_db_path(history_path: &Path) -> PathBuf {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from);
+    if let Some(home) = home {
+        let codex_dir = home.join(".codex");
+        let config_dir = agent_switch_config_dir();
+        if history_path.starts_with(&codex_dir) || history_path.starts_with(&config_dir) {
+            return config_dir.join("agent-switch.db");
+        }
+    }
+    history_path.with_extension("sqlite.db")
+}
+
+fn default_profile_usage_history_entry() -> ProfileUsageHistory {
+    ProfileUsageHistory {
+        observations: Vec::new(),
+        weekly_reset_at: None,
+        five_hour_reset_at: None,
+        weekly_window_seconds: default_weekly_window_seconds(),
+        five_hour_window_seconds: default_five_hour_window_seconds(),
+        weekly_windows: Vec::new(),
+        five_hour_windows: Vec::new(),
+    }
+}
+
+fn should_backfill_from_legacy(legacy_path: &Path, db_path: &Path) -> bool {
+    let Ok(legacy_meta) = fs::metadata(legacy_path) else {
+        return false;
+    };
+    let Ok(legacy_modified) = legacy_meta.modified() else {
+        return false;
+    };
+    let Ok(db_meta) = fs::metadata(db_path) else {
+        return true;
+    };
+    let Ok(db_modified) = db_meta.modified() else {
+        return true;
+    };
+    legacy_modified > db_modified
 }
 
 pub fn pick_five_hour_window(usage: &UsageResponse) -> Option<&UsageWindow> {

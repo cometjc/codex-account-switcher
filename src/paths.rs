@@ -67,6 +67,10 @@ impl AppPaths {
         self.codex_dir.join("agent-switch-refresh.log")
     }
 
+    pub fn database_path(&self) -> PathBuf {
+        detect_agent_switch_config_dir().join("agent-switch.db")
+    }
+
     /// Playwright `storageState` JSON files for Cursor dashboard sessions (one file per profile name).
     /// Stored under the app config dir (not `~/.codex`, which is Codex-only).
     pub fn cursor_profiles_dir(&self) -> PathBuf {
@@ -97,6 +101,10 @@ fn detect_agent_switch_config_dir() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
     home.join(".config").join("agent-switch")
+}
+
+pub fn agent_switch_config_dir() -> PathBuf {
+    detect_agent_switch_config_dir()
 }
 
 fn detect_codex_dir() -> PathBuf {
