@@ -2,6 +2,7 @@
 
 # Windows x86_64 GNU (.exe); cross-build from Linux/macOS with mingw + rustup target.
 WINDOWS_TARGET := x86_64-pc-windows-gnu
+WARNINGS_AS_ERRORS := -D warnings
 
 install:
 	@build_number=$$(cat build-number 2>/dev/null || \
@@ -9,11 +10,11 @@ install:
 	BUILD_NUMBER=$${build_number} cargo install --locked --path .
 
 build:
-	cargo build
+	RUSTFLAGS="$(WARNINGS_AS_ERRORS) $${RUSTFLAGS:-}" cargo build
 
 test:
 	@echo "cargo test ..."; \
-	cargo test && $(MAKE) install
+	RUSTFLAGS="$(WARNINGS_AS_ERRORS) $${RUSTFLAGS:-}" cargo test && $(MAKE) install
 
 # Run tests, then release-build agent-switch + cursor-export for Windows.
 # Requires: rustup, mingw linker (see .cargo/config.toml).

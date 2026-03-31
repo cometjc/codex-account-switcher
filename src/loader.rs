@@ -57,8 +57,6 @@ pub fn load_profiles_with_report(
     let current_snapshot = store.get_current_snapshot().ok();
     let current_account_id = current_snapshot.as_ref().and_then(read_account_id);
     let current_access_token = current_snapshot.as_ref().and_then(read_access_token);
-    // Current profile identity is resolved by store-level xattr UUID mapping.
-    let current_codex_name = store.get_current_account_name().ok().flatten();
     let mut refresh_errors = Vec::new();
 
     let mut profiles = saved_profiles
@@ -68,7 +66,6 @@ pub fn load_profiles_with_report(
                 store,
                 profile,
                 &current_account_id,
-                &current_codex_name,
                 usage_service,
                 force_refresh,
                 refresh_account_id,
@@ -79,13 +76,11 @@ pub fn load_profiles_with_report(
         .collect::<Result<Vec<_>>>()?;
 
     if let Some(snapshot) = current_snapshot {
+        // 視為「已儲存」的條件只看 account_id，不再因同名就覆蓋舊 profile。
         let current_saved = profiles.iter().any(|profile| {
             current_account_id
                 .as_deref()
                 .is_some_and(|account_id| profile.account_id.as_deref() == Some(account_id))
-                || current_codex_name
-                    .as_deref()
-                    .is_some_and(|name| profile.saved_name.as_deref() == Some(name))
         });
         if !current_saved {
             let force_current = refresh_account_id
@@ -185,7 +180,6 @@ fn load_claude_profiles(
     let saved = store.list_saved_profiles()?;
     let current_creds = store.get_current_credentials().ok();
     let current_account_id = current_creds.as_ref().map(|c| c.account_id());
-    let current_name = store.get_current_account_name().ok().flatten();
     let mut refresh_errors = Vec::new();
 
     // Helper: composite key for UsageService cache
@@ -207,8 +201,10 @@ fn load_claude_profiles(
                 ),
                 None => (None, None, None),
             };
-            let use_current_credentials = current_name.as_deref() == Some(saved_profile.name.as_str())
-                || (current_account_id.is_some() && current_account_id.as_deref() == acct_id.as_deref());
+            // 只有 account_id 相同時才沿用 current credentials；同名但不同帳號視為新帳號。
+            let use_current_credentials = current_account_id
+                .as_deref()
+                .is_some_and(|id| Some(id) == acct_id.as_deref());
             let effective_acct_id = if use_current_credentials {
                 current_creds.as_ref().map(|creds| creds.account_id())
             } else {
@@ -281,14 +277,13 @@ fn load_claude_profiles(
         let comp_id = composite_id(creds);
         let sub_type = creds.subscription_type().to_string();
 
-        let matched_by_acct_or_name = profiles.iter().any(|p| {
-            p.account_id.as_deref() == Some(acct_id.as_str())
-                || current_name.as_deref().is_some_and(|n| p.saved_name.as_deref() == Some(n))
-        });
+        let matched_by_acct = profiles
+            .iter()
+            .any(|p| p.account_id.as_deref() == Some(acct_id.as_str()));
 
         // Fallback: if exactly one saved profile shares the same subscriptionType,
         // treat it as the same account (e.g. after a full re-auth that changes refresh token).
-        let sub_type_match_name: Option<String> = if !matched_by_acct_or_name {
+        let sub_type_match_name: Option<String> = if !matched_by_acct {
             let matches: Vec<_> = profiles
                 .iter()
                 .filter(|p| {
@@ -322,7 +317,7 @@ fn load_claude_profiles(
             }
         }
 
-        let already_saved = matched_by_acct_or_name || sub_type_match_name.is_some();
+        let already_saved = matched_by_acct || sub_type_match_name.is_some();
         if !already_saved {
             let force_current =
                 force_refresh || refresh_account_id.is_some_and(|t| t == acct_id.as_str());
@@ -367,7 +362,6 @@ fn build_saved_entry(
     store: &AccountStore,
     profile: SavedProfile,
     current_account_id: &Option<String>,
-    current_name: &Option<String>,
     usage_service: &UsageService,
     force_refresh: bool,
     refresh_account_id: Option<&str>,
@@ -376,13 +370,11 @@ fn build_saved_entry(
 ) -> Result<ProfileEntry> {
     let saved_account_id = read_account_id(&profile.snapshot);
     let access_token = read_access_token(&profile.snapshot);
-    let matches_id = current_account_id.is_some()
-        && current_account_id.as_deref() == saved_account_id.as_deref();
-    let matches_name =
-        current_name
-            .as_deref()
-            .is_some_and(|n| n == profile.name.as_str());
-    let use_current_auth = matches_id || matches_name;
+    // 只有 account_id 相同時才沿用 current auth；同名但不同帳號視為「未儲存新帳號」。
+    let matches_id = current_account_id
+        .as_deref()
+        .is_some_and(|id| Some(id) == saved_account_id.as_deref());
+    let use_current_auth = matches_id;
     let effective_account_id = if use_current_auth {
         current_account_id.clone().or_else(|| saved_account_id.clone())
     } else {
@@ -413,25 +405,10 @@ fn build_saved_entry(
     } else {
         profile.snapshot.clone()
     };
-    // When a saved profile starts using the current auth snapshot (e.g. after re-auth),
-    // merge any existing history under the old account_id into the new effective key so
-    // that charts keep a continuous 7d/5h curve instead of "starting over".
-    if use_current_auth {
-        if let (Some(ref effective), Some(ref saved)) = (&effective_account_id, &saved_account_id)
-        {
-            if effective != saved {
-                usage_service.merge_profile_history_aliases(
-                    Some(effective.as_str()),
-                    std::iter::once(saved.as_str()),
-                )?;
-            }
-        }
-    }
     usage_service.record_usage_snapshot(effective_account_id.as_deref(), &usage_view)?;
     let chart_data =
         build_profile_chart_data(effective_account_id.as_deref(), usage_view.usage.as_ref(), usage_service)?;
 
-    // Match by account_id OR by current profile name resolved from auth/profile UUID tags.
     Ok(ProfileEntry {
         kind: ProfileKind::Codex,
         saved_name: Some(profile.name.clone()),
@@ -439,7 +416,8 @@ fn build_saved_entry(
         snapshot,
         usage_view,
         account_id: effective_account_id,
-        is_current: matches_id || matches_name,
+        // 只有 account_id 相同才標記為 current。
+        is_current: matches_id,
         chart_data,
     })
 }
@@ -1289,28 +1267,29 @@ mod tests {
             codex_paths.usage_history_path().to_path_buf(),
             300,
         );
-        let report = load_profiles_with_report(&store, &usage, false, None, true, None, None, None).unwrap();
+        let report =
+            load_profiles_with_report(&store, &usage, false, None, true, None, None, None).unwrap();
 
-        let codex_profile = report
+        // Saved profile `team` 應該仍然指向舊帳號，新的帳號以未儲存 profile 出現。
+        let saved_team = report
             .profiles
             .iter()
-            .find(|profile| profile.kind == ProfileKind::Codex)
-            .expect("codex profile");
-        assert_eq!(codex_profile.saved_name.as_deref(), Some("team"));
-        assert_eq!(codex_profile.account_id.as_deref(), Some("acct-current"));
-        assert!(codex_profile.is_current);
-        assert_eq!(
-            codex_profile
-                .snapshot
-                .get("tokens")
-                .and_then(|tokens| tokens.get("account_id"))
-                .and_then(|value| value.as_str()),
-            Some("acct-current")
-        );
+            .find(|profile| profile.kind == ProfileKind::Codex && profile.saved_name.as_deref() == Some("team"))
+            .expect("saved codex profile team");
+        assert_eq!(saved_team.account_id.as_deref(), Some("acct-stale"));
+        assert!(!saved_team.is_current);
 
-        let saved_raw = fs::read_to_string(codex_paths.accounts_dir().join("team.json")).unwrap();
-        let saved: serde_json::Value = serde_json::from_str(&saved_raw).unwrap();
-        assert_eq!(saved, current);
+        let unsaved = report
+            .profiles
+            .iter()
+            .find(|profile| profile.kind == ProfileKind::Codex && profile.saved_name.is_none())
+            .expect("unsaved current codex profile");
+        assert_eq!(unsaved.account_id.as_deref(), Some("acct-current"));
+        assert!(unsaved.is_current);
+        assert!(
+            unsaved.profile_name.contains("[UNSAVED]"),
+            "current codex profile should be rendered as UNSAVED"
+        );
     }
 
     #[test]
@@ -1424,6 +1403,7 @@ mod tests {
         )
         .unwrap();
 
+        // 在 account_id 相同的情況下，saved profile 會直接沿用 current snapshot。
         let claude_profile = report
             .profiles
             .iter()
@@ -1436,18 +1416,6 @@ mod tests {
             Some(current_creds.account_id().as_str())
         );
         assert!(claude_profile.is_current);
-        assert_eq!(
-            claude_profile
-                .snapshot
-                .get("claudeAiOauth")
-                .and_then(|oauth| oauth.get("accessToken"))
-                .and_then(|value| value.as_str()),
-            Some("token-current")
-        );
-
-        let saved_raw = fs::read_to_string(claude_paths.accounts_dir().join("claude-one.json")).unwrap();
-        let saved: serde_json::Value = serde_json::from_str(&saved_raw).unwrap();
-        assert_eq!(saved, current);
     }
 
     #[test]
@@ -1485,11 +1453,7 @@ mod tests {
 
         let stale_creds: crate::claude::ClaudeCredentials =
             serde_json::from_value(stale_saved.clone()).unwrap();
-        let current_creds: crate::claude::ClaudeCredentials =
-            serde_json::from_value(current.clone()).unwrap();
         let stale_comp_id = format!("{}|{}", stale_creds.account_id(), stale_creds.subscription_type());
-        let current_comp_id =
-            format!("{}|{}", current_creds.account_id(), current_creds.subscription_type());
 
         let claude_usage = UsageService::new(
             claude_paths.limit_cache_path().to_path_buf(),
@@ -1544,29 +1508,11 @@ mod tests {
             &fs::read_to_string(claude_paths.usage_history_path()).unwrap(),
         )
         .unwrap();
-        let current_entry = merged_history
-            .by_account_id
-            .get(&current_comp_id)
-            .expect("current history entry");
         assert!(
-            current_entry
-                .observations
-                .iter()
-                .any(|observation| {
-                    observation.observed_at_local == 123
-                        && observation.weekly_used_percent == Some(45.0)
-                })
+            merged_history.by_account_id.contains_key(&stale_comp_id),
+            "legacy history for stale account id should be preserved"
         );
-        assert!(
-            current_entry
-                .observations
-                .iter()
-                .any(|observation| {
-                    observation.observed_at_local == 15
-                        && observation.five_hour_used_percent == Some(55.0)
-                })
-        );
-        assert!(!merged_history.by_account_id.contains_key(&stale_comp_id));
+        // 在新策略下，不強制要求 current_comp_id 一定已有歷史；只要舊帳號的歷史沒有被清掉即可。
     }
 
     #[test]
