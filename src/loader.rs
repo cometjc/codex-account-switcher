@@ -378,8 +378,10 @@ fn build_saved_entry(
     let access_token = read_access_token(&profile.snapshot);
     let matches_id = current_account_id.is_some()
         && current_account_id.as_deref() == saved_account_id.as_deref();
-    let matches_name = current_name.as_deref()
-        .is_some_and(|n| n == profile.name.as_str());
+    let matches_name =
+        current_name
+            .as_deref()
+            .is_some_and(|n| n == profile.name.as_str());
     let use_current_auth = matches_id || matches_name;
     let effective_account_id = if use_current_auth {
         current_account_id.clone().or_else(|| saved_account_id.clone())
@@ -394,9 +396,7 @@ fn build_saved_entry(
         usage_service,
         Some(if use_current_auth {
             store.paths().auth_path()
-        } else {
-            profile.file_path.as_path()
-        }),
+        } else { profile.file_path.as_path() }),
         effective_account_id.as_deref(),
         access_token.as_deref(),
         force_this_profile,
@@ -413,6 +413,20 @@ fn build_saved_entry(
     } else {
         profile.snapshot.clone()
     };
+    // When a saved profile starts using the current auth snapshot (e.g. after re-auth),
+    // merge any existing history under the old account_id into the new effective key so
+    // that charts keep a continuous 7d/5h curve instead of "starting over".
+    if use_current_auth {
+        if let (Some(ref effective), Some(ref saved)) = (&effective_account_id, &saved_account_id)
+        {
+            if effective != saved {
+                usage_service.merge_profile_history_aliases(
+                    Some(effective.as_str()),
+                    std::iter::once(saved.as_str()),
+                )?;
+            }
+        }
+    }
     usage_service.record_usage_snapshot(effective_account_id.as_deref(), &usage_view)?;
     let chart_data =
         build_profile_chart_data(effective_account_id.as_deref(), usage_view.usage.as_ref(), usage_service)?;
