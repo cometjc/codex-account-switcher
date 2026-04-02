@@ -81,7 +81,6 @@ fn run_refresh_all() -> Result<()> {
             .and_then(|v| v.as_str())
             .map(str::to_string)
     });
-    let current_name = store.get_current_account_name().ok().flatten();
     let mut current_saved = false;
     let mut codex_ok = 0usize;
     let mut codex_failed = 0usize;
@@ -90,8 +89,11 @@ fn run_refresh_all() -> Result<()> {
             .get("tokens")
             .and_then(|t| t.get("account_id"))
             .and_then(|v| v.as_str());
-        let use_current_auth = current_account_id.as_deref() == saved_account_id
-            || current_name.as_deref() == Some(profile.name.as_str());
+        let use_current_auth = codex_saved_profile_uses_current_auth(
+            current_account_id.as_deref(),
+            profile.name.as_str(),
+            saved_account_id,
+        );
         let effective_account_id = if use_current_auth {
             current_account_id.as_deref().or(saved_account_id)
         } else {
@@ -314,6 +316,14 @@ fn run_refresh_all() -> Result<()> {
     Ok(())
 }
 
+fn codex_saved_profile_uses_current_auth(
+    current_account_id: Option<&str>,
+    _profile_name: &str,
+    saved_account_id: Option<&str>,
+) -> bool {
+    current_account_id.is_some() && current_account_id == saved_account_id
+}
+
 fn refresh_usage_snapshot(
     usage: &UsageService,
     account_id: Option<&str>,
@@ -493,5 +503,17 @@ mod tests {
         let _ = fs::remove_file(cache_path);
         let _ = fs::remove_file(history_path);
         let _ = fs::remove_file(auth_path);
+    }
+
+    #[test]
+    fn codex_refresh_ignores_stale_current_name_when_account_id_changed() {
+        assert!(
+            !codex_saved_profile_uses_current_auth(
+                Some("acct-new"),
+                "t5-free",
+                Some("acct-old"),
+            ),
+            "stale current-name hint must not make cron treat old saved profile as the new account",
+        );
     }
 }

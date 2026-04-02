@@ -38,12 +38,12 @@ pub struct SavedProfile {
 #[derive(Debug, Clone)]
 pub struct AccountStore {
     paths: AppPaths,
-    platform: StorePlatform,
+    _platform: StorePlatform,
 }
 
 impl AccountStore {
     pub fn new(paths: AppPaths, platform: StorePlatform) -> Self {
-        Self { paths, platform }
+        Self { paths, _platform: platform }
     }
 
     pub fn paths(&self) -> &AppPaths {

@@ -35,6 +35,7 @@ pub struct ProfileEntry {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProfileChartData {
     pub seven_day_points: Vec<ChartPoint>,
+    pub quota_window_label: String,
     pub five_hour_band: OwnedFiveHourBandState,
     pub five_hour_subframe: OwnedFiveHourSubframeState,
 }
@@ -43,6 +44,7 @@ impl ProfileChartData {
     pub fn empty(reason: &str) -> Self {
         Self {
             seven_day_points: Vec::new(),
+            quota_window_label: "?d".to_string(),
             five_hour_band: OwnedFiveHourBandState {
                 available: false,
                 used_percent: None,

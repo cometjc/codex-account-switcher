@@ -47,3 +47,10 @@
 - 遇到 auth/refresh 類問題時，不能因為文件寫有 auto-refresh 就假設現有 snapshot 一定能被自動救回；必須先實跑 refresh endpoint，分清楚是 access token 過期，還是 refresh token 本身已失效/重用，再決定是修 code path 還是要求重新登入/reseed。
 - 本 repo 驗證預設必須使用 `make test`（會連動 `make install`）；除非使用者明確要求或是純快速本地檢查，否則不要只跑 `cargo test`。
 - 規則入口與 thin adapter（例如 `AGENTS.md` 與 `CLAUDE.md`）的同一主題不可互相矛盾；若發現不一致，先修正 adapter 對齊權威入口，再執行驗證命令。
+- 任何涉及資料 schema/migration 或儲存路徑重構的改動，都必須以「保留現有使用者資料」為最高原則：先設計 backfill/alias merge，把舊 JSON/舊 account_id 歷史完整搬入新 SQLite / 新 key，禁止為了簡化實作而清空歷史或要求使用者手動重建；但若產品語意已明確定義「account_id 改變 = 新帳號」，就必須保留舊資料在舊 key，不能自動把舊帳號歷史 merge 到新帳號。
+
+- 當使用者回報 chart tag「畫面上看不到，但複製文字後其實存在」時，先判定為 render 可讀性問題，不要再沿資料或 layout 路徑盲修；要先確認 buffer 內容是否已存在，再處理底色、覆蓋順序或終端顯示對比。
+
+- 當 chart end-label 在 live pane 中消失時，不要只驗證一般 layout case；要特別檢查「plot glyph + 5h band 已佔滿所有候選位」的情況，必要時提供 force-fallback 最小標籤，避免整個 profile tag 消失。
+
+- 當使用者對 5h band/subframe 的產品語意明確指定「用歷史高使用量窗口的平均轉換率」，不要沿用偏保守的最大歷史 rate；要先把排序鍵、取樣數（如 top3）、以及是映射到當前 5h 還是 100% 5h 一次問清楚。

@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
+use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
 
 use crate::usage::{UsageRateLimit, UsageResponse, UsageWindow};
 
@@ -252,7 +253,7 @@ pub(crate) fn map_copilot_usage_response(r: &CopilotUserResponse) -> Option<Usag
                         primary_window: None,
                         secondary_window: Some(UsageWindow {
                             used_percent,
-                            limit_window_seconds: 604_800,
+                            limit_window_seconds: monthly_window_seconds_from_reset_at(reset_at),
                             reset_at,
                             reset_after_seconds,
                         }),
@@ -285,11 +286,9 @@ pub(crate) fn map_copilot_usage_response(r: &CopilotUserResponse) -> Option<Usag
         plan_type: Some(plan_type),
         rate_limit: Some(UsageRateLimit {
             primary_window: None,
-            // Monthly quota goes into secondary_window with limit_window_seconds=604_800
-            // so that pick_weekly_window() surfaces it for display.
             secondary_window: Some(UsageWindow {
                 used_percent,
-                limit_window_seconds: 604_800,
+                limit_window_seconds: monthly_window_seconds_from_reset_at(reset_at),
                 reset_at,
                 reset_after_seconds,
             }),
@@ -300,6 +299,38 @@ pub(crate) fn map_copilot_usage_response(r: &CopilotUserResponse) -> Option<Usag
 /// Parse "YYYY-MM-DD" to unix timestamp at midnight UTC.
 fn parse_date_to_unix(date: &str) -> Option<i64> {
     crate::claude::parse_rfc3339_unix(&format!("{date}T00:00:00+00:00"))
+}
+
+fn monthly_window_seconds_from_reset_at(reset_at: i64) -> i64 {
+    let Some(reset_dt) = DateTime::<Utc>::from_timestamp(reset_at, 0) else {
+        return 604_800;
+    };
+    let Some(previous_reset_dt) = previous_month_reset_at(reset_dt) else {
+        return 604_800;
+    };
+    (reset_dt.timestamp() - previous_reset_dt.timestamp()).max(604_800)
+}
+
+fn previous_month_reset_at(reset_dt: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    let (year, month) = if reset_dt.month() == 1 {
+        (reset_dt.year() - 1, 12)
+    } else {
+        (reset_dt.year(), reset_dt.month() - 1)
+    };
+    let day = reset_dt.day().min(last_day_of_month(year, month)?);
+    let date = chrono::NaiveDate::from_ymd_opt(year, month, day)?;
+    let naive = date.and_hms_opt(reset_dt.hour(), reset_dt.minute(), reset_dt.second())?;
+    Some(Utc.from_utc_datetime(&naive))
+}
+
+fn last_day_of_month(year: i32, month: u32) -> Option<u32> {
+    let (next_year, next_month) = if month == 12 {
+        (year + 1, 1)
+    } else {
+        (year, month + 1)
+    };
+    let first_of_next_month = chrono::NaiveDate::from_ymd_opt(next_year, next_month, 1)?;
+    Some(first_of_next_month.pred_opt()?.day())
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -341,6 +372,7 @@ mod tests {
         // (500-290)/500 * 100 = 42%
         assert!((window.used_percent - 42.0).abs() < 0.01, "expected ~42%, got {}", window.used_percent);
         assert!(window.reset_at > 0);
+        assert_eq!(window.limit_window_seconds, 2_419_200);
     }
 
     #[test]
@@ -388,6 +420,7 @@ mod tests {
         assert!((window.used_percent - 86.6).abs() < 0.1,
             "expected ~86.6%, got {}", window.used_percent);
         assert!(window.reset_at > 0);
+        assert_eq!(window.limit_window_seconds, 2_678_400);
     }
 
     #[test]

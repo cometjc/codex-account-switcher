@@ -61,6 +61,7 @@ pub struct RenderProfile<'a> {
     pub label: &'a str,
     pub is_current: bool,
     pub agent_type: &'a str,
+    pub window_label: &'a str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

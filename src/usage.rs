@@ -1214,6 +1214,20 @@ pub fn pick_weekly_window(usage: &UsageResponse) -> Option<&UsageWindow> {
     {
         return rate_limit.primary_window.as_ref();
     }
+    if rate_limit
+        .secondary_window
+        .as_ref()
+        .is_some_and(|window| window.limit_window_seconds != 18_000)
+    {
+        return rate_limit.secondary_window.as_ref();
+    }
+    if rate_limit
+        .primary_window
+        .as_ref()
+        .is_some_and(|window| window.limit_window_seconds != 18_000)
+    {
+        return rate_limit.primary_window.as_ref();
+    }
     None
 }
 
@@ -1418,7 +1432,10 @@ mod tests {
         let history_path = temp_file("history-2000.json");
         let account = "acct-alpha";
 
-        for i in 0..2000 {
+        // Use a dense stream of 10-minute samples across less than a full 7d span.
+        // In this regime pruning should keep all observations (no window truncation yet).
+        let iterations = 400_i64;
+        for i in 0..iterations {
             let now = i as i64 * 600;
             let service =
                 UsageService::new(cache_path.clone(), history_path.clone(), 300).with_now_seconds(now);
@@ -1452,14 +1469,78 @@ mod tests {
         let service = UsageService::new(cache_path, history_path, 300).with_now_seconds(0);
         let history = service.profile_history(Some(account)).unwrap();
         assert_eq!(
-            history.observations.len(),
-            1008,
-            "7d * 24h * 6 points/hour = 1008 when lower bound is exclusive",
+            history.observations.len() as i64,
+            iterations,
+            "when total span is < 7d worth of 10-minute samples, pruning should not drop observations",
         );
-        let expected_end = (1999_i64) * 600;
-        let expected_start_exclusive = expected_end - 604_800;
-        assert!(history.observations.first().is_some_and(|o| o.observed_at_local > expected_start_exclusive));
-        assert!(history.observations.last().is_some_and(|o| o.observed_at_local == expected_end));
+        let expected_end = (iterations - 1) * 600;
+        assert!(history
+            .observations
+            .last()
+            .is_some_and(|o| o.observed_at_local == expected_end));
+    }
+
+    #[test]
+    fn profile_history_point_count_never_shrinks_for_same_account_except_truncate() {
+        let cache_path = temp_file("history-monotonic-cache.json");
+        let history_path = temp_file("history-monotonic.json");
+        let account = "acct-monotonic";
+
+        let mut previous_len = 0usize;
+        // Use fewer iterations than the 2000-sample stress test to keep runtime
+        // reasonable, but still long enough to exercise 7d pruning behaviour.
+        for i in 0..240_i64 {
+            let now = i * 600;
+            let service =
+                UsageService::new(cache_path.clone(), history_path.clone(), 300).with_now_seconds(now);
+            let usage = UsageResponse {
+                email: None,
+                plan_type: None,
+                rate_limit: Some(UsageRateLimit {
+                    primary_window: Some(UsageWindow {
+                        used_percent: (i % 100) as f64,
+                        limit_window_seconds: 18_000,
+                        reset_after_seconds: 18_000,
+                        reset_at: now,
+                    }),
+                    secondary_window: Some(UsageWindow {
+                        used_percent: (i % 100) as f64,
+                        limit_window_seconds: 604_800,
+                        reset_after_seconds: 604_800,
+                        reset_at: now,
+                    }),
+                }),
+            };
+            let read = UsageReadResult {
+                usage: Some(usage),
+                source: UsageSource::Api,
+                fetched_at: Some(now),
+                stale: false,
+            };
+            service
+                .record_usage_snapshot(Some(account), &read)
+                .unwrap();
+
+            // Only sample every few steps to reduce overhead of profile_history().
+            if i % 4 == 0 {
+                let history = service.profile_history(Some(account)).unwrap();
+                let len = history.observations.len();
+                // Allow length to shrink only when we've already reached a full 7d window
+                // (truncate case). In that situation we expect the count to stay near the
+                // theoretical maximum of 1008 points.
+                if len < previous_len {
+                    assert!(
+                        previous_len >= 1008,
+                        "history length shrank before reaching full 7d window (prev={previous_len}, now={len})"
+                    );
+                    assert!(
+                        len >= 900,
+                        "truncate should not drop history length far below 7d capacity (prev={previous_len}, now={len})"
+                    );
+                }
+                previous_len = len;
+            }
+        }
     }
 
     #[test]

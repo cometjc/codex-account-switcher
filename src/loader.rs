@@ -517,6 +517,7 @@ fn build_profile_chart_data(
 
     Ok(ProfileChartData {
         seven_day_points,
+        quota_window_label: format_quota_window_label(weekly_window.map(|window| window.limit_window_seconds)),
         five_hour_band,
         five_hour_subframe,
     })
@@ -544,8 +545,8 @@ fn project_weekly_points_from_profile_observations(
     window: &UsageWindow,
     observations: &[crate::usage::ProfileUsageObservation],
 ) -> Vec<ChartPoint> {
+    let start_at = window.reset_at - window.limit_window_seconds;
     let end_at = window.reset_at;
-    let start_at = end_at - window.limit_window_seconds;
     let total = (end_at - start_at) as f64;
     if total <= 0.0 {
         return Vec::new();
@@ -568,6 +569,14 @@ fn project_weekly_points_from_profile_observations(
         (left.x - right.x).abs() < f64::EPSILON && (left.y - right.y).abs() < f64::EPSILON
     });
     points
+}
+
+fn format_quota_window_label(window_seconds: Option<i64>) -> String {
+    let Some(window_seconds) = window_seconds.filter(|seconds| *seconds > 0) else {
+        return "?d".to_string();
+    };
+    let days = ((window_seconds as f64) / 86_400.0).round().max(1.0) as i64;
+    format!("{days}d")
 }
 
 fn build_weekly_history_from_profile_observations(
@@ -739,22 +748,21 @@ fn build_five_hour_subframe(
         })
         .unwrap_or_else(|| (current_7d - five_hour_used).max(0.0));
 
-    // upper_y: project the max observed 7d/5h rate across all windows (current + historical)
-    // to 100% 5h usage. Using the maximum ensures the band covers the worst-case observed ratio.
-    // When five_hour_used is 0, fall back to the historical max rate (thin line, min 1%).
+    // upper_y: map historical 5h->7d conversion rate to a hypothetical 100% 5h window.
+    // We rank historical windows by 5h used%, take the top 3, average their 7d_delta / 5h_used
+    // ratios, then project that average rate onto 100% 5h.
     let seven_day_delta = (current_7d - lower_y).max(0.0);
     const MIN_BAND_HEIGHT: f64 = 1.0;
-    let upper_y = if five_hour_used > 0.0 {
-        let current_rate = seven_day_delta / five_hour_used;
-        let rate = compute_max_historical_rate(all_five_hour_windows, all_weekly_windows)
-            .map(|hist_max| hist_max.max(current_rate))
-            .unwrap_or(current_rate);
+    let upper_y = if let Some(rate) = compute_average_top_historical_rate_by_five_hour_usage(
+        all_five_hour_windows,
+        all_weekly_windows,
+    ) {
         (lower_y + rate * 100.0).clamp(lower_y, 100.0)
+    } else if five_hour_used > 0.0 {
+        let current_rate = seven_day_delta / five_hour_used;
+        (lower_y + current_rate * 100.0).clamp(lower_y, 100.0)
     } else {
-        let fallback_band = compute_max_historical_rate(all_five_hour_windows, all_weekly_windows)
-            .map(|r| (r * 10.0).max(MIN_BAND_HEIGHT))
-            .unwrap_or(MIN_BAND_HEIGHT);
-        (lower_y + fallback_band).clamp(lower_y, 100.0)
+        (lower_y + MIN_BAND_HEIGHT).clamp(lower_y, 100.0)
     };
     // Invariant: upper_y >= current_7d. The current 7d value was already reached within
     // this 5h window, so the projected ceiling must not fall below the observed fact.
@@ -770,13 +778,13 @@ fn build_five_hour_subframe(
     }
 }
 
-/// Returns the maximum `7d_delta / 5h_delta` rate across past 5h windows with usage > 0.
-/// Returns None if no valid windows found.
-fn compute_max_historical_rate(
+/// Returns the average `7d_delta / 5h_delta` rate for the 3 historical 5h windows
+/// with the largest 5h used%.
+fn compute_average_top_historical_rate_by_five_hour_usage(
     five_hour_windows: &[UsageWindowHistory],
     weekly_windows: &[UsageWindowHistory],
 ) -> Option<f64> {
-    five_hour_windows
+    let mut samples = five_hour_windows
         .iter()
         .filter_map(|fh_win| {
             let five_hour_delta = fh_win.observations.last()?.used_percent;
@@ -787,9 +795,16 @@ fn compute_max_historical_rate(
             if seven_day_delta < 0.0 {
                 return None;
             }
-            Some(seven_day_delta / five_hour_delta)
+            Some((five_hour_delta, seven_day_delta / five_hour_delta))
         })
-        .reduce(f64::max)
+        .collect::<Vec<_>>();
+
+    samples.sort_by(|left, right| right.0.total_cmp(&left.0));
+    let top = samples.into_iter().take(3).collect::<Vec<_>>();
+    if top.is_empty() {
+        return None;
+    }
+    Some(top.iter().map(|(_, rate)| rate).sum::<f64>() / top.len() as f64)
 }
 
 /// Computes 7d usage growth during a 5h window's time span.
@@ -1081,6 +1096,123 @@ mod tests {
         assert_eq!(subframe_no_hist.upper_y, Some(100.0));
     }
 
+
+    #[test]
+    fn five_hour_subframe_uses_average_rate_of_top3_largest_5h_windows() {
+        let weekly = UsageWindow {
+            used_percent: 10.0,
+            limit_window_seconds: 604_800,
+            reset_after_seconds: 86_400,
+            reset_at: 604_800,
+        };
+        let five_hour = UsageWindow {
+            used_percent: 14.0,
+            limit_window_seconds: 18_000,
+            reset_after_seconds: 1_800,
+            reset_at: 540_000,
+        };
+        let weekly_history = UsageWindowHistory {
+            limit_window_seconds: 604_800,
+            start_at: 0,
+            end_at: 604_800,
+            observations: vec![
+                UsageObservation { observed_at: 522_000, used_percent: 10.0 },
+                UsageObservation { observed_at: 540_000, used_percent: 10.0 },
+            ],
+        };
+
+        let all_weekly_windows = vec![
+            UsageWindowHistory {
+                limit_window_seconds: 604_800,
+                start_at: 0,
+                end_at: 604_800,
+                observations: vec![
+                    UsageObservation { observed_at: 82_000, used_percent: 10.0 },
+                    UsageObservation { observed_at: 100_000, used_percent: 20.0 },
+                ],
+            },
+            UsageWindowHistory {
+                limit_window_seconds: 604_800,
+                start_at: 200_000,
+                end_at: 804_800,
+                observations: vec![
+                    UsageObservation { observed_at: 282_000, used_percent: 7.0 },
+                    UsageObservation { observed_at: 300_000, used_percent: 14.0 },
+                ],
+            },
+            UsageWindowHistory {
+                limit_window_seconds: 604_800,
+                start_at: 400_000,
+                end_at: 1_004_800,
+                observations: vec![
+                    UsageObservation { observed_at: 482_000, used_percent: 8.0 },
+                    UsageObservation { observed_at: 500_000, used_percent: 16.0 },
+                ],
+            },
+            UsageWindowHistory {
+                limit_window_seconds: 604_800,
+                start_at: 600_000,
+                end_at: 1_204_800,
+                observations: vec![
+                    UsageObservation { observed_at: 682_000, used_percent: 4.0 },
+                    UsageObservation { observed_at: 700_000, used_percent: 16.0 },
+                ],
+            },
+        ];
+        let all_five_hour_windows = vec![
+            UsageWindowHistory {
+                limit_window_seconds: 18_000,
+                start_at: 82_000,
+                end_at: 100_000,
+                observations: vec![
+                    UsageObservation { observed_at: 100_000, used_percent: 60.0 },
+                ],
+            },
+            UsageWindowHistory {
+                limit_window_seconds: 18_000,
+                start_at: 282_000,
+                end_at: 300_000,
+                observations: vec![
+                    UsageObservation { observed_at: 300_000, used_percent: 50.0 },
+                ],
+            },
+            UsageWindowHistory {
+                limit_window_seconds: 18_000,
+                start_at: 482_000,
+                end_at: 500_000,
+                observations: vec![
+                    UsageObservation { observed_at: 500_000, used_percent: 100.0 },
+                ],
+            },
+            UsageWindowHistory {
+                limit_window_seconds: 18_000,
+                start_at: 682_000,
+                end_at: 700_000,
+                observations: vec![
+                    UsageObservation { observed_at: 700_000, used_percent: 20.0 },
+                ],
+            },
+        ];
+
+        let subframe = build_five_hour_subframe(
+            Some(&weekly),
+            Some(&five_hour),
+            Some(&weekly_history),
+            &all_five_hour_windows,
+            &all_weekly_windows,
+        );
+
+        assert_eq!(subframe.lower_y, Some(10.0));
+        let expected_rate = ((10.0 / 60.0) + (7.0 / 50.0) + (8.0 / 100.0)) / 3.0;
+        let expected_upper = 10.0 + 100.0 * expected_rate;
+        let actual_upper = subframe.upper_y.expect("upper_y");
+        assert!(
+            (actual_upper - expected_upper).abs() < 1e-9,
+            "expected upper_y {expected_upper}, got {actual_upper}"
+        );
+    }
+
+
     #[test]
     fn claude_profile_chart_uses_recorded_history() {
         use crate::usage::{UsageRateLimit, UsageResponse, UsageWindow};
@@ -1185,6 +1317,57 @@ mod tests {
         let _ = std::fs::remove_file(history_path);
     }
 
+    #[test]
+    fn copilot_monthly_usage_projects_month_window_into_normalized_chart() {
+        use crate::usage::{UsageRateLimit, UsageResponse, UsageWindow};
+
+        let cache_path = PathBuf::from("dummy_cache_copilot_recent_projection.json");
+        let history_path =
+            std::env::temp_dir().join(format!("test_copilot_recent_projection_{}.json", std::process::id()));
+        let now = 1_700_000_000;
+        let usage_service = UsageService::new(cache_path, history_path.clone(), 300).with_now_seconds(now);
+        let usage = UsageResponse {
+            email: Some("teamt5-it".to_string()),
+            plan_type: Some("business".to_string()),
+            rate_limit: Some(UsageRateLimit {
+                primary_window: None,
+                secondary_window: Some(UsageWindow {
+                    used_percent: 0.0,
+                    limit_window_seconds: 2_592_000,
+                    reset_at: now + (29 * 86_400),
+                    reset_after_seconds: 29 * 86_400,
+                }),
+            }),
+        };
+        let account_id = "copilot-teamt5-it";
+        usage_service
+            .record_usage_snapshot(
+                Some(account_id),
+                &crate::usage::UsageReadResult {
+                    usage: Some(usage.clone()),
+                    source: crate::usage::UsageSource::Api,
+                    fetched_at: Some(now),
+                    stale: false,
+                },
+            )
+            .unwrap();
+
+        let chart_data = build_profile_chart_data(Some(account_id), Some(&usage), &usage_service).unwrap();
+
+        assert!(
+            !chart_data.seven_day_points.is_empty(),
+            "monthly Copilot quota should project into the normalized window chart"
+        );
+        assert_eq!(chart_data.quota_window_label, "30d");
+        assert!(chart_data.seven_day_points.iter().any(|point| point.y == 0.0));
+        assert!(chart_data
+            .seven_day_points
+            .last()
+            .is_some_and(|point| point.x < 1.0));
+
+        let _ = std::fs::remove_file(history_path);
+    }
+
     fn unique_temp_dir(prefix: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "{prefix}-{}-{}",
@@ -1225,7 +1408,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_saved_profile_uses_current_snapshot_and_syncs_saved_file() {
+    fn codex_account_id_change_is_new_unsaved_account_and_preserves_saved_profile() {
         let base = unique_temp_dir("loader-codex-current-sync");
         let codex_paths = AppPaths::from_codex_dir(base.join("codex"));
         let store = AccountStore::new(codex_paths.clone(), StorePlatform::Copy);
@@ -1270,7 +1453,8 @@ mod tests {
         let report =
             load_profiles_with_report(&store, &usage, false, None, true, None, None, None).unwrap();
 
-        // Saved profile `team` 應該仍然指向舊帳號，新的帳號以未儲存 profile 出現。
+        // `current` 仍指向 `team`，但只要 account_id 改變，就視為新帳號：
+        // 舊 saved profile 保留，新的 current 以未儲存 profile 呈現。
         let saved_team = report
             .profiles
             .iter()
@@ -1278,6 +1462,7 @@ mod tests {
             .expect("saved codex profile team");
         assert_eq!(saved_team.account_id.as_deref(), Some("acct-stale"));
         assert!(!saved_team.is_current);
+        assert_eq!(saved_team.snapshot, stale_saved);
 
         let unsaved = report
             .profiles
@@ -1286,6 +1471,7 @@ mod tests {
             .expect("unsaved current codex profile");
         assert_eq!(unsaved.account_id.as_deref(), Some("acct-current"));
         assert!(unsaved.is_current);
+        assert_eq!(unsaved.snapshot, current);
         assert!(
             unsaved.profile_name.contains("[UNSAVED]"),
             "current codex profile should be rendered as UNSAVED"

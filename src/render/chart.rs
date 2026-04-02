@@ -20,6 +20,7 @@ const SERIES_BAND_COLORS: [Color; 8] = [
     Color::Rgb(72, 72, 72),
 ];
 
+const LABEL_BG_COLOR: Color = Color::Rgb(20, 20, 20);
 
 pub fn render_chart<State: RenderState>(frame: &mut Frame, context: &RenderContext<'_, State>) {
     let chart_state = context.state.chart_state();
@@ -28,12 +29,12 @@ pub fn render_chart<State: RenderState>(frame: &mut Frame, context: &RenderConte
     } else {
         let block = if chart_state.focused {
             Block::default()
-                .title("Usage chart (align to 7d window)")
+                .title("Usage chart")
                 .borders(Borders::ALL)
                 .style(Style::default().bg(Color::Rgb(20, 20, 20)))
         } else {
             Block::default()
-                .title("Usage chart (align to 7d window)")
+                .title("Usage chart")
                 .borders(Borders::ALL)
         };
         let inner = block.inner(context.area);
@@ -53,23 +54,19 @@ pub fn render_chart<State: RenderState>(frame: &mut Frame, context: &RenderConte
 
     let window_days = chart_state.x_upper - chart_state.x_lower;
     let offset_days = 7.0 - chart_state.x_upper;
-    let window_label = if offset_days > 0.01 {
-        format!("{:.1}d @{:.1}d", window_days, offset_days)
+    let window_percent = ((window_days / 7.0) * 100.0).round() as i32;
+    let offset_percent = ((offset_days / 7.0) * 100.0).round() as i32;
+    let window_label = if offset_percent > 0 {
+        format!("{window_percent}% @{offset_percent}%")
     } else {
-        let window_days_i = (window_days * 10.0).round() as i32;
-        match window_days_i {
-            70 => "7d".to_string(),
-            30 => "3d".to_string(),
-            10 => "1d".to_string(),
-            _ => format!("{:.1}d", window_days),
-        }
+        format!("{window_percent}%")
     };
     let view_prefix = match chart_state.tab_zoom_label {
         Some(label) => format!("[{}] · ", label),
         None => String::new(),
     };
     let hint_line = format!(
-        "{}W:{} · ←→=pan · =/- zoom-x · ↑↓=pan-y · [/]=zoom-y · z=reset · 1/3/7=snap",
+        "{}Window view:{} · ←→=pan · =/- zoom-x · ↑↓=pan-y · [/]=zoom-y · z=reset · 1/3/7=snap",
         view_prefix, window_label
     );
     let band_summary = Paragraph::new(Text::from(vec![Line::from(hint_line)]))
@@ -92,7 +89,7 @@ fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_stat
         .filter(|s| !chart_state.solo || s.style.is_selected)
         .collect();
 
-    // Pre-compute 7d line points for each series.
+    // Pre-compute normalized quota-window line points for each series.
     let series_points = visible_series
         .iter()
         .map(|series| {
@@ -147,15 +144,19 @@ fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_stat
 
 
     let x_range = x_bounds[1] - x_bounds[0];
-    let x_label_lo  = format!("{:.1}d", x_bounds[0]);
-    let x_label_q1  = format!("{:.1}d", x_bounds[0] + x_range * 0.25);
-    let x_label_mid = format!("{:.1}d", x_bounds[0] + x_range * 0.5);
-    let x_label_q3  = format!("{:.1}d", x_bounds[0] + x_range * 0.75);
-    let x_label_hi  = if (x_bounds[1] - 7.0).abs() < 0.01 {
-        "reset".to_string()
-    } else {
-        format!("{:.1}d ago", 7.0 - x_bounds[1])
+    let format_x_label = |value: f64| {
+        let percent = ((value / 7.0) * 100.0).round() as i32;
+        match percent {
+            0 => "start".to_string(),
+            100 => "reset".to_string(),
+            value => format!("{value}%"),
+        }
     };
+    let x_label_lo  = format_x_label(x_bounds[0]);
+    let x_label_q1  = format_x_label(x_bounds[0] + x_range * 0.25);
+    let x_label_mid = format_x_label(x_bounds[0] + x_range * 0.5);
+    let x_label_q3  = format_x_label(x_bounds[0] + x_range * 0.75);
+    let x_label_hi  = format_x_label(x_bounds[1]);
     let y_range = y_bounds[1] - y_bounds[0];
     let y_label_lo  = format!("{:.0}%", y_bounds[0]);
     let y_label_q1  = format!("{:.0}%", y_bounds[0] + y_range * 0.25);
@@ -165,7 +166,7 @@ fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_stat
     let chart = Chart::new(datasets)
         .x_axis(
             Axis::default()
-                .title("7d window")
+                .title("window-relative")
                 .bounds(x_bounds)
                 .labels([x_label_lo.as_str(), x_label_q1.as_str(), x_label_mid.as_str(), x_label_q3.as_str(), x_label_hi.as_str()]),
         )
@@ -284,6 +285,7 @@ fn render_end_labels(
                 .find(|point| point.x >= x_bounds[0] && point.x <= x_bounds[1])?;
             Some(LabelAnchor {
                 text: format_end_label(series),
+                fallback_texts: compact_end_label_variants(series),
                 color: SERIES_COLORS[series.style.color_slot % SERIES_COLORS.len()],
                 x: project_x(point.x, graph_area, x_bounds),
                 y: project_y(point.y, graph_area, y_bounds),
@@ -294,9 +296,19 @@ fn render_end_labels(
 
     for label in layout_end_labels(&anchors, graph_area, occupied_cells, blocked_cells) {
         draw_label_connector(frame, &label, graph_area);
-        frame
-            .buffer_mut()
-            .set_string(label.x, label.y, label.text, Style::default().fg(label.color));
+        let label_width = label.text.chars().count() as u16;
+        for dx in 0..label_width {
+            frame
+                .buffer_mut()[(label.x + dx, label.y)]
+                .set_symbol(" ")
+                .set_bg(LABEL_BG_COLOR);
+        }
+        frame.buffer_mut().set_string(
+            label.x,
+            label.y,
+            label.text,
+            Style::default().fg(label.color).bg(LABEL_BG_COLOR),
+        );
     }
 }
 
@@ -347,8 +359,9 @@ fn band_background_color(color_slot: usize) -> Color {
 
 fn format_end_label(series: &super::ChartSeries<'_>) -> String {
     format!(
-        "[{}] {} {}/{}",
+        "[{} {}] {} {}/{}",
         series.profile.agent_type,
+        series.profile.window_label,
         series.profile.label,
         format_unsigned_percent(series.last_seven_day_percent),
         format_unsigned_percent(series.five_hour_used_percent),
@@ -361,10 +374,27 @@ fn format_unsigned_percent(value: Option<f64>) -> String {
         .unwrap_or("?%".to_string())
 }
 
+fn compact_end_label_variants(series: &super::ChartSeries<'_>) -> Vec<String> {
+    let compact = format!(
+        "{} {}",
+        series.profile.label,
+        format_unsigned_percent(series.last_seven_day_percent),
+    );
+    let minimal = series.profile.label.to_string();
+    let mut variants = Vec::new();
+    for text in [compact, minimal] {
+        if !variants.iter().any(|existing| existing == &text) {
+            variants.push(text);
+        }
+    }
+    variants
+}
+
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LabelAnchor {
     text: String,
+    fallback_texts: Vec<String>,
     color: Color,
     x: u16,
     y: u16,
@@ -392,67 +422,129 @@ fn layout_end_labels(
     const FALLBACK_LABEL_OFFSET: u16 = 1;
 
     for anchor in anchors {
-        let width = anchor.text.chars().count() as u16;
-        if width == 0 || graph_area.width == 0 || graph_area.height == 0 {
+        let text_variants = std::iter::once(&anchor.text).chain(anchor.fallback_texts.iter());
+
+        'variants: for text in text_variants {
+            let width = text.chars().count() as u16;
+            if width == 0 || graph_area.width == 0 || graph_area.height == 0 {
+                continue;
+            }
+
+            let mut candidates = Vec::new();
+            for step in 0..graph_area.height {
+                let step = step as i16;
+                let offsets = if step == 0 { vec![0] } else { vec![-step, step] };
+                for dy in offsets {
+                    let y = anchor.y as i16 + dy;
+                    if y < graph_area.top() as i16 || y >= graph_area.bottom() as i16 {
+                        continue;
+                    }
+                    let y = y as u16;
+                    for offset in [PREFERRED_LABEL_OFFSET, FALLBACK_LABEL_OFFSET] {
+                        let right_x = anchor.x.saturating_add(offset);
+                        if right_x + width <= graph_area.right() {
+                            candidates.push((right_x, y));
+                        }
+                        let left_x = anchor
+                            .x
+                            .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
+                            .max(graph_area.left());
+                        if left_x >= graph_area.left() && left_x + width <= graph_area.right() {
+                            candidates.push((left_x, y));
+                        }
+                    }
+                }
+            }
+
+            if let Some((x, y)) = candidates.iter().copied().find(|(x, y)| {
+                let label_cells_ok = (0..width).all(|dx| {
+                    let cell = (x + dx, *y);
+                    !occupied_cells.contains(&cell)
+                        && !blocked_cells.contains(&cell)
+                        && !reserved.contains(&cell)
+                });
+                if !label_cells_ok {
+                    return false;
+                }
+                connector_cells(*x, *y, width, anchor.x, anchor.y, graph_area)
+                    .into_iter()
+                    .all(|cell| !blocked_cells.contains(&cell) && !reserved.contains(&cell))
+            }) {
+                let connector = connector_cells(x, y, width, anchor.x, anchor.y, graph_area);
+                for cell in connector {
+                    reserved.insert(cell);
+                }
+                for dx in 0..width {
+                    reserved.insert((x + dx, y));
+                }
+                placed.push(PlacedLabel {
+                    text: text.clone(),
+                    color: anchor.color,
+                    x,
+                    y,
+                    anchor_x: anchor.x,
+                    anchor_y: anchor.y,
+                });
+                break 'variants;
+            }
+        }
+    }
+
+    for anchor in anchors {
+        if placed.iter().any(|label| label.anchor_x == anchor.x && label.anchor_y == anchor.y) {
             continue;
         }
 
-        let mut candidates = Vec::new();
-        for step in 0..graph_area.height {
-            let step = step as i16;
-            let offsets = if step == 0 { vec![0] } else { vec![-step, step] };
-            for dy in offsets {
-                let y = anchor.y as i16 + dy;
-                if y < graph_area.top() as i16 || y >= graph_area.bottom() as i16 {
-                    continue;
-                }
-                let y = y as u16;
-                for offset in [PREFERRED_LABEL_OFFSET, FALLBACK_LABEL_OFFSET] {
-                    let right_x = anchor.x.saturating_add(offset);
-                    if right_x + width <= graph_area.right() {
-                        candidates.push((right_x, y));
-                    }
-                    let left_x = anchor
-                        .x
-                        .saturating_sub(width.saturating_add(offset.saturating_sub(1)));
-                    if left_x >= graph_area.left() && left_x + width <= graph_area.right() {
-                        candidates.push((left_x, y));
-                    }
-                }
-            }
-        }
+        let force_variants = std::iter::once(&anchor.text).chain(anchor.fallback_texts.iter());
 
-        if let Some((x, y)) = candidates.into_iter().find(|(x, y)| {
-            let label_cells_ok = (0..width).all(|dx| {
-                let cell = (x + dx, *y);
-                !occupied_cells.contains(&cell)
-                    && !blocked_cells.contains(&cell)
-                    && !reserved.contains(&cell)
-            });
-            if !label_cells_ok {
-                return false;
+        'force_variants: for text in force_variants {
+            let width = text.chars().count() as u16;
+            if width == 0 || width > graph_area.width {
+                continue;
             }
-            connector_cells(*x, *y, width, anchor.x, anchor.y, graph_area)
-                .into_iter()
-                .all(|cell| {
-                    !blocked_cells.contains(&cell) && !reserved.contains(&cell)
-                })
-        }) {
-            let connector = connector_cells(x, y, width, anchor.x, anchor.y, graph_area);
-            for cell in connector {
-                reserved.insert(cell);
+
+            let mut candidates = Vec::new();
+            for step in 0..graph_area.height {
+                let step = step as i16;
+                let offsets = if step == 0 { vec![0] } else { vec![-step, step] };
+                for dy in offsets {
+                    let y = anchor.y as i16 + dy;
+                    if y < graph_area.top() as i16 || y >= graph_area.bottom() as i16 {
+                        continue;
+                    }
+                    let y = y as u16;
+                    for offset in [FALLBACK_LABEL_OFFSET, PREFERRED_LABEL_OFFSET] {
+                        let right_x = anchor.x.saturating_add(offset).min(graph_area.right().saturating_sub(width));
+                        if right_x + width <= graph_area.right() {
+                            candidates.push((right_x, y));
+                        }
+                        let left_x = anchor
+                            .x
+                            .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
+                            .max(graph_area.left());
+                        if left_x + width <= graph_area.right() {
+                            candidates.push((left_x, y));
+                        }
+                    }
+                }
             }
-            for dx in 0..width {
-                reserved.insert((x + dx, y));
+
+            if let Some((x, y)) = candidates.into_iter().find(|(x, y)| {
+                (0..width).all(|dx| !reserved.contains(&(x + dx, *y)))
+            }) {
+                for dx in 0..width {
+                    reserved.insert((x + dx, y));
+                }
+                placed.push(PlacedLabel {
+                    text: text.clone(),
+                    color: anchor.color,
+                    x,
+                    y,
+                    anchor_x: anchor.x,
+                    anchor_y: anchor.y,
+                });
+                break 'force_variants;
             }
-            placed.push(PlacedLabel {
-                text: anchor.text.clone(),
-                color: anchor.color,
-                x,
-                y,
-                anchor_x: anchor.x,
-                anchor_y: anchor.y,
-            });
         }
     }
 
@@ -576,12 +668,14 @@ mod tests {
         let anchors = vec![
             LabelAnchor {
                 text: "Alpha".to_string(),
+                fallback_texts: vec![],
                 color: Color::Cyan,
                 x: 12,
                 y: 4,
             },
             LabelAnchor {
                 text: "Beta".to_string(),
+                fallback_texts: vec![],
                 color: Color::Yellow,
                 x: 12,
                 y: 4,
@@ -601,6 +695,26 @@ mod tests {
                 assert!(!blocked.contains(&cell));
             }
         }
+    }
+
+    #[test]
+    fn layout_end_labels_clamps_left_edge_instead_of_dropping_label() {
+        let anchors = vec![LabelAnchor {
+            text: "[codex 7d] comet.jc 7%/0%".to_string(),
+            fallback_texts: vec!["comet.jc 7%".to_string(), "comet.jc".to_string()],
+            color: Color::Cyan,
+            x: 10,
+            y: 9,
+        }];
+
+        let occupied = HashSet::from([
+            (13, 9), (14, 9), (15, 9), (16, 9), (17, 9), (18, 9), (19, 9), (20, 9),
+            (21, 9), (22, 9), (23, 9), (24, 9), (25, 9), (26, 9), (27, 9), (28, 9),
+        ]);
+        let labels = layout_end_labels(&anchors, Rect::new(8, 0, 32, 10), &occupied, &HashSet::new());
+
+        assert_eq!(labels.len(), 1, "label should still render when left-edge clamping is required");
+        assert!(labels[0].x >= 8);
     }
 
     #[test]
@@ -626,6 +740,7 @@ mod tests {
                 label: "Alpha",
                 is_current: true,
                 agent_type: "codex",
+            window_label: "7d",
             },
             style: ChartSeriesStyle {
                 color_slot: 0,
@@ -646,7 +761,7 @@ mod tests {
             },
         };
 
-        assert_eq!(format_end_label(&series), "[codex] Alpha 76%/40%");
+        assert_eq!(format_end_label(&series), "[codex 7d] Alpha 76%/40%");
     }
 
     #[test]
@@ -658,12 +773,14 @@ mod tests {
                     label: "Alpha",
                     is_current: false,
                     agent_type: "codex",
+                window_label: "7d",
                 }),
                 current: Some(RenderProfile {
                     id: "beta",
                     label: "Beta",
                     is_current: true,
                     agent_type: "codex",
+                window_label: "7d",
                 }),
             },
             chart: ChartState {
@@ -673,6 +790,7 @@ mod tests {
                         label: "Alpha",
                         is_current: false,
                         agent_type: "codex",
+                    window_label: "7d",
                     },
                     style: ChartSeriesStyle {
                         color_slot: 0,
@@ -737,10 +855,11 @@ mod tests {
         let lines = render_lines(&state, 72, 18);
         let joined = lines.join("\n");
 
-        assert!(joined.contains("Usage chart (align to 7d window)"));
-        assert!(joined.contains("[codex] Alpha 76%/40%"));
-        assert!(joined.contains("0.0d"));
-        assert!(joined.contains("3.5d"));
+        assert!(joined.contains("Usage chart"));
+        assert!(joined.contains("Window view:100%"));
+        assert!(joined.contains("[codex 7d] Alpha 76%/40%"));
+        assert!(joined.contains("start"));
+        assert!(joined.contains("50%"));
         assert!(joined.contains("reset"));
         assert!(joined.contains("100%"));
         assert!(!joined.contains("▪"));
@@ -754,6 +873,213 @@ mod tests {
     }
 
     #[test]
+    fn render_chart_uses_compact_label_when_full_label_would_not_fit() {
+        let state = MockState {
+            selection: SelectionState {
+                selected: Some(RenderProfile {
+                    id: "comet",
+                    label: "comet.jc",
+                    is_current: true,
+                    agent_type: "codex",
+                    window_label: "7d",
+                }),
+                current: Some(RenderProfile {
+                    id: "comet",
+                    label: "comet.jc",
+                    is_current: true,
+                    agent_type: "codex",
+                    window_label: "7d",
+                }),
+            },
+            chart: ChartState {
+                series: vec![ChartSeries {
+                    profile: RenderProfile {
+                        id: "comet",
+                        label: "comet.jc",
+                        is_current: true,
+                        agent_type: "codex",
+                        window_label: "7d",
+                    },
+                    style: ChartSeriesStyle {
+                        color_slot: 0,
+                        is_selected: true,
+                        is_current: true,
+                        hidden: false,
+                    },
+                    points: vec![
+                        ChartPoint { x: 0.0, y: 4.0 },
+                        ChartPoint { x: 7.0, y: 7.0 },
+                    ],
+                    last_seven_day_percent: Some(7.0),
+                    five_hour_used_percent: Some(0.0),
+                    five_hour_subframe: FiveHourSubframeState {
+                        available: false,
+                        start_x: None,
+                        end_x: None,
+                        lower_y: None,
+                        upper_y: None,
+                        reason: Some("no 5h window"),
+                    },
+                }],
+                seven_day_points: vec![
+                    ChartPoint { x: 0.0, y: 4.0 },
+                    ChartPoint { x: 7.0, y: 7.0 },
+                ],
+                five_hour_band: FiveHourBandState {
+                    available: false,
+                    used_percent: None,
+                    lower_y: None,
+                    upper_y: None,
+                    delta_seven_day_percent: None,
+                    delta_five_hour_percent: None,
+                    reason: Some("no 5h window"),
+                },
+                five_hour_subframe: FiveHourSubframeState {
+                    available: false,
+                    start_x: None,
+                    end_x: None,
+                    lower_y: None,
+                    upper_y: None,
+                    reason: Some("no 5h window"),
+                },
+                total_points: 2,
+                y_lower: 0.0,
+                y_upper: 100.0,
+                x_lower: 0.0,
+                x_upper: 7.0,
+                solo: false,
+                tab_zoom_label: None,
+                focused: false,
+                fullscreen: false,
+            },
+        };
+
+        let lines = render_lines(&state, 32, 18);
+        let joined = lines.join("\n");
+
+        assert!(joined.contains("comet.jc"), "expected compact label to remain visible, got:\n{joined}");
+    }
+
+    #[test]
+    fn render_chart_keeps_comet_label_visible_beside_neighboring_series() {
+        let state = MockState {
+            selection: SelectionState {
+                selected: Some(RenderProfile {
+                    id: "comet",
+                    label: "comet.jc",
+                    is_current: true,
+                    agent_type: "codex",
+                    window_label: "7d",
+                }),
+                current: Some(RenderProfile {
+                    id: "team",
+                    label: "teamt5-it",
+                    is_current: false,
+                    agent_type: "copilot",
+                    window_label: "30d",
+                }),
+            },
+            chart: ChartState {
+                series: vec![
+                    ChartSeries {
+                        profile: RenderProfile {
+                            id: "team",
+                            label: "teamt5-it",
+                            is_current: false,
+                            agent_type: "copilot",
+                            window_label: "30d",
+                        },
+                        style: ChartSeriesStyle {
+                            color_slot: 1,
+                            is_selected: false,
+                            is_current: false,
+                            hidden: false,
+                        },
+                        points: vec![
+                            ChartPoint { x: 0.0, y: 3.0 },
+                            ChartPoint { x: 7.0, y: 5.0 },
+                        ],
+                        last_seven_day_percent: Some(5.0),
+                        five_hour_used_percent: None,
+                        five_hour_subframe: FiveHourSubframeState {
+                            available: false,
+                            start_x: None,
+                            end_x: None,
+                            lower_y: None,
+                            upper_y: None,
+                            reason: Some("no 5h window"),
+                        },
+                    },
+                    ChartSeries {
+                        profile: RenderProfile {
+                            id: "comet",
+                            label: "comet.jc",
+                            is_current: true,
+                            agent_type: "codex",
+                            window_label: "7d",
+                        },
+                        style: ChartSeriesStyle {
+                            color_slot: 0,
+                            is_selected: true,
+                            is_current: true,
+                            hidden: false,
+                        },
+                        points: vec![
+                            ChartPoint { x: 0.0, y: 4.0 },
+                            ChartPoint { x: 7.0, y: 7.0 },
+                        ],
+                        last_seven_day_percent: Some(7.0),
+                        five_hour_used_percent: Some(0.0),
+                        five_hour_subframe: FiveHourSubframeState {
+                            available: false,
+                            start_x: None,
+                            end_x: None,
+                            lower_y: None,
+                            upper_y: None,
+                            reason: Some("no 5h window"),
+                        },
+                    },
+                ],
+                seven_day_points: vec![
+                    ChartPoint { x: 0.0, y: 4.0 },
+                    ChartPoint { x: 7.0, y: 7.0 },
+                ],
+                five_hour_band: FiveHourBandState {
+                    available: false,
+                    used_percent: None,
+                    lower_y: None,
+                    upper_y: None,
+                    delta_seven_day_percent: None,
+                    delta_five_hour_percent: None,
+                    reason: Some("no 5h window"),
+                },
+                five_hour_subframe: FiveHourSubframeState {
+                    available: false,
+                    start_x: None,
+                    end_x: None,
+                    lower_y: None,
+                    upper_y: None,
+                    reason: Some("no 5h window"),
+                },
+                total_points: 4,
+                y_lower: 0.0,
+                y_upper: 100.0,
+                x_lower: 0.0,
+                x_upper: 7.0,
+                solo: false,
+                tab_zoom_label: None,
+                focused: false,
+                fullscreen: false,
+            },
+        };
+
+        let lines = render_lines(&state, 34, 18);
+        let joined = lines.join("\n");
+
+        assert!(joined.contains("comet.jc"), "expected comet label to remain visible beside neighboring series, got:\n{joined}");
+    }
+
+    #[test]
     fn render_chart_surfaces_unavailable_band_reason_without_placeholder_copy() {
         let state = MockState {
             selection: SelectionState {
@@ -762,12 +1088,14 @@ mod tests {
                     label: "Alpha",
                     is_current: true,
                     agent_type: "codex",
+                window_label: "7d",
                 }),
                 current: Some(RenderProfile {
                     id: "alpha",
                     label: "Alpha",
                     is_current: true,
                     agent_type: "codex",
+                window_label: "7d",
                 }),
             },
             chart: ChartState {
@@ -777,6 +1105,7 @@ mod tests {
                         label: "Alpha",
                         is_current: true,
                         agent_type: "codex",
+                    window_label: "7d",
                     },
                     style: ChartSeriesStyle {
                         color_slot: 0,
@@ -839,5 +1168,485 @@ mod tests {
 
         assert!(!joined.contains("pending Canvas plot"));
     }
+
+    #[test]
+    fn render_chart_gives_labels_an_opaque_background_for_readability() {
+        let state = MockState {
+            selection: SelectionState {
+                selected: Some(RenderProfile {
+                    id: "comet",
+                    label: "comet.jc",
+                    is_current: true,
+                    agent_type: "codex",
+                    window_label: "7d",
+                }),
+                current: Some(RenderProfile {
+                    id: "team",
+                    label: "teamt5-it",
+                    is_current: false,
+                    agent_type: "copilot",
+                    window_label: "30d",
+                }),
+            },
+            chart: ChartState {
+                series: vec![
+                    ChartSeries {
+                        profile: RenderProfile {
+                            id: "team",
+                            label: "teamt5-it",
+                            is_current: false,
+                            agent_type: "copilot",
+                            window_label: "30d",
+                        },
+                        style: ChartSeriesStyle {
+                            color_slot: 1,
+                            is_selected: false,
+                            is_current: false,
+                            hidden: false,
+                        },
+                        points: vec![
+                            ChartPoint { x: 0.0, y: 3.0 },
+                            ChartPoint { x: 7.0, y: 5.0 },
+                        ],
+                        last_seven_day_percent: Some(5.0),
+                        five_hour_used_percent: None,
+                        five_hour_subframe: FiveHourSubframeState {
+                            available: false,
+                            start_x: None,
+                            end_x: None,
+                            lower_y: None,
+                            upper_y: None,
+                            reason: Some("no 5h window"),
+                        },
+                    },
+                    ChartSeries {
+                        profile: RenderProfile {
+                            id: "comet",
+                            label: "comet.jc",
+                            is_current: true,
+                            agent_type: "codex",
+                            window_label: "7d",
+                        },
+                        style: ChartSeriesStyle {
+                            color_slot: 0,
+                            is_selected: true,
+                            is_current: true,
+                            hidden: false,
+                        },
+                        points: vec![
+                            ChartPoint { x: 0.0, y: 4.0 },
+                            ChartPoint { x: 7.0, y: 7.0 },
+                        ],
+                        last_seven_day_percent: Some(7.0),
+                        five_hour_used_percent: Some(0.0),
+                        five_hour_subframe: FiveHourSubframeState {
+                            available: false,
+                            start_x: None,
+                            end_x: None,
+                            lower_y: None,
+                            upper_y: None,
+                            reason: Some("no 5h window"),
+                        },
+                    },
+                ],
+                seven_day_points: vec![
+                    ChartPoint { x: 0.0, y: 4.0 },
+                    ChartPoint { x: 7.0, y: 7.0 },
+                ],
+                five_hour_band: FiveHourBandState {
+                    available: false,
+                    used_percent: None,
+                    lower_y: None,
+                    upper_y: None,
+                    delta_seven_day_percent: None,
+                    delta_five_hour_percent: None,
+                    reason: Some("no 5h window"),
+                },
+                five_hour_subframe: FiveHourSubframeState {
+                    available: false,
+                    start_x: None,
+                    end_x: None,
+                    lower_y: None,
+                    upper_y: None,
+                    reason: Some("no 5h window"),
+                },
+                total_points: 2,
+                y_lower: -10.0,
+                y_upper: 72.0,
+                x_lower: 0.0,
+                x_upper: 7.0,
+                solo: false,
+                tab_zoom_label: None,
+                focused: false,
+                fullscreen: false,
+            },
+        };
+
+        let backend = TestBackend::new(72, 18);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let frame = terminal
+            .draw(|frame| render_chart(frame, &RenderContext::new(&state, frame.area())))
+            .unwrap();
+
+        let label_chars = "comet.jc".chars().collect::<Vec<_>>();
+        let label_cells = frame
+            .buffer
+            .content
+            .iter()
+            .filter(|cell| {
+                let symbol = cell.symbol();
+                symbol.chars().count() == 1 && label_chars.contains(&symbol.chars().next().unwrap())
+            })
+            .collect::<Vec<_>>();
+
+        assert!(
+            label_cells.iter().any(|cell| cell.bg != Color::Reset),
+            "expected end-label cells to use a non-reset background for readability"
+        );
+    }
+
+
+    #[test]
+    fn render_chart_keeps_label_visible_even_when_own_5h_band_overlaps_connector() {
+        let state = MockState {
+            selection: SelectionState {
+                selected: Some(RenderProfile {
+                    id: "comet",
+                    label: "comet.jc",
+                    is_current: true,
+                    agent_type: "codex",
+                    window_label: "7d",
+                }),
+                current: Some(RenderProfile {
+                    id: "comet",
+                    label: "comet.jc",
+                    is_current: true,
+                    agent_type: "codex",
+                    window_label: "7d",
+                }),
+            },
+            chart: ChartState {
+                series: vec![
+                    ChartSeries {
+                        profile: RenderProfile {
+                            id: "comet",
+                            label: "comet.jc",
+                            is_current: true,
+                            agent_type: "codex",
+                            window_label: "7d",
+                        },
+                        style: ChartSeriesStyle {
+                            color_slot: 0,
+                            is_selected: true,
+                            is_current: true,
+                            hidden: false,
+                        },
+                        points: vec![
+                            ChartPoint { x: 0.05, y: 18.0 },
+                            ChartPoint { x: 0.18, y: 22.0 },
+                            ChartPoint { x: 0.37, y: 24.0 },
+                        ],
+                        last_seven_day_percent: Some(24.0),
+                        five_hour_used_percent: Some(42.0),
+                        five_hour_subframe: FiveHourSubframeState {
+                            available: true,
+                            start_x: Some(0.22),
+                            end_x: Some(0.37),
+                            lower_y: Some(12.0),
+                            upper_y: Some(42.0),
+                            reason: None,
+                        },
+                    },
+                    ChartSeries {
+                        profile: RenderProfile {
+                            id: "team",
+                            label: "teamt5-it",
+                            is_current: false,
+                            agent_type: "copilot",
+                            window_label: "30d",
+                        },
+                        style: ChartSeriesStyle {
+                            color_slot: 1,
+                            is_selected: false,
+                            is_current: false,
+                            hidden: false,
+                        },
+                        points: vec![
+                            ChartPoint { x: 0.03, y: 0.0 },
+                            ChartPoint { x: 0.16, y: 0.0 },
+                        ],
+                        last_seven_day_percent: Some(0.0),
+                        five_hour_used_percent: None,
+                        five_hour_subframe: FiveHourSubframeState {
+                            available: false,
+                            start_x: None,
+                            end_x: None,
+                            lower_y: None,
+                            upper_y: None,
+                            reason: Some("no 5h window"),
+                        },
+                    },
+                ],
+                seven_day_points: vec![
+                    ChartPoint { x: 0.05, y: 18.0 },
+                    ChartPoint { x: 0.18, y: 22.0 },
+                    ChartPoint { x: 0.37, y: 24.0 },
+                ],
+                five_hour_band: FiveHourBandState {
+                    available: true,
+                    used_percent: Some(42.0),
+                    lower_y: Some(12.0),
+                    upper_y: Some(42.0),
+                    delta_seven_day_percent: None,
+                    delta_five_hour_percent: None,
+                    reason: None,
+                },
+                five_hour_subframe: FiveHourSubframeState {
+                    available: true,
+                    start_x: Some(0.22),
+                    end_x: Some(0.37),
+                    lower_y: Some(12.0),
+                    upper_y: Some(42.0),
+                    reason: None,
+                },
+                total_points: 5,
+                y_lower: -10.0,
+                y_upper: 72.0,
+                x_lower: 0.0,
+                x_upper: 7.0,
+                solo: false,
+                tab_zoom_label: None,
+                focused: false,
+                fullscreen: false,
+            },
+        };
+
+        let lines = render_lines(&state, 237, 49);
+        let joined = lines.join("\n");
+
+        assert!(
+            joined.contains("comet.jc"),
+            "expected comet label to remain visible even when its own 5h band overlaps the connector, got:\n{joined}"
+        );
+    }
+
+
+    #[test]
+    fn render_chart_keeps_codex_label_visible_with_live_like_initial_state() {
+        let state = MockState {
+            selection: SelectionState {
+                selected: Some(RenderProfile {
+                    id: "cc",
+                    label: "CC",
+                    is_current: true,
+                    agent_type: "claude",
+                    window_label: "?d",
+                }),
+                current: Some(RenderProfile {
+                    id: "cc",
+                    label: "CC",
+                    is_current: true,
+                    agent_type: "claude",
+                    window_label: "?d",
+                }),
+            },
+            chart: ChartState {
+                series: vec![
+                    ChartSeries {
+                        profile: RenderProfile {
+                            id: "cc",
+                            label: "CC",
+                            is_current: true,
+                            agent_type: "claude",
+                            window_label: "?d",
+                        },
+                        style: ChartSeriesStyle {
+                            color_slot: 0,
+                            is_selected: true,
+                            is_current: true,
+                            hidden: false,
+                        },
+                        points: vec![],
+                        last_seven_day_percent: None,
+                        five_hour_used_percent: None,
+                        five_hour_subframe: FiveHourSubframeState {
+                            available: false,
+                            start_x: None,
+                            end_x: None,
+                            lower_y: None,
+                            upper_y: None,
+                            reason: Some("no usage"),
+                        },
+                    },
+                    ChartSeries {
+                        profile: RenderProfile {
+                            id: "comet",
+                            label: "comet",
+                            is_current: true,
+                            agent_type: "codex",
+                            window_label: "7d",
+                        },
+                        style: ChartSeriesStyle {
+                            color_slot: 1,
+                            is_selected: false,
+                            is_current: true,
+                            hidden: false,
+                        },
+                        points: vec![
+                            ChartPoint { x: 0.16, y: 22.0 },
+                            ChartPoint { x: 0.20, y: 24.0 },
+                            ChartPoint { x: 0.24, y: 25.0 },
+                            ChartPoint { x: 0.28, y: 27.0 },
+                            ChartPoint { x: 0.32, y: 29.0 },
+                            ChartPoint { x: 0.36, y: 31.0 },
+                            ChartPoint { x: 0.40, y: 32.0 },
+                            ChartPoint { x: 0.4486, y: 33.0 },
+                        ],
+                        last_seven_day_percent: Some(33.0),
+                        five_hour_used_percent: Some(14.0),
+                        five_hour_subframe: FiveHourSubframeState {
+                            available: true,
+                            start_x: Some(0.25),
+                            end_x: Some(0.4486),
+                            lower_y: Some(31.0),
+                            upper_y: Some(55.5),
+                            reason: None,
+                        },
+                    },
+                    ChartSeries {
+                        profile: RenderProfile {
+                            id: "team",
+                            label: "teamt5-it",
+                            is_current: true,
+                            agent_type: "copilot",
+                            window_label: "30d",
+                        },
+                        style: ChartSeriesStyle {
+                            color_slot: 2,
+                            is_selected: false,
+                            is_current: true,
+                            hidden: false,
+                        },
+                        points: vec![
+                            ChartPoint { x: 0.05, y: 0.0 },
+                            ChartPoint { x: 0.10, y: 0.0 },
+                            ChartPoint { x: 0.15, y: 0.0 },
+                            ChartPoint { x: 0.1814, y: 0.0 },
+                        ],
+                        last_seven_day_percent: Some(0.0),
+                        five_hour_used_percent: None,
+                        five_hour_subframe: FiveHourSubframeState {
+                            available: false,
+                            start_x: None,
+                            end_x: None,
+                            lower_y: None,
+                            upper_y: None,
+                            reason: Some("no 5h window"),
+                        },
+                    },
+                ],
+                seven_day_points: vec![],
+                five_hour_band: FiveHourBandState {
+                    available: false,
+                    used_percent: None,
+                    lower_y: None,
+                    upper_y: None,
+                    delta_seven_day_percent: None,
+                    delta_five_hour_percent: None,
+                    reason: Some("no usage"),
+                },
+                five_hour_subframe: FiveHourSubframeState {
+                    available: false,
+                    start_x: None,
+                    end_x: None,
+                    lower_y: None,
+                    upper_y: None,
+                    reason: Some("no usage"),
+                },
+                total_points: 12,
+                y_lower: -10.0,
+                y_upper: 100.0,
+                x_lower: 0.0,
+                x_upper: 7.0,
+                solo: false,
+                tab_zoom_label: None,
+                focused: false,
+                fullscreen: true,
+            },
+        };
+
+        let lines = render_lines(&state, 237, 49);
+        let joined = lines.join("\n");
+
+        assert!(
+            joined.contains("comet"),
+            "expected live-like layout to keep codex label visible, got:\n{joined}"
+        );
+    }
+
+
+    #[test]
+    fn layout_end_labels_allows_label_to_overlay_plot_cells() {
+        let anchors = vec![LabelAnchor {
+            text: "[codex 7d] comet 26%/14%".to_string(),
+            fallback_texts: vec!["comet 26%".to_string(), "comet".to_string()],
+            color: Color::Yellow,
+            x: 16,
+            y: 20,
+        }];
+
+        let graph_area = Rect::new(0, 0, 80, 30);
+        let occupied = (17..26).map(|x| (x, 20)).collect::<HashSet<_>>();
+        let labels = layout_end_labels(&anchors, graph_area, &occupied, &HashSet::new());
+
+        assert_eq!(labels.len(), 1, "label should still place even when its preferred row has plot glyphs");
+        assert!(labels[0].text.contains("comet"));
+    }
+
+
+    #[test]
+    fn layout_end_labels_forces_minimal_label_when_plot_and_band_claim_every_candidate() {
+        let anchors = vec![LabelAnchor {
+            text: "[codex 7d] comet 33%/14%".to_string(),
+            fallback_texts: vec!["comet 33%".to_string(), "comet".to_string()],
+            color: Color::Yellow,
+            x: 20,
+            y: 8,
+        }];
+
+        let graph_area = Rect::new(5, 0, 60, 12);
+        let occupied = (5..60)
+            .flat_map(|x| (0..12).map(move |y| (x, y)))
+            .collect::<HashSet<_>>();
+        let blocked = occupied.clone();
+        let labels = layout_end_labels(&anchors, graph_area, &occupied, &blocked);
+
+        assert_eq!(labels.len(), 1, "label should still place in force-fallback mode");
+        assert_eq!(labels[0].text, "[codex 7d] comet 33%/14%");
+    }
+
+
+    #[test]
+    fn layout_end_labels_force_fallback_prefers_full_label_when_space_exists() {
+        let anchors = vec![LabelAnchor {
+            text: "[codex 7d] comet 33%/14%".to_string(),
+            fallback_texts: vec!["comet 33%".to_string(), "comet".to_string()],
+            color: Color::Yellow,
+            x: 12,
+            y: 8,
+        }];
+
+        let graph_area = Rect::new(0, 0, 80, 12);
+        let occupied = (0..80)
+            .flat_map(|x| (0..12).filter(move |y| *y != 10).map(move |y| (x, y)))
+            .collect::<HashSet<_>>();
+        let blocked = occupied.clone();
+
+        let labels = layout_end_labels(&anchors, graph_area, &occupied, &blocked);
+
+        assert_eq!(labels.len(), 1);
+        assert_eq!(labels[0].text, "[codex 7d] comet 33%/14%");
+    }
+
 
 }

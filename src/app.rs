@@ -1550,12 +1550,14 @@ impl render::RenderState for AppRenderState<'_> {
                 label: profile.profile_name.as_str(),
                 is_current: profile.is_current,
                 agent_type: profile.kind.as_str(),
+                window_label: profile.chart_data.quota_window_label.as_str(),
             }),
             current: self.current_profile().map(|profile| RenderProfile {
                 id: profile.account_id.as_deref().unwrap_or(profile.profile_name.as_str()),
                 label: profile.profile_name.as_str(),
                 is_current: profile.is_current,
                 agent_type: profile.kind.as_str(),
+                window_label: profile.chart_data.quota_window_label.as_str(),
             }),
         }
     }
@@ -1724,7 +1726,7 @@ fn render_account_detail(
         }
         if let Some(w) = pick_weekly_window(usage) {
             lines.push(Line::from(format!(
-                "Weekly: {:.0}% used, reset in {}",
+                "Quota: {:.0}% used, reset in {}",
                 w.used_percent, format_duration_short(w.reset_after_seconds)
             )));
         }
@@ -1999,6 +2001,7 @@ fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: u
                 label: profile.profile_name.as_str(),
                 is_current: profile.is_current,
                 agent_type: profile.kind.as_str(),
+                window_label: profile.chart_data.quota_window_label.as_str(),
             },
             style: ChartSeriesStyle {
                 color_slot: index,
@@ -2225,6 +2228,43 @@ mod tests {
     }
 
     #[test]
+    fn account_detail_uses_quota_label_for_longer_windows() {
+        let profile = ProfileEntry {
+            kind: ProfileKind::Copilot,
+            saved_name: Some("teamt5-it".to_string()),
+            profile_name: "teamt5-it".to_string(),
+            snapshot: serde_json::json!({}),
+            usage_view: UsageReadResult {
+                usage: Some(UsageResponse {
+                    email: Some("teamt5-it".to_string()),
+                    plan_type: Some("business".to_string()),
+                    rate_limit: Some(crate::usage::UsageRateLimit {
+                        primary_window: None,
+                        secondary_window: Some(crate::usage::UsageWindow {
+                            used_percent: 0.0,
+                            limit_window_seconds: 2_592_000,
+                            reset_at: 1_800_000_000,
+                            reset_after_seconds: 2_550_000,
+                        }),
+                    }),
+                }),
+                source: UsageSource::Api,
+                fetched_at: Some(1_700_000_000),
+                stale: false,
+            },
+            account_id: Some("copilot-teamt5-it".to_string()),
+            is_current: true,
+            chart_data: ProfileChartData::empty("no usage data"),
+        };
+
+        let lines = render_account_detail(Some(&profile), None);
+        let rendered = lines.iter().map(Line::to_string).collect::<Vec<_>>();
+
+        assert!(rendered.iter().any(|line| line.starts_with("Quota: 0% used, reset in ")));
+        assert!(!rendered.iter().any(|line| line.starts_with("Weekly:")));
+    }
+
+    #[test]
     fn refresh_tasks_panel_renders_cron_and_background_status() {
         let cron_status = CronStatus {
             installed: true,
@@ -2394,6 +2434,7 @@ mod tests {
             is_current: true,
             chart_data: ProfileChartData {
                 seven_day_points: vec![ChartPoint { x: 7.0, y: 14.0 }],
+                quota_window_label: "7d".to_string(),
                 five_hour_band: OwnedFiveHourBandState {
                     available: true,
                     used_percent: Some(12.0),
