@@ -317,14 +317,13 @@ fn normalize_account_name(raw: &str) -> Result<String> {
 /// Map a raw Claude usage API JSON response + subscription_type to UsageResponse.
 /// `now` is the current unix timestamp in seconds (injected for testability).
 pub fn map_claude_usage_response(raw: &Value, subscription_type: &str, now: i64) -> Option<UsageResponse> {
-    let five_hour = raw
-        .get("five_hour")
-        .and_then(|window| parse_claude_usage_window(window, 18_000, now));
-    let seven_day = raw
-        .get("seven_day")
-        .and_then(|window| parse_claude_usage_window(window, 604_800, now));
+    let five_hour_raw = find_claude_usage_window(raw, "five_hour", "fiveHour");
+    let seven_day_raw = find_claude_usage_window(raw, "seven_day", "sevenDay");
+    let five_hour = five_hour_raw.and_then(|window| parse_claude_usage_window(window, 18_000, now));
+    let seven_day = seven_day_raw.and_then(|window| parse_claude_usage_window(window, 604_800, now));
+    let has_known_window_shape = five_hour_raw.is_some() || seven_day_raw.is_some();
 
-    if five_hour.is_none() && seven_day.is_none() {
+    if !has_known_window_shape {
         return None;
     }
 
@@ -339,9 +338,19 @@ pub fn map_claude_usage_response(raw: &Value, subscription_type: &str, now: i64)
 }
 
 fn parse_claude_usage_window(value: &Value, limit_window_seconds: i64, now: i64) -> Option<UsageWindow> {
-    let utilization = value.get("utilization")?.as_f64()?;
-    let resets_at = value.get("resets_at")?.as_str()?;
-    let reset_at = parse_rfc3339_unix(resets_at).map(|t| (t + 30) / 60 * 60)?;
+    let utilization = value
+        .get("utilization")
+        .or_else(|| value.get("used_percent"))
+        .or_else(|| value.get("usedPercent"))
+        .or_else(|| value.get("percent"))
+        .and_then(Value::as_f64)?;
+    let reset_at = value
+        .get("resets_at")
+        .or_else(|| value.get("resetsAt"))
+        .or_else(|| value.get("reset_at"))
+        .or_else(|| value.get("resetAt"))
+        .and_then(parse_reset_timestamp)
+        .map(|t| (t + 30) / 60 * 60)?;
 
     Some(UsageWindow {
         used_percent: utilization.clamp(0.0, 100.0),
@@ -349,6 +358,63 @@ fn parse_claude_usage_window(value: &Value, limit_window_seconds: i64, now: i64)
         reset_at,
         reset_after_seconds: (reset_at - now).max(0),
     })
+}
+
+fn find_claude_usage_window<'a>(raw: &'a Value, snake_key: &str, camel_key: &str) -> Option<&'a Value> {
+    const ROOT_KEYS: [&str; 6] = [
+        "",
+        "usage",
+        "rate_limit",
+        "rateLimit",
+        "limits",
+        "windows",
+    ];
+    const WINDOW_CONTAINER_KEYS: [&str; 2] = ["windows", "rate_limit"];
+
+    for root_key in ROOT_KEYS {
+        let root = if root_key.is_empty() {
+            raw
+        } else {
+            match raw.get(root_key) {
+                Some(value) => value,
+                None => continue,
+            }
+        };
+
+        if let Some(window) = root.get(snake_key).or_else(|| root.get(camel_key)) {
+            return Some(window);
+        }
+
+        for nested_key in WINDOW_CONTAINER_KEYS {
+            if let Some(window) = root
+                .get(nested_key)
+                .and_then(|nested| nested.get(snake_key).or_else(|| nested.get(camel_key)))
+            {
+                return Some(window);
+            }
+        }
+    }
+
+    None
+}
+
+fn parse_reset_timestamp(value: &Value) -> Option<i64> {
+    if let Some(text) = value.as_str() {
+        return parse_rfc3339_unix(text);
+    }
+    let unix = value
+        .as_i64()
+        .or_else(|| value.as_u64().and_then(|raw| i64::try_from(raw).ok()))?;
+    Some(normalize_unix_timestamp(unix))
+}
+
+fn normalize_unix_timestamp(ts: i64) -> i64 {
+    // Accept unix milliseconds while keeping second precision in storage.
+    if ts.abs() >= 1_000_000_000_000 {
+        ts / 1000
+    } else {
+        ts
+    }
 }
 
 /// Parse an RFC3339 datetime string like "2025-11-04T04:59:59.943648+00:00"
@@ -758,6 +824,38 @@ mod tests {
         let seven_d = rl.secondary_window.as_ref().unwrap();
         assert_eq!(seven_d.limit_window_seconds, 604_800);
         assert_eq!(seven_d.used_percent, 28.0);
+    }
+
+    #[test]
+    fn map_claude_usage_response_accepts_rate_limit_camel_case_shape() {
+        let now = 1_730_000_000_i64;
+        let raw = serde_json::json!({
+            "rateLimit": {
+                "fiveHour": { "utilization": 40.0, "resetsAt": "2025-10-27T04:59:59.000000+00:00" },
+                "sevenDay": { "utilization": 28.0, "resetsAt": "2025-10-29T04:59:59.000000+00:00" }
+            }
+        });
+
+        let response = map_claude_usage_response(&raw, "team", now).unwrap();
+        let rl = response.rate_limit.as_ref().unwrap();
+        assert_eq!(response.plan_type.as_deref(), Some("team"));
+        assert_eq!(rl.primary_window.as_ref().unwrap().used_percent, 40.0);
+        assert_eq!(rl.secondary_window.as_ref().unwrap().used_percent, 28.0);
+    }
+
+    #[test]
+    fn map_claude_usage_response_accepts_null_reset_known_shape() {
+        let now = 1_730_000_000_i64;
+        let raw = serde_json::json!({
+            "five_hour": { "utilization": 0.0, "resets_at": null },
+            "seven_day": { "utilization": 0.0, "resets_at": null }
+        });
+
+        let response = map_claude_usage_response(&raw, "team", now).unwrap();
+        let rl = response.rate_limit.as_ref().unwrap();
+        assert_eq!(response.plan_type.as_deref(), Some("team"));
+        assert!(rl.primary_window.is_none());
+        assert!(rl.secondary_window.is_none());
     }
 
     #[test]
