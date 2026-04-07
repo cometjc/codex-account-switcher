@@ -1730,11 +1730,13 @@ fn render_account_detail(
                 w.used_percent, format_duration_short(w.reset_after_seconds)
             )));
         }
-        if let Some(w) = pick_five_hour_window(usage) {
-            lines.push(Line::from(format!(
-                "5h: {:.0}% used, reset in {}",
-                w.used_percent, format_duration_short(w.reset_after_seconds)
-            )));
+        if profile.kind != ProfileKind::Copilot {
+            if let Some(w) = pick_five_hour_window(usage) {
+                lines.push(Line::from(format!(
+                    "5h: {:.0}% used, reset in {}",
+                    w.used_percent, format_duration_short(w.reset_after_seconds)
+                )));
+            }
         }
     }
 
@@ -1944,7 +1946,7 @@ fn auto_y_lower(profiles: &[ProfileEntry]) -> f64 {
     if min_y.is_infinite() {
         return 0.0;
     }
-    ((min_y - END_LABEL_Y_PADDING_PERCENT) / 5.0).floor() * 5.0
+    (((min_y - END_LABEL_Y_PADDING_PERCENT) / 5.0).floor() * 5.0).max(0.0)
 }
 
 fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: usize) -> ChartState<'a> {
@@ -2265,6 +2267,48 @@ mod tests {
     }
 
     #[test]
+    fn account_detail_hides_five_hour_line_for_copilot() {
+        let profile = ProfileEntry {
+            kind: ProfileKind::Copilot,
+            saved_name: Some("teamt5-it".to_string()),
+            profile_name: "teamt5-it".to_string(),
+            snapshot: serde_json::json!({}),
+            usage_view: UsageReadResult {
+                usage: Some(UsageResponse {
+                    email: Some("teamt5-it".to_string()),
+                    plan_type: Some("business".to_string()),
+                    rate_limit: Some(crate::usage::UsageRateLimit {
+                        primary_window: Some(crate::usage::UsageWindow {
+                            used_percent: 70.0,
+                            limit_window_seconds: 18_000,
+                            reset_at: 1_800_000_000,
+                            reset_after_seconds: 1_200,
+                        }),
+                        secondary_window: Some(crate::usage::UsageWindow {
+                            used_percent: 42.0,
+                            limit_window_seconds: 2_592_000,
+                            reset_at: 1_800_000_000,
+                            reset_after_seconds: 2_000_000,
+                        }),
+                    }),
+                }),
+                source: UsageSource::Api,
+                fetched_at: Some(1_700_000_000),
+                stale: false,
+            },
+            account_id: Some("copilot-teamt5-it".to_string()),
+            is_current: true,
+            chart_data: ProfileChartData::empty("no usage data"),
+        };
+
+        let lines = render_account_detail(Some(&profile), None);
+        let rendered = lines.iter().map(Line::to_string).collect::<Vec<_>>();
+
+        assert!(rendered.iter().any(|line| line.starts_with("Quota: 42% used, reset in ")));
+        assert!(!rendered.iter().any(|line| line.starts_with("5h: ")));
+    }
+
+    #[test]
     fn refresh_tasks_panel_renders_cron_and_background_status() {
         let cron_status = CronStatus {
             installed: true,
@@ -2455,7 +2499,7 @@ mod tests {
             },
         }];
 
-        assert_eq!(auto_y_lower(&profiles), -5.0);
+        assert_eq!(auto_y_lower(&profiles), 0.0);
     }
 
     #[test]
