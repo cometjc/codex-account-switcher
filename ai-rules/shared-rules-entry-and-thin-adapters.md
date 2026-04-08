@@ -2,7 +2,7 @@
 
 ## 與其他 baseline 章節的分工
 
-- **同步與採納決策**（與上游 diff、逐條討論）：見 [adoption-workflow.md](adoption-workflow.md) 與 [shared-baseline-sync-and-local-adoption.md](shared-baseline-sync-and-local-adoption.md)。
+- **同步與採納決策**（與上游 diff、逐條討論）：見 `skills/new-rule/SKILL.md`。
 - **本章**只約束：**本 repo 內**如何把「共用／baseline 規則」接進目錄結構與各 AI 工具設定，避免雙源與漏接線。
 
 ## 核心要求

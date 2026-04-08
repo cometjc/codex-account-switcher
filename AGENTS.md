@@ -1,7 +1,7 @@
 # Governance
 
 - 本 `AGENTS.md` 為本 repo 的治理權威入口。
-- 與組織 shared baseline 對齊之正式章節見下方 [共同 baseline 章節](#共同-baseline-章節)（`ai-rules/*.md`）；後續同步請依該目錄內之 adoption workflow 執行。
+- 與組織 shared baseline 對齊之正式章節見下方 [共同 baseline 章節](#共同-baseline-章節)（`ai-rules/*.md`）；後續同步請依 `skills/new-rule/SKILL.md` 執行。
 
 ---
 
@@ -45,6 +45,8 @@
 - Diff behavior between main and your changes when relevant
 - Ask yourself: "Would a staff engineer approve this?"
 - Run tests, check logs, demonstrate correctness
+- 若問題提出時附有 tmux app 即時畫面可對照，且 `make test` 成功後會讓 app hot reload 到新版本，則完成驗證前必須重新查看同一個 tmux 畫面，確認 UI 問題已在 live app 中實際消失
+- 若重看 tmux live 畫面後仍有落差，不能只以測試綠燈結案；必須繼續修正，並把該 live 誤差補進回歸測試涵蓋範圍
 
 ---
 
@@ -82,8 +84,6 @@
 
 以下檔案由組織 shared baseline 採納至本 repo；與上游的採納錨點由 baseline 倉庫之 `adopted/agent-switch` 分支標示（由維護者在每次完成同步後更新）。
 
-- [ai-rules/adoption-workflow.md](ai-rules/adoption-workflow.md)
-- [ai-rules/shared-baseline-sync-and-local-adoption.md](ai-rules/shared-baseline-sync-and-local-adoption.md)
 - [ai-rules/shared-rules-entry-and-thin-adapters.md](ai-rules/shared-rules-entry-and-thin-adapters.md)
 - [ai-rules/commit-each-minimum-viable-change.md](ai-rules/commit-each-minimum-viable-change.md)
 - [ai-rules/before-new-mvc-assess-existing-dirty-tree.md](ai-rules/before-new-mvc-assess-existing-dirty-tree.md)
@@ -129,3 +129,21 @@
 
 ## Agent-Specific Notes
 - If Python tooling is introduced for repo automation, use `uv` workflows (`uv run`, `uv pip`) instead of `pip`.
+### 開發流程
+
+所有 plan 的實作流程固定為：
+
+```
+plan[1..n] -> split to lanes[1..m] -> 4a parallel-lane flow（`plugins/parallel-lane-dev/`、`npm run pld:*`）
+```
+
+- 收到實作任務時，先確認 plan 拆分完成
+- 將 plan 切分為獨立 lanes
+- 以 4a parallel-lane flow 執行各 lane（腳本 symlink 自 `agent-plugins` 套件；技能 `plugins/parallel-lane-dev/skills/parallel-lane-dev/SKILL.md`）
+- 不可跳過 lane 拆分直接實作
+- 若使用者提供 tmux app 即時畫面作為 UI 問題參考，則在 `make test` 成功並觸發 hot reload 後，必須回看同一個 tmux pane；若 live UI 仍有偏差，該偏差要在繼續修正時一併補進測試
+
+### Build Rule
+
+Always use `make test` as the default verification command for Rust changes.  
+Use `cargo test` only for explicit quick local checks or when the user explicitly requests it.
