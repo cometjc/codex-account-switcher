@@ -67,12 +67,13 @@
 ---
 
 ## Task Management
-1. **Plan First**: Write plan to `tasks/todo.md` with checkable items
-2. **Verify Plan**: Check in before starting implementation
-3. **Track Progress**: Mark items complete as you go
-4. **Explain Changes**: High-level summary at each step
-5. **Document Results**: Add review section to `tasks/todo.md`
-6. **Capture Lessons**: Update `tasks/lessons.md` after corrections
+1. **Dirty Tree Gate**: Before writing `tasks/todo.md`, session `plan.md`, or implementation files, inspect `git status`; if the current tree is dirty and the dirty paths are not the exact work you are continuing, create and switch to a dedicated worktree first, then do planning and follow-up work there.
+2. **Plan First**: Write plan to `tasks/todo.md` with checkable items
+3. **Verify Plan**: Check in before starting implementation
+4. **Track Progress**: Mark items complete as you go
+5. **Explain Changes**: High-level summary at each step
+6. **Document Results**: Add review section to `tasks/todo.md`
+7. **Capture Lessons**: Update `tasks/lessons.md` after corrections
 
 ---
 

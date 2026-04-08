@@ -1,5 +1,6 @@
 # Lessons
 
+- 當主要工作樹已經是 dirty tree，而新請求不是明確要求在同一棵樹延續既有 WIP 時，必須先檢查 `git status`、建立/切換到 dedicated worktree，之後才開始寫 `plan.md`、`tasks/todo.md` 或後續實作。
 - 當使用者指出 shared-baseline 的推送/同步更新流程不是一般開發治理規則時，不要再把它放進 `ai-rules/`；這類帶 trigger/decision/exit 的流程應集中到 shared repo 的對應 `skills/*.md`，並同步移除索引中的舊章節，避免 skill 與 `ai-rules/` 雙重權威來源。
 - 當用 `new-rule` 做 baseline adoption review 且已有 adopted baseline 時，預設用雙 ref 形式比較正式規則面，例如 `git diff adopted/<project> main -- . ':(exclude)skills/*'`；`skills/` 預設排除，只有任務本身明確在改 workflow skill 時才納入。
 - 當使用者要求用 **parallel-lane 流程**完成剩下全部計畫時，不能只在本地直接做一大塊修改；要先把剩餘 scope 全部寫進 central executor 的 execution / plan / lanes，再沿 lane truth 推進與收斂（實作見 `parallel-lane-dev` 倉庫）。
