@@ -54,3 +54,7 @@
 - 當 chart end-label 在 live pane 中消失時，不要只驗證一般 layout case；要特別檢查「plot glyph + 5h band 已佔滿所有候選位」的情況，必要時提供 force-fallback 最小標籤，避免整個 profile tag 消失。
 
 - 當使用者對 5h band/subframe 的產品語意明確指定「用歷史高使用量窗口的平均轉換率」，不要沿用偏保守的最大歷史 rate；要先把排序鍵、取樣數（如 top3）、以及是映射到當前 5h 還是 100% 5h 一次問清楚。
+- 當使用者要的是「reset 後尚未開始使用」的 zero-state，不要把條件寫成「active window 完全沒有 observation」；cron/app 會持續記錄 0/0 snapshots，所以應判定為「active window 內沒有任何正值使用」才對。
+- 當使用者糾正 zero-state chart 的呈現語意時，不要把 shared anchor 與 origin point 視為二選一；單一 zero-state 可以保留 shared anchor，但仍必須明確畫出 `(0,0)` 的資料點。
+- 當使用者進一步指定 zero-state anchor 的幾何形狀時，要把「文字存在」和「連接關係正確」分開驗證；像單一 `┌─ xxx`、多個 `┌─/├─` 並貼著原點這種 branch 形狀，必須直接寫進 render regression tests，不能只驗證文案內容。
+- 當使用者指定多個 reset countdown 的選擇規則時，不要偷懶用固定視窗優先序（例如永遠偏 7d）；要把真正的產品語意寫死，例如「兩者都滿時取較長 countdown」，並同步補進 spec 與測試案例。
