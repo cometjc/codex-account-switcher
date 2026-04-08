@@ -38,6 +38,7 @@ pub struct ProfileChartData {
     pub quota_window_label: String,
     pub five_hour_band: OwnedFiveHourBandState,
     pub five_hour_subframe: OwnedFiveHourSubframeState,
+    pub is_zero_state: bool,
 }
 
 impl ProfileChartData {
@@ -62,6 +63,7 @@ impl ProfileChartData {
                 upper_y: None,
                 reason: Some(reason.to_string()),
             },
+            is_zero_state: false,
         }
     }
 }

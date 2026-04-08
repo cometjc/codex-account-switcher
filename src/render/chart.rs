@@ -90,9 +90,14 @@ fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_stat
         .collect();
 
     // Pre-compute normalized quota-window line points for each series.
+    // Zero-state series render as a single point at the actual chart origin
+    // instead of their full observation history (which would draw a flat line at y=0).
     let series_points = visible_series
         .iter()
         .map(|series| {
+            if series.is_zero_state {
+                return vec![(0.0, 0.0_f64.clamp(y_bounds[0], y_bounds[1]))];
+            }
             series
                 .points
                 .iter()
@@ -180,7 +185,32 @@ fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_stat
     let graph_area = chart_graph_area(area, x_label_lo.as_str(), [y_label_lo.as_str(), y_label_q1.as_str(), y_label_mid.as_str(), y_label_q3.as_str(), y_label_hi.as_str()]);
     let blocked_cells = apply_band_backgrounds(frame, graph_area, &band_rects, x_bounds, y_bounds);
     let occupied_cells = collect_occupied_plot_cells(frame, graph_area);
-    render_end_labels(frame, graph_area, &visible_series, x_bounds, y_bounds, &occupied_cells, &blocked_cells);
+    let zero_state_series = visible_series
+        .iter()
+        .copied()
+        .filter(|series| series.is_zero_state)
+        .collect::<Vec<_>>();
+    let normal_series = visible_series
+        .iter()
+        .copied()
+        .filter(|series| !series.is_zero_state)
+        .collect::<Vec<_>>();
+
+    if !zero_state_series.is_empty() {
+        render_zero_state_labels(
+            frame,
+            graph_area,
+            x_bounds,
+            y_bounds,
+            &zero_state_series,
+            &occupied_cells,
+            &blocked_cells,
+        );
+    }
+
+    let occupied_cells = collect_occupied_plot_cells(frame, graph_area);
+    render_end_labels(frame, graph_area, &normal_series, x_bounds, y_bounds, &occupied_cells, &blocked_cells);
+    render_zero_state_origin_marker(frame, graph_area, x_bounds, y_bounds, &zero_state_series);
 }
 
 fn chart_graph_area(area: Rect, first_x_label: &str, y_labels: [&str; 5]) -> Rect {
@@ -312,6 +342,142 @@ fn render_end_labels(
     }
 }
 
+fn render_zero_state_labels(
+    frame: &mut Frame,
+    graph_area: Rect,
+    x_bounds: [f64; 2],
+    y_bounds: [f64; 2],
+    zero_state_series: &[&super::ChartSeries<'_>],
+    _occupied_cells: &HashSet<(u16, u16)>,
+    _blocked_cells: &HashSet<(u16, u16)>,
+) {
+    if zero_state_series.is_empty() || graph_area.width == 0 || graph_area.height == 0 {
+        return;
+    }
+
+    let origin_x = project_x(0.0, graph_area, x_bounds);
+    let origin_y = project_y(0.0, graph_area, y_bounds);
+    if origin_y <= graph_area.top() {
+        return;
+    }
+
+    let branch_rows = zero_state_branch_rows(origin_y, graph_area, zero_state_series.len());
+    for ((series, row), branch_kind) in zero_state_series
+        .iter()
+        .zip(branch_rows.iter())
+        .zip(zero_state_branch_kinds(zero_state_series.len()).iter())
+    {
+        let label = zero_state_branch_text(series, zero_state_series.len());
+        let branch_style = Style::default()
+            .fg(SERIES_COLORS[series.style.color_slot % SERIES_COLORS.len()])
+            .bg(LABEL_BG_COLOR)
+            .add_modifier(Modifier::BOLD);
+        let label_x = origin_x.saturating_add(3);
+        let available = graph_area.right().saturating_sub(label_x) as usize;
+        if available == 0 {
+            continue;
+        }
+
+        frame.buffer_mut()[(origin_x, *row)]
+            .set_symbol(branch_kind.symbol())
+            .set_style(branch_style);
+
+        if origin_x.saturating_add(1) < graph_area.right() {
+            frame.buffer_mut()[(origin_x.saturating_add(1), *row)]
+                .set_symbol("─")
+                .set_style(branch_style);
+        }
+
+        if origin_x.saturating_add(2) < graph_area.right() {
+            frame.buffer_mut()[(origin_x.saturating_add(2), *row)]
+                .set_symbol(" ")
+                .set_bg(LABEL_BG_COLOR);
+        }
+
+        let clipped = label.chars().take(available).collect::<String>();
+        frame.buffer_mut().set_string(label_x, *row, clipped, branch_style);
+    }
+}
+
+fn zero_state_branch_rows(origin_y: u16, graph_area: Rect, count: usize) -> Vec<u16> {
+    if count == 0 || origin_y == graph_area.top() {
+        return Vec::new();
+    }
+
+    let available = origin_y.saturating_sub(graph_area.top()) as usize;
+    let visible_count = count.min(available);
+    let start_y = origin_y.saturating_sub(visible_count as u16);
+    (0..visible_count)
+        .map(|offset| start_y.saturating_add(offset as u16))
+        .collect()
+}
+
+fn zero_state_branch_text(series: &super::ChartSeries<'_>, branch_count: usize) -> String {
+    if branch_count == 1 {
+        format!(
+            "[{}] {} reset / no usage yet",
+            series.profile.agent_type, series.profile.label
+        )
+    } else {
+        format!("[{}] {}", series.profile.agent_type, series.profile.label)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ZeroStateBranchKind {
+    First,
+    Continuing,
+}
+
+impl ZeroStateBranchKind {
+    fn symbol(self) -> &'static str {
+        match self {
+            Self::First => "┌",
+            Self::Continuing => "├",
+        }
+    }
+}
+
+fn zero_state_branch_kinds(count: usize) -> Vec<ZeroStateBranchKind> {
+    (0..count)
+        .map(|index| {
+            if index == 0 {
+                ZeroStateBranchKind::First
+            } else {
+                ZeroStateBranchKind::Continuing
+            }
+        })
+        .collect()
+}
+
+fn render_zero_state_origin_marker(
+    frame: &mut Frame,
+    graph_area: Rect,
+    x_bounds: [f64; 2],
+    y_bounds: [f64; 2],
+    zero_state_series: &[&super::ChartSeries<'_>],
+) {
+    if zero_state_series.is_empty()
+        || graph_area.width == 0
+        || graph_area.height == 0
+        || !(x_bounds[0] <= 0.0 && 0.0 <= x_bounds[1])
+        || !(y_bounds[0] <= 0.0 && 0.0 <= y_bounds[1])
+    {
+        return;
+    }
+
+    let marker_series = zero_state_series
+        .iter()
+        .copied()
+        .find(|series| series.style.is_selected)
+        .unwrap_or(zero_state_series[0]);
+    let marker_x = project_x(0.0, graph_area, x_bounds);
+    let marker_y = project_y(0.0, graph_area, y_bounds);
+    frame.buffer_mut()[(marker_x, marker_y)].set_symbol("•").set_style(
+        Style::default().fg(SERIES_COLORS[marker_series.style.color_slot % SERIES_COLORS.len()]),
+    );
+}
+
 fn project_x(x: f64, graph_area: Rect, x_bounds: [f64; 2]) -> u16 {
     if graph_area.width <= 1 || (x_bounds[1] - x_bounds[0]).abs() < f64::EPSILON {
         return graph_area.left();
@@ -428,6 +594,7 @@ fn layout_end_labels(
     let mut placed = Vec::new();
     let mut placed_anchor_indices = HashSet::new();
     let mut reserved = HashSet::new();
+    let label_exclusion_cells = expand_label_exclusion_cells(blocked_cells, graph_area);
     const PREFERRED_LABEL_OFFSET: u16 = 3;
     const FALLBACK_LABEL_OFFSET: u16 = 1;
 
@@ -472,7 +639,7 @@ fn layout_end_labels(
                 let label_cells_ok = (0..width).all(|dx| {
                     let cell = (x + dx, y);
                     !occupied_cells.contains(&cell)
-                        && !blocked_cells.contains(&cell)
+                        && !label_exclusion_cells.contains(&cell)
                         && !reserved.contains(&cell)
                 });
                 if !label_cells_ok {
@@ -565,7 +732,10 @@ fn layout_end_labels(
             }
 
             for (x, y) in candidates {
-                if !(0..width).all(|dx| !reserved.contains(&(x + dx, y))) {
+                if !(0..width).all(|dx| {
+                    let cell = (x + dx, y);
+                    !reserved.contains(&cell) && !label_exclusion_cells.contains(&cell)
+                }) {
                     continue;
                 }
                 let attach_x = connector_attach_x(x, width, anchor.x);
@@ -602,6 +772,30 @@ fn layout_end_labels(
     }
 
     placed
+}
+
+fn expand_label_exclusion_cells(
+    blocked_cells: &HashSet<(u16, u16)>,
+    graph_area: Rect,
+) -> HashSet<(u16, u16)> {
+    let mut expanded = HashSet::new();
+    for &(x, y) in blocked_cells {
+        for dx in -1i16..=1 {
+            for dy in -1i16..=1 {
+                let expanded_x = x as i16 + dx;
+                let expanded_y = y as i16 + dy;
+                if expanded_x < graph_area.left() as i16
+                    || expanded_x >= graph_area.right() as i16
+                    || expanded_y < graph_area.top() as i16
+                    || expanded_y >= graph_area.bottom() as i16
+                {
+                    continue;
+                }
+                expanded.insert((expanded_x as u16, expanded_y as u16));
+            }
+        }
+    }
+    expanded
 }
 
 fn connector_cells(
@@ -802,6 +996,7 @@ mod tests {
                 upper_y: Some(35.0),
                 reason: None,
             },
+            is_zero_state: false,
         };
 
         assert_eq!(format_end_label(&series), "[codex 7d] Alpha 76%/40%");
@@ -834,6 +1029,7 @@ mod tests {
                 upper_y: None,
                 reason: Some("no 5h window"),
             },
+            is_zero_state: false,
         };
 
         assert_eq!(format_end_label(&series), "[copilot 30d] teamt5-it 70%");
@@ -890,6 +1086,7 @@ mod tests {
                         upper_y: Some(35.0),
                         reason: None,
                     },
+                    is_zero_state: false,
                 }],
                 seven_day_points: vec![
                     ChartPoint { x: 0.0, y: 8.0 },
@@ -948,6 +1145,333 @@ mod tests {
     }
 
     #[test]
+    fn render_chart_renders_single_zero_state_with_anchor_and_origin_marker() {
+        let state = MockState {
+            selection: SelectionState {
+                selected: Some(RenderProfile {
+                    id: "comet",
+                    label: "comet",
+                    is_current: true,
+                    agent_type: "codex",
+                    window_label: "7d",
+                }),
+                current: Some(RenderProfile {
+                    id: "comet",
+                    label: "comet",
+                    is_current: true,
+                    agent_type: "codex",
+                    window_label: "7d",
+                }),
+            },
+            chart: ChartState {
+                series: vec![ChartSeries {
+                    profile: RenderProfile {
+                        id: "comet",
+                        label: "comet",
+                        is_current: true,
+                        agent_type: "codex",
+                        window_label: "7d",
+                    },
+                    style: ChartSeriesStyle {
+                        color_slot: 0,
+                        is_selected: true,
+                        is_current: true,
+                        hidden: false,
+                    },
+                    points: vec![],
+                    last_seven_day_percent: None,
+                    five_hour_used_percent: None,
+                    five_hour_subframe: FiveHourSubframeState {
+                        available: false,
+                        start_x: None,
+                        end_x: None,
+                        lower_y: None,
+                        upper_y: None,
+                        reason: Some("zero-state"),
+                    },
+                    is_zero_state: true,
+                }],
+                seven_day_points: vec![],
+                five_hour_band: FiveHourBandState {
+                    available: false,
+                    used_percent: None,
+                    lower_y: None,
+                    upper_y: None,
+                    delta_seven_day_percent: None,
+                    delta_five_hour_percent: None,
+                    reason: Some("zero-state"),
+                },
+                five_hour_subframe: FiveHourSubframeState {
+                    available: false,
+                    start_x: None,
+                    end_x: None,
+                    lower_y: None,
+                    upper_y: None,
+                    reason: Some("zero-state"),
+                },
+                total_points: 0,
+                y_lower: 0.0,
+                y_upper: 100.0,
+                x_lower: 0.0,
+                x_upper: 7.0,
+                solo: false,
+                tab_zoom_label: None,
+                focused: false,
+                fullscreen: false,
+            },
+        };
+
+        let joined = render_lines(&state, 72, 18).join("\n");
+
+        assert!(
+            joined.contains("┌─ [codex] comet reset / no usage yet"),
+            "single zero-state series should render as a connected ┌─ anchor above the origin, got:\n{joined}"
+        );
+        assert!(
+            joined.contains("•"),
+            "expected a dedicated zero-state marker at the chart origin, got:\n{joined}"
+        );
+        assert!(!joined.contains("|comet"), "single zero-state series should not fan out a branch label, got:\n{joined}");
+    }
+
+    #[test]
+    fn render_chart_branches_multiple_zero_state_series_from_shared_anchor() {
+        let state = MockState {
+            selection: SelectionState {
+                selected: Some(RenderProfile {
+                    id: "alpha",
+                    label: "Alpha",
+                    is_current: true,
+                    agent_type: "codex",
+                    window_label: "7d",
+                }),
+                current: Some(RenderProfile {
+                    id: "beta",
+                    label: "Beta",
+                    is_current: false,
+                    agent_type: "copilot",
+                    window_label: "30d",
+                }),
+            },
+            chart: ChartState {
+                series: vec![
+                    ChartSeries {
+                        profile: RenderProfile {
+                            id: "alpha",
+                            label: "Alpha",
+                            is_current: true,
+                            agent_type: "codex",
+                            window_label: "7d",
+                        },
+                        style: ChartSeriesStyle {
+                            color_slot: 0,
+                            is_selected: true,
+                            is_current: true,
+                            hidden: false,
+                        },
+                        points: vec![],
+                        last_seven_day_percent: None,
+                        five_hour_used_percent: None,
+                        five_hour_subframe: FiveHourSubframeState {
+                            available: false,
+                            start_x: None,
+                            end_x: None,
+                            lower_y: None,
+                            upper_y: None,
+                            reason: Some("zero-state"),
+                        },
+                        is_zero_state: true,
+                    },
+                    ChartSeries {
+                        profile: RenderProfile {
+                            id: "beta",
+                            label: "Beta",
+                            is_current: false,
+                            agent_type: "copilot",
+                            window_label: "30d",
+                        },
+                        style: ChartSeriesStyle {
+                            color_slot: 1,
+                            is_selected: false,
+                            is_current: false,
+                            hidden: false,
+                        },
+                        points: vec![],
+                        last_seven_day_percent: None,
+                        five_hour_used_percent: None,
+                        five_hour_subframe: FiveHourSubframeState {
+                            available: false,
+                            start_x: None,
+                            end_x: None,
+                            lower_y: None,
+                            upper_y: None,
+                            reason: Some("zero-state"),
+                        },
+                        is_zero_state: true,
+                    },
+                ],
+                seven_day_points: vec![],
+                five_hour_band: FiveHourBandState {
+                    available: false,
+                    used_percent: None,
+                    lower_y: None,
+                    upper_y: None,
+                    delta_seven_day_percent: None,
+                    delta_five_hour_percent: None,
+                    reason: Some("zero-state"),
+                },
+                five_hour_subframe: FiveHourSubframeState {
+                    available: false,
+                    start_x: None,
+                    end_x: None,
+                    lower_y: None,
+                    upper_y: None,
+                    reason: Some("zero-state"),
+                },
+                total_points: 0,
+                y_lower: 0.0,
+                y_upper: 100.0,
+                x_lower: 0.0,
+                x_upper: 7.0,
+                solo: false,
+                tab_zoom_label: None,
+                focused: false,
+                fullscreen: false,
+            },
+        };
+
+        let lines = render_lines(&state, 72, 18);
+        let joined = lines.join("\n");
+
+        assert!(joined.contains("┌─ [codex] Alpha"), "expected first zero-state branch to use ┌─ geometry, got:\n{joined}");
+        assert!(joined.contains("├─ [copilot] Beta"), "expected second zero-state branch to use ├─ geometry, got:\n{joined}");
+        assert!(joined.contains("•"), "expected origin marker below the zero-state branches, got:\n{joined}");
+    }
+
+    #[test]
+    fn render_chart_keeps_zero_state_and_normal_series_coexisting() {
+        let state = MockState {
+            selection: SelectionState {
+                selected: Some(RenderProfile {
+                    id: "alpha",
+                    label: "Alpha",
+                    is_current: true,
+                    agent_type: "codex",
+                    window_label: "7d",
+                }),
+                current: Some(RenderProfile {
+                    id: "beta",
+                    label: "Beta",
+                    is_current: false,
+                    agent_type: "copilot",
+                    window_label: "30d",
+                }),
+            },
+            chart: ChartState {
+                series: vec![
+                    ChartSeries {
+                        profile: RenderProfile {
+                            id: "alpha",
+                            label: "Alpha",
+                            is_current: true,
+                            agent_type: "codex",
+                            window_label: "7d",
+                        },
+                        style: ChartSeriesStyle {
+                            color_slot: 0,
+                            is_selected: true,
+                            is_current: true,
+                            hidden: false,
+                        },
+                        points: vec![],
+                        last_seven_day_percent: None,
+                        five_hour_used_percent: None,
+                        five_hour_subframe: FiveHourSubframeState {
+                            available: false,
+                            start_x: None,
+                            end_x: None,
+                            lower_y: None,
+                            upper_y: None,
+                            reason: Some("zero-state"),
+                        },
+                        is_zero_state: true,
+                    },
+                    ChartSeries {
+                        profile: RenderProfile {
+                            id: "beta",
+                            label: "Beta",
+                            is_current: false,
+                            agent_type: "copilot",
+                            window_label: "30d",
+                        },
+                        style: ChartSeriesStyle {
+                            color_slot: 1,
+                            is_selected: false,
+                            is_current: false,
+                            hidden: false,
+                        },
+                        points: vec![
+                            ChartPoint { x: 0.0, y: 3.0 },
+                            ChartPoint { x: 7.0, y: 5.0 },
+                        ],
+                        last_seven_day_percent: Some(5.0),
+                        five_hour_used_percent: Some(2.0),
+                        five_hour_subframe: FiveHourSubframeState {
+                            available: false,
+                            start_x: None,
+                            end_x: None,
+                            lower_y: None,
+                            upper_y: None,
+                            reason: Some("no 5h window"),
+                        },
+                        is_zero_state: false,
+                    },
+                ],
+                seven_day_points: vec![
+                    ChartPoint { x: 0.0, y: 3.0 },
+                    ChartPoint { x: 7.0, y: 5.0 },
+                ],
+                five_hour_band: FiveHourBandState {
+                    available: false,
+                    used_percent: None,
+                    lower_y: None,
+                    upper_y: None,
+                    delta_seven_day_percent: None,
+                    delta_five_hour_percent: None,
+                    reason: Some("mixed"),
+                },
+                five_hour_subframe: FiveHourSubframeState {
+                    available: false,
+                    start_x: None,
+                    end_x: None,
+                    lower_y: None,
+                    upper_y: None,
+                    reason: Some("mixed"),
+                },
+                total_points: 2,
+                y_lower: 0.0,
+                y_upper: 100.0,
+                x_lower: 0.0,
+                x_upper: 7.0,
+                solo: false,
+                tab_zoom_label: None,
+                focused: false,
+                fullscreen: false,
+            },
+        };
+
+        let joined = render_lines(&state, 72, 18).join("\n");
+
+        assert!(
+            joined.contains("┌─ [codex] Alpha reset / no usage yet"),
+            "single zero-state series should keep a connected labeled anchor even when other series are visible, got:\n{joined}"
+        );
+        assert!(joined.contains("•"), "expected the zero-state origin marker to remain visible, got:\n{joined}");
+        assert!(!joined.contains("|Alpha"), "single zero-state series should not fan out a branch label when mixed with normal series, got:\n{joined}");
+        assert!(joined.contains("[copilot 30d] Beta 5%"), "expected normal end label to remain unchanged, got:\n{joined}");
+    }
+
+    #[test]
     fn render_chart_uses_compact_label_when_full_label_would_not_fit() {
         let state = MockState {
             selection: SelectionState {
@@ -995,6 +1519,7 @@ mod tests {
                         upper_y: None,
                         reason: Some("no 5h window"),
                     },
+                    is_zero_state: false,
                 }],
                 seven_day_points: vec![
                     ChartPoint { x: 0.0, y: 4.0 },
@@ -1084,6 +1609,7 @@ mod tests {
                             upper_y: None,
                             reason: Some("no 5h window"),
                         },
+                        is_zero_state: false,
                     },
                     ChartSeries {
                         profile: RenderProfile {
@@ -1113,6 +1639,7 @@ mod tests {
                             upper_y: None,
                             reason: Some("no 5h window"),
                         },
+                        is_zero_state: false,
                     },
                 ],
                 seven_day_points: vec![
@@ -1203,6 +1730,7 @@ mod tests {
                         upper_y: None,
                         reason: Some("insufficient 5h overlap"),
                     },
+                    is_zero_state: false,
                 }],
                 seven_day_points: vec![
                     ChartPoint { x: 0.0, y: 12.0 },
@@ -1293,6 +1821,7 @@ mod tests {
                             upper_y: None,
                             reason: Some("no 5h window"),
                         },
+                        is_zero_state: false,
                     },
                     ChartSeries {
                         profile: RenderProfile {
@@ -1322,6 +1851,7 @@ mod tests {
                             upper_y: None,
                             reason: Some("no 5h window"),
                         },
+                        is_zero_state: false,
                     },
                 ],
                 seven_day_points: vec![
@@ -1431,6 +1961,7 @@ mod tests {
                             upper_y: Some(42.0),
                             reason: None,
                         },
+                        is_zero_state: false,
                     },
                     ChartSeries {
                         profile: RenderProfile {
@@ -1460,6 +1991,7 @@ mod tests {
                             upper_y: None,
                             reason: Some("no 5h window"),
                         },
+                        is_zero_state: false,
                     },
                 ],
                 seven_day_points: vec![
@@ -1552,6 +2084,7 @@ mod tests {
                             upper_y: None,
                             reason: Some("no usage"),
                         },
+                        is_zero_state: false,
                     },
                     ChartSeries {
                         profile: RenderProfile {
@@ -1587,6 +2120,7 @@ mod tests {
                             upper_y: Some(55.5),
                             reason: None,
                         },
+                        is_zero_state: false,
                     },
                     ChartSeries {
                         profile: RenderProfile {
@@ -1618,6 +2152,7 @@ mod tests {
                             upper_y: None,
                             reason: Some("no 5h window"),
                         },
+                        is_zero_state: false,
                     },
                 ],
                 seven_day_points: vec![],
@@ -1678,9 +2213,27 @@ mod tests {
         assert!(labels[0].text.contains("comet"));
     }
 
+    #[test]
+    fn layout_end_labels_keeps_one_row_gap_from_blocked_band_cells() {
+        let anchors = vec![LabelAnchor {
+            text: "tag".to_string(),
+            fallback_texts: vec![],
+            color: Color::Yellow,
+            x: 10,
+            y: 5,
+        }];
+
+        let graph_area = Rect::new(10, 0, 12, 10);
+        let blocked = (10..=15).map(|x| (x, 5)).collect::<HashSet<_>>();
+        let labels = layout_end_labels(&anchors, graph_area, &HashSet::new(), &blocked);
+
+        assert_eq!(labels.len(), 1);
+        assert_eq!(labels[0].y, 3, "label should skip the blocked row and its 1-cell safety margin");
+    }
+
 
     #[test]
-    fn layout_end_labels_forces_minimal_label_when_plot_and_band_claim_every_candidate() {
+    fn layout_end_labels_omits_label_when_band_claims_every_candidate() {
         let anchors = vec![LabelAnchor {
             text: "[codex 7d] comet 33%/14%".to_string(),
             fallback_texts: vec!["comet 33%".to_string(), "comet".to_string()],
@@ -1696,8 +2249,10 @@ mod tests {
         let blocked = occupied.clone();
         let labels = layout_end_labels(&anchors, graph_area, &occupied, &blocked);
 
-        assert_eq!(labels.len(), 1, "label should still place in force-fallback mode");
-        assert_eq!(labels[0].text, "[codex 7d] comet 33%/14%");
+        assert!(
+            labels.is_empty(),
+            "label should be omitted when every candidate would violate the blocked band exclusion zone"
+        );
     }
 
 
@@ -1715,7 +2270,13 @@ mod tests {
         let occupied = (0..80)
             .flat_map(|x| (0..12).filter(move |y| *y != 10).map(move |y| (x, y)))
             .collect::<HashSet<_>>();
-        let blocked = occupied.clone();
+        let blocked = (0..80)
+            .flat_map(|x| {
+                (0..12)
+                    .filter(move |y| !matches!(*y, 9..=11))
+                    .map(move |y| (x, y))
+            })
+            .collect::<HashSet<_>>();
 
         let labels = layout_end_labels(&anchors, graph_area, &occupied, &blocked);
 

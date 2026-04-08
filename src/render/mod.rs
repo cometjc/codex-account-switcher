@@ -92,6 +92,7 @@ pub struct ChartSeries<'a> {
     pub last_seven_day_percent: Option<f64>,
     pub five_hour_used_percent: Option<f64>,
     pub five_hour_subframe: FiveHourSubframeState<'a>,
+    pub is_zero_state: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

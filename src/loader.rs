@@ -506,20 +506,51 @@ fn build_profile_chart_data(
         .map(|window| build_weekly_history_from_profile_observations(window, &history.observations));
     let five_hour_histories = build_five_hour_histories_from_profile_observations(&history);
     let weekly_histories = build_weekly_histories_from_profile_observations(&history);
-    let five_hour_band = build_five_hour_band(weekly_window, five_hour_window);
-    let five_hour_subframe = build_five_hour_subframe(
+    let is_zero_state = is_zero_state_chart_series(
         weekly_window,
         five_hour_window,
         weekly_history.as_ref(),
-        &five_hour_histories,
-        &weekly_histories,
+        five_hour_histories.first(),
     );
+    let (five_hour_band, five_hour_subframe) = if is_zero_state {
+        (
+            OwnedFiveHourBandState {
+                available: false,
+                used_percent: None,
+                lower_y: None,
+                upper_y: None,
+                delta_seven_day_percent: None,
+                delta_five_hour_percent: None,
+                reason: Some("zero-state".to_string()),
+            },
+            OwnedFiveHourSubframeState {
+                available: false,
+                start_x: None,
+                end_x: None,
+                lower_y: None,
+                upper_y: None,
+                reason: Some("zero-state".to_string()),
+            },
+        )
+    } else {
+        (
+            build_five_hour_band(weekly_window, five_hour_window),
+            build_five_hour_subframe(
+                weekly_window,
+                five_hour_window,
+                weekly_history.as_ref(),
+                &five_hour_histories,
+                &weekly_histories,
+            ),
+        )
+    };
 
     Ok(ProfileChartData {
         seven_day_points,
         quota_window_label: format_quota_window_label(weekly_window.map(|window| window.limit_window_seconds)),
         five_hour_band,
         five_hour_subframe,
+        is_zero_state,
     })
 }
 
@@ -539,6 +570,30 @@ fn latest_five_hour_used_percent(history: &ProfileUsageHistory) -> f64 {
         .rev()
         .find_map(|obs| obs.five_hour_used_percent)
         .unwrap_or(0.0)
+}
+
+fn is_zero_state_chart_series(
+    weekly_window: Option<&UsageWindow>,
+    five_hour_window: Option<&UsageWindow>,
+    weekly_history: Option<&UsageWindowHistory>,
+    five_hour_history: Option<&UsageWindowHistory>,
+) -> bool {
+    let (Some(weekly_window), Some(five_hour_window)) = (weekly_window, five_hour_window) else {
+        return false;
+    };
+    weekly_window.used_percent == 0.0
+        && five_hour_window.used_percent == 0.0
+        && history_is_zero_or_empty(weekly_history)
+        && history_is_zero_or_empty(five_hour_history)
+}
+
+fn history_is_zero_or_empty(history: Option<&UsageWindowHistory>) -> bool {
+    history.is_none_or(|history| {
+        history
+            .observations
+            .iter()
+            .all(|observation| observation.used_percent == 0.0)
+    })
 }
 
 fn project_weekly_points_from_profile_observations(
@@ -1210,6 +1265,163 @@ mod tests {
             (actual_upper - expected_upper).abs() < 1e-9,
             "expected upper_y {expected_upper}, got {actual_upper}"
         );
+    }
+
+    #[test]
+    fn zero_state_chart_data_is_flagged_when_windows_are_zero_and_observations_are_absent() {
+        use crate::usage::{UsageRateLimit, UsageResponse, UsageWindow};
+
+        let cache_path = PathBuf::from("dummy_cache_zero_state.json");
+        let history_path =
+            std::env::temp_dir().join(format!("test_zero_state_{}.json", std::process::id()));
+        let usage_service = UsageService::new(cache_path, history_path.clone(), 300);
+        let now = 1_700_000_000;
+        let usage = UsageResponse {
+            email: None,
+            plan_type: Some("pro".to_string()),
+            rate_limit: Some(UsageRateLimit {
+                primary_window: Some(UsageWindow {
+                    used_percent: 0.0,
+                    limit_window_seconds: 604_800,
+                    reset_at: now + 604_800,
+                    reset_after_seconds: 604_800,
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: 0.0,
+                    limit_window_seconds: 18_000,
+                    reset_at: now + 1_800,
+                    reset_after_seconds: 1_800,
+                }),
+            }),
+        };
+
+        let chart_data = build_profile_chart_data(Some("zero-state"), Some(&usage), &usage_service).unwrap();
+
+        assert!(chart_data.is_zero_state, "expected zero-state series classification");
+        assert!(!chart_data.five_hour_band.available, "zero-state should suppress the 5h band");
+        assert!(!chart_data.five_hour_subframe.available, "zero-state should suppress the 5h subframe");
+
+        let _ = std::fs::remove_file(history_path);
+    }
+
+    #[test]
+    fn observed_zero_usage_series_still_counts_as_zero_state() {
+        use crate::usage::{UsageRateLimit, UsageReadResult, UsageResponse, UsageSource, UsageWindow};
+
+        let cache_path = PathBuf::from("dummy_cache_zero_observed.json");
+        let history_path =
+            std::env::temp_dir().join(format!("test_zero_observed_{}.json", std::process::id()));
+        let now = 1_700_000_000;
+        let observed_now = now + 60;
+        let usage_service =
+            UsageService::new(cache_path, history_path.clone(), 300).with_now_seconds(observed_now);
+        let usage = UsageResponse {
+            email: None,
+            plan_type: Some("pro".to_string()),
+            rate_limit: Some(UsageRateLimit {
+                primary_window: Some(UsageWindow {
+                    used_percent: 0.0,
+                    limit_window_seconds: 604_800,
+                    reset_at: now + 604_800,
+                    reset_after_seconds: 604_800,
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: 0.0,
+                    limit_window_seconds: 18_000,
+                    reset_at: now + 1_800,
+                    reset_after_seconds: 1_800,
+                }),
+            }),
+        };
+        usage_service
+            .record_usage_snapshot(
+                Some("zero-observed"),
+                &UsageReadResult {
+                    usage: Some(usage.clone()),
+                    source: UsageSource::Api,
+                    fetched_at: Some(observed_now),
+                    stale: false,
+                },
+            )
+            .unwrap();
+
+        let chart_data = build_profile_chart_data(Some("zero-observed"), Some(&usage), &usage_service).unwrap();
+
+        assert!(chart_data.is_zero_state, "repeated 0% observations after reset should still be zero-state");
+        assert!(!chart_data.five_hour_band.available, "zero-state should suppress the 5h band");
+        assert!(!chart_data.five_hour_subframe.available, "zero-state should suppress the 5h subframe");
+        assert!(!chart_data.seven_day_points.is_empty(), "observed series should still project points");
+
+        let _ = std::fs::remove_file(history_path);
+    }
+
+    #[test]
+    fn non_zero_observations_in_active_window_break_zero_state() {
+        use crate::usage::{UsageRateLimit, UsageReadResult, UsageResponse, UsageSource, UsageWindow};
+
+        let cache_path = PathBuf::from("dummy_cache_positive_observed.json");
+        let history_path =
+            std::env::temp_dir().join(format!("test_positive_observed_{}.json", std::process::id()));
+        let now = 1_700_000_000;
+        let usage_service =
+            UsageService::new(cache_path, history_path.clone(), 300).with_now_seconds(now + 120);
+        let positive_usage = UsageResponse {
+            email: None,
+            plan_type: Some("pro".to_string()),
+            rate_limit: Some(UsageRateLimit {
+                primary_window: Some(UsageWindow {
+                    used_percent: 12.0,
+                    limit_window_seconds: 604_800,
+                    reset_at: now + 604_800,
+                    reset_after_seconds: 604_800,
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: 4.0,
+                    limit_window_seconds: 18_000,
+                    reset_at: now + 1_800,
+                    reset_after_seconds: 1_800,
+                }),
+            }),
+        };
+        usage_service
+            .record_usage_snapshot(
+                Some("positive-observed"),
+                &UsageReadResult {
+                    usage: Some(positive_usage),
+                    source: UsageSource::Api,
+                    fetched_at: Some(now + 120),
+                    stale: false,
+                },
+            )
+            .unwrap();
+
+        let zero_usage = UsageResponse {
+            email: None,
+            plan_type: Some("pro".to_string()),
+            rate_limit: Some(UsageRateLimit {
+                primary_window: Some(UsageWindow {
+                    used_percent: 0.0,
+                    limit_window_seconds: 604_800,
+                    reset_at: now + 604_800,
+                    reset_after_seconds: 604_800,
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: 0.0,
+                    limit_window_seconds: 18_000,
+                    reset_at: now + 1_800,
+                    reset_after_seconds: 1_800,
+                }),
+            }),
+        };
+
+        let chart_data = build_profile_chart_data(Some("positive-observed"), Some(&zero_usage), &usage_service).unwrap();
+
+        assert!(
+            !chart_data.is_zero_state,
+            "a series with positive observations in the active window must not be treated as zero-state"
+        );
+
+        let _ = std::fs::remove_file(history_path);
     }
 
 

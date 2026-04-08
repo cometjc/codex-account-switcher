@@ -2022,6 +2022,7 @@ fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: u
                 upper_y: profile.chart_data.five_hour_subframe.upper_y,
                 reason: profile.chart_data.five_hour_subframe.reason.as_deref(),
             },
+            is_zero_state: profile.chart_data.is_zero_state,
         })
         .collect::<Vec<_>>();
 
@@ -2166,6 +2167,50 @@ mod tests {
         assert!(!should_schedule_background_refresh(Some(now + 60), now));
         assert!(should_schedule_background_refresh(Some(now - 1), now));
         assert!(should_schedule_background_refresh(None, now));
+    }
+
+    #[test]
+    fn chart_series_propagates_zero_state_from_profile_data() {
+        let profiles = vec![ProfileEntry {
+            kind: ProfileKind::Codex,
+            saved_name: Some("alpha".to_string()),
+            profile_name: "Alpha".to_string(),
+            snapshot: serde_json::json!({}),
+            usage_view: crate::usage::UsageReadResult {
+                usage: None,
+                source: crate::usage::UsageSource::None,
+                fetched_at: None,
+                stale: false,
+            },
+            account_id: Some("acct-alpha".to_string()),
+            is_current: true,
+            chart_data: crate::app_data::ProfileChartData {
+                seven_day_points: vec![],
+                quota_window_label: "7d".to_string(),
+                five_hour_band: OwnedFiveHourBandState {
+                    available: false,
+                    used_percent: None,
+                    lower_y: None,
+                    upper_y: None,
+                    delta_seven_day_percent: None,
+                    delta_five_hour_percent: None,
+                    reason: Some("zero-state".to_string()),
+                },
+                five_hour_subframe: OwnedFiveHourSubframeState {
+                    available: false,
+                    start_x: None,
+                    end_x: None,
+                    lower_y: None,
+                    upper_y: None,
+                    reason: Some("zero-state".to_string()),
+                },
+                is_zero_state: true,
+            },
+        }];
+
+        let chart_state = build_chart_state(&profiles, 0);
+        assert!(chart_state.series[0].is_zero_state);
+        assert!(chart_state.series[0].five_hour_subframe.available == false);
     }
 
     #[test]
@@ -2496,6 +2541,7 @@ mod tests {
                     upper_y: Some(20.0),
                     reason: None,
                 },
+                is_zero_state: false,
             },
         }];
 
