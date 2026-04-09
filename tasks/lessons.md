@@ -2,6 +2,7 @@
 
 - 當使用者明確指定 code-change 入口改為 `$superpower-dev:do` 時，治理文件與流程敘述必須全部對齊；不要再把 `tasks/todo.md` 當成 tracked 變更工作的預設開工面。
 - 當流程要求用 AUQ 進行執行器或路徑確認時，不要退回一般文字提問；即使問題很短，也要用 AUQ 送出結構化選項並等待回覆。
+- `$superpower-dev:do` 在同一請求收到多個 plans 時，語意是「依序執行並連續收斂」：每個 plan 完成且驗證通過後，若回 main 的路徑單一且低風險，應自動收斂並直接進下一個 plan，不要多停一次等待額外口令。
 - 當主要工作樹已經是 dirty tree，而新請求不是明確要求在同一棵樹延續既有 WIP 時，必須先檢查 `git status`、建立/切換到 dedicated worktree，之後才開始寫 `plan.md`、`tasks/todo.md` 或後續實作。
 - 當使用者指出 shared-baseline 的推送/同步更新流程不是一般開發治理規則時，不要再把它放進 `ai-rules/`；這類帶 trigger/decision/exit 的流程應集中到 shared repo 的對應 `skills/*.md`，並同步移除索引中的舊章節，避免 skill 與 `ai-rules/` 雙重權威來源。
 - 當用 `new-rule` 做 baseline adoption review 且已有 adopted baseline 時，預設用雙 ref 形式比較正式規則面，例如 `git diff adopted/<project> main -- . ':(exclude)skills/*'`；`skills/` 預設排除，只有任務本身明確在改 workflow skill 時才納入。
