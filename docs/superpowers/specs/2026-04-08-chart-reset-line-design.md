@@ -29,7 +29,7 @@ When the trigger condition is met, render a second line directly below the exist
 
 ```text
 [codex 7d] comet 100%/44%
-reset in 3h 12m
+Hit limit · resets in 3h 12m
 ```
 
 This second line belongs to the same label block and should participate in the same collision-avoidance behavior as the first line.
@@ -46,7 +46,7 @@ No behavior change. Zero-state anchors keep their current branch geometry and do
 3. Map those fields into `render::ChartSeries` inside `app::build_chart_state`, alongside the existing `last_seven_day_percent` and `five_hour_used_percent` values.
 4. Add a derived render-layer contract equivalent to `Option<ResetLineDisplay>` on `ChartSeries`, where `ResetLineDisplay` contains:
    - the chosen source (`weekly` or `five_hour`)
-   - the already-formatted text `reset in <TIME>`
+   - the already-formatted text `Hit limit · resets in <TIME>`
 5. Resolve that derived value from the raw weekly/5h percentages already used for labels:
    - trigger when raw 7d or 5h usage is `>= 100.0`
    - compare both countdowns when both qualify and choose the longer one
@@ -57,10 +57,10 @@ No behavior change. Zero-state anchors keep their current branch geometry and do
 
 - If reset metadata is missing or cannot be formatted, do not render the second line.
 - Treat `reset_after_seconds <= 0` as missing/unrenderable reset metadata for this feature.
-- Do not invent placeholder text like `reset in ?`.
+- Do not invent placeholder text like `Hit limit · resets in ?`.
 - Do not change non-100% label behavior.
-- If there is not enough safe vertical room for a second line, preserve the existing first line and omit only the `reset in <TIME>` line.
-- If compact fallback label variants are in use, the `reset in <TIME>` line belongs only to the full multi-line label. Any degraded compact/minimal variant drops the second line first.
+- If there is not enough safe vertical room for a second line, preserve the existing first line and omit only the `Hit limit · resets in <TIME>` line.
+- If compact fallback label variants are in use, the `Hit limit · resets in <TIME>` line belongs only to the full multi-line label. Any degraded compact/minimal variant drops the second line first.
 
 ## Testing
 
