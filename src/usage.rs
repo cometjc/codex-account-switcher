@@ -11,7 +11,9 @@ use fs2::FileExt;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use crate::db::{ProfileWindowRow, SqliteStore, UsageCacheRow, UsageObservationRow};
+use crate::db::{
+    FiveHourCycleSummaryRow, ProfileWindowRow, SqliteStore, UsageCacheRow, UsageObservationRow,
+};
 use crate::paths::agent_switch_config_dir;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -168,6 +170,21 @@ pub struct UsageService {
     ttl_seconds: i64,
     clock: Arc<Clock>,
     fetcher: Arc<Fetcher>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FiveHourCycleSummary {
+    pub cycle_start_at: i64,
+    pub cycle_end_at: i64,
+    pub first_observed_at: i64,
+    pub last_observed_at: i64,
+    pub start_weekly_used_percent: Option<f64>,
+    pub end_weekly_used_percent: Option<f64>,
+    pub start_five_hour_used_percent: Option<f64>,
+    pub end_five_hour_used_percent: f64,
+    pub active_seconds: i64,
+    pub idle_seconds: i64,
+    pub suspected_cap_stall: bool,
 }
 
 impl UsageService {
@@ -463,12 +480,42 @@ impl UsageService {
         // Keep on-disk schema normalized before serving history to callers.
         self.mutate_history_cache(|_| Ok(false))?;
         let history = self.read_history_cache()?;
-        Ok(history
+        let entry = history
             .by_account_id
             .get(account_id)
             .cloned()
             .map(|entry| normalize_profile_history(entry).0)
-            .unwrap_or_default())
+            .unwrap_or_default();
+        self.backfill_cycle_summaries_from_history(account_id, &entry)?;
+        Ok(entry)
+    }
+
+    pub fn five_hour_cycle_summaries(
+        &self,
+        account_id: Option<&str>,
+    ) -> Result<Vec<FiveHourCycleSummary>> {
+        let Some(account_id) = account_id.filter(|value| !value.trim().is_empty()) else {
+            return Ok(Vec::new());
+        };
+        self.db
+            .read_five_hour_cycle_summaries(&self.service_namespace, account_id)
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|row| FiveHourCycleSummary {
+                        cycle_start_at: row.cycle_start_at,
+                        cycle_end_at: row.cycle_end_at,
+                        first_observed_at: row.first_observed_at,
+                        last_observed_at: row.last_observed_at,
+                        start_weekly_used_percent: row.start_weekly_used_percent,
+                        end_weekly_used_percent: row.end_weekly_used_percent,
+                        start_five_hour_used_percent: row.start_five_hour_used_percent,
+                        end_five_hour_used_percent: row.end_five_hour_used_percent,
+                        active_seconds: row.active_seconds,
+                        idle_seconds: row.idle_seconds,
+                        suspected_cap_stall: row.suspected_cap_stall,
+                    })
+                    .collect()
+            })
     }
 
     pub fn merge_profile_history_aliases<'a>(
@@ -681,6 +728,33 @@ impl UsageService {
         )
         .with_context(|| format!("write {}", self.history_path.display()))?;
         Ok(())
+    }
+
+    fn backfill_cycle_summaries_from_history(
+        &self,
+        account_id: &str,
+        history: &ProfileUsageHistory,
+    ) -> Result<()> {
+        let summaries = derive_five_hour_cycle_summaries(history);
+        let rows = summaries
+            .into_iter()
+            .map(|summary| FiveHourCycleSummaryRow {
+                account_key: account_id.to_string(),
+                cycle_start_at: summary.cycle_start_at,
+                cycle_end_at: summary.cycle_end_at,
+                first_observed_at: summary.first_observed_at,
+                last_observed_at: summary.last_observed_at,
+                start_weekly_used_percent: summary.start_weekly_used_percent,
+                end_weekly_used_percent: summary.end_weekly_used_percent,
+                start_five_hour_used_percent: summary.start_five_hour_used_percent,
+                end_five_hour_used_percent: summary.end_five_hour_used_percent,
+                active_seconds: summary.active_seconds,
+                idle_seconds: summary.idle_seconds,
+                suspected_cap_stall: summary.suspected_cap_stall,
+            })
+            .collect::<Vec<_>>();
+        self.db
+            .replace_five_hour_cycle_summaries(&self.service_namespace, account_id, &rows)
     }
 }
 
@@ -1179,6 +1253,57 @@ fn should_backfill_from_legacy(legacy_path: &Path, db_path: &Path) -> bool {
     legacy_modified > db_modified
 }
 
+fn derive_five_hour_cycle_summaries(history: &ProfileUsageHistory) -> Vec<FiveHourCycleSummary> {
+    let Some(reset_at) = history.five_hour_reset_at else {
+        return Vec::new();
+    };
+    let window_seconds = history.five_hour_window_seconds;
+    if window_seconds <= 0 {
+        return Vec::new();
+    }
+
+    let mut grouped = BTreeMap::<i64, Vec<&ProfileUsageObservation>>::new();
+    for obs in history
+        .observations
+        .iter()
+        .filter(|obs| obs.five_hour_used_percent.is_some())
+    {
+        if obs.observed_at_local > reset_at {
+            continue;
+        }
+        let delta = reset_at - obs.observed_at_local;
+        let cycle_index = delta.div_euclid(window_seconds);
+        let cycle_end_at = reset_at - cycle_index * window_seconds;
+        grouped.entry(cycle_end_at).or_default().push(obs);
+    }
+
+    grouped
+        .into_iter()
+        .filter_map(|(cycle_end_at, mut observations)| {
+            observations.sort_by_key(|obs| obs.observed_at_local);
+            let first = *observations.first()?;
+            let last = *observations.last()?;
+            let cycle_start_at = cycle_end_at - window_seconds;
+            let active_seconds = (last.observed_at_local - first.observed_at_local).max(0);
+            let idle_seconds = (window_seconds - active_seconds).max(0);
+            let end_five_hour_used_percent = last.five_hour_used_percent?;
+            Some(FiveHourCycleSummary {
+                cycle_start_at,
+                cycle_end_at,
+                first_observed_at: first.observed_at_local,
+                last_observed_at: last.observed_at_local,
+                start_weekly_used_percent: first.weekly_used_percent,
+                end_weekly_used_percent: last.weekly_used_percent,
+                start_five_hour_used_percent: first.five_hour_used_percent,
+                end_five_hour_used_percent,
+                active_seconds,
+                idle_seconds,
+                suspected_cap_stall: end_five_hour_used_percent >= 95.0,
+            })
+        })
+        .collect()
+}
+
 pub fn pick_five_hour_window(usage: &UsageResponse) -> Option<&UsageWindow> {
     let rate_limit = usage.rate_limit.as_ref()?;
     if rate_limit
@@ -1236,6 +1361,8 @@ mod tests {
     use std::fs;
     use std::sync::{Arc, Mutex};
 
+    use rusqlite::{OptionalExtension, params};
+
     use super::*;
 
     fn temp_file(name: &str) -> PathBuf {
@@ -1267,6 +1394,55 @@ mod tests {
                 }),
             }),
         }
+    }
+
+    fn sqlite_table_exists(service: &UsageService, table: &str) -> bool {
+        service
+            .db
+            .with_conn(|conn| {
+                conn.query_row(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    params![table],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map(|value| value.is_some())
+                .context("query sqlite_master")
+            })
+            .unwrap()
+    }
+
+    fn sqlite_row_count(service: &UsageService, table: &str, account_key: &str) -> i64 {
+        let sql = match table {
+            "usage_cache" => {
+                "SELECT COUNT(*)
+                 FROM usage_cache c
+                 JOIN profiles p ON p.id = c.profile_id
+                 WHERE p.service = ?1 AND p.account_key = ?2"
+            }
+            "usage_observations" => {
+                "SELECT COUNT(*)
+                 FROM usage_observations o
+                 JOIN profiles p ON p.id = o.profile_id
+                 WHERE p.service = ?1 AND p.account_key = ?2"
+            }
+            "five_hour_cycle_summaries" => {
+                "SELECT COUNT(*)
+                 FROM five_hour_cycle_summaries s
+                 JOIN profiles p ON p.id = s.profile_id
+                 WHERE p.service = ?1 AND p.account_key = ?2"
+            }
+            other => panic!("unexpected table: {other}"),
+        };
+        service
+            .db
+            .with_conn(|conn| {
+                conn.query_row(sql, params![service.service_namespace, account_key], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .context("count table rows")
+            })
+            .unwrap()
     }
 
     fn write_codex_auth(
@@ -1977,6 +2153,88 @@ mod tests {
         assert_eq!(acct["weekly_reset_at"], serde_json::json!(604800));
         assert_eq!(acct["five_hour_reset_at"], serde_json::json!(18010));
         assert!(acct["observations"].as_array().is_some_and(|list| !list.is_empty()));
+    }
+
+    #[test]
+    fn migration_creates_cycle_summary_table_without_dropping_existing_rows() {
+        let cache_path = temp_file("forecast-migrate-cache.json");
+        let history_path = temp_file("forecast-migrate-history.json");
+        let service = UsageService::new(cache_path, history_path, 300);
+        let account = "acct-alpha";
+
+        let cache = UsageCache::from_entries([(
+            account.to_string(),
+            5_000,
+            sample_usage("plus"),
+        )]);
+        service.write_cache(&cache).unwrap();
+
+        let mut history = UsageHistoryCache::default();
+        history.by_account_id.insert(
+            account.to_string(),
+            ProfileUsageHistory {
+                observations: vec![ProfileUsageObservation {
+                    observed_at_local: 5_000,
+                    weekly_used_percent: Some(41.0),
+                    five_hour_used_percent: Some(12.0),
+                }],
+                weekly_reset_at: Some(604_800),
+                five_hour_reset_at: Some(18_000),
+                ..ProfileUsageHistory::default()
+            },
+        );
+        service.write_history_cache(&history).unwrap();
+
+        assert_eq!(sqlite_row_count(&service, "usage_cache", account), 1);
+        assert_eq!(sqlite_row_count(&service, "usage_observations", account), 1);
+        assert!(
+            sqlite_table_exists(&service, "five_hour_cycle_summaries"),
+            "forecast migration should create cycle-summary storage"
+        );
+        assert_eq!(
+            sqlite_row_count(&service, "five_hour_cycle_summaries", account),
+            0,
+            "migration should preserve old rows before any summary backfill"
+        );
+    }
+
+    #[test]
+    fn startup_backfill_reconstructs_cycle_summaries_from_retained_observations() {
+        let cache_path = temp_file("forecast-backfill-cache.json");
+        let history_path = temp_file("forecast-backfill-history.json");
+        let service = UsageService::new(cache_path, history_path.clone(), 300);
+        let account = "acct-alpha";
+        let retained = serde_json::json!({
+            "byAccountId": {
+                account: {
+                    "observations": [
+                        {"observed_at_local": 90000, "weekly_used_percent": 10.0, "five_hour_used_percent": 5.0},
+                        {"observed_at_local": 93000, "weekly_used_percent": 14.0, "five_hour_used_percent": 35.0},
+                        {"observed_at_local": 108100, "weekly_used_percent": 15.0, "five_hour_used_percent": 4.0},
+                        {"observed_at_local": 111000, "weekly_used_percent": 17.0, "five_hour_used_percent": 28.0}
+                    ],
+                    "weekly_reset_at": 604800,
+                    "five_hour_reset_at": 126000,
+                    "weekly_window_seconds": 604800,
+                    "five_hour_window_seconds": 18000,
+                    "weekly_windows": [],
+                    "five_hour_windows": []
+                }
+            }
+        });
+        write_json(&history_path, &retained).unwrap();
+
+        let history = service.profile_history(Some(account)).unwrap();
+
+        assert_eq!(history.observations.len(), 4, "startup backfill must keep raw observations");
+        assert!(
+            sqlite_table_exists(&service, "five_hour_cycle_summaries"),
+            "startup path should migrate db before reading history"
+        );
+        assert!(
+            sqlite_row_count(&service, "five_hour_cycle_summaries", account) >= 2,
+            "retained observations spanning multiple 5h segments should backfill summaries"
+        );
     }
 
     #[test]

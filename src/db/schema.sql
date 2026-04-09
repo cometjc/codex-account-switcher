@@ -33,6 +33,23 @@ CREATE TABLE IF NOT EXISTS profile_windows (
   FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS five_hour_cycle_summaries (
+  profile_id INTEGER NOT NULL,
+  cycle_start_at INTEGER NOT NULL,
+  cycle_end_at INTEGER NOT NULL,
+  first_observed_at INTEGER NOT NULL,
+  last_observed_at INTEGER NOT NULL,
+  start_weekly_used_percent REAL,
+  end_weekly_used_percent REAL,
+  start_five_hour_used_percent REAL,
+  end_five_hour_used_percent REAL NOT NULL,
+  active_seconds INTEGER NOT NULL DEFAULT 0,
+  idle_seconds INTEGER NOT NULL DEFAULT 0,
+  suspected_cap_stall INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(profile_id, cycle_end_at),
+  FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS ui_state (
   key TEXT PRIMARY KEY,
   value_json TEXT NOT NULL
@@ -55,3 +72,5 @@ CREATE TABLE IF NOT EXISTS kv_meta (
 CREATE INDEX IF NOT EXISTS idx_usage_observations_profile_time
   ON usage_observations(profile_id, observed_at);
 
+CREATE INDEX IF NOT EXISTS idx_five_hour_cycle_summaries_profile_end
+  ON five_hour_cycle_summaries(profile_id, cycle_end_at);

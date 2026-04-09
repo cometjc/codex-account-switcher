@@ -6,7 +6,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 pub mod async_adapter;
 
-const MIGRATION_VERSION: i64 = 1;
+const MIGRATION_VERSION: i64 = 2;
 const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -31,6 +31,22 @@ pub struct ProfileWindowRow {
     pub weekly_window_seconds: i64,
     pub five_hour_reset_at: Option<i64>,
     pub five_hour_window_seconds: i64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FiveHourCycleSummaryRow {
+    pub account_key: String,
+    pub cycle_start_at: i64,
+    pub cycle_end_at: i64,
+    pub first_observed_at: i64,
+    pub last_observed_at: i64,
+    pub start_weekly_used_percent: Option<f64>,
+    pub end_weekly_used_percent: Option<f64>,
+    pub start_five_hour_used_percent: Option<f64>,
+    pub end_five_hour_used_percent: f64,
+    pub active_seconds: i64,
+    pub idle_seconds: i64,
+    pub suspected_cap_stall: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -315,6 +331,92 @@ impl SqliteStore {
             Ok(())
         })
     }
+
+    pub fn read_five_hour_cycle_summaries(
+        &self,
+        service: &str,
+        account_key: &str,
+    ) -> Result<Vec<FiveHourCycleSummaryRow>> {
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT p.account_key, s.cycle_start_at, s.cycle_end_at, s.first_observed_at,
+                        s.last_observed_at, s.start_weekly_used_percent, s.end_weekly_used_percent,
+                        s.start_five_hour_used_percent, s.end_five_hour_used_percent,
+                        s.active_seconds, s.idle_seconds, s.suspected_cap_stall
+                 FROM five_hour_cycle_summaries s
+                 JOIN profiles p ON p.id = s.profile_id
+                 WHERE p.service = ?1 AND p.account_key = ?2
+                 ORDER BY s.cycle_end_at",
+            )?;
+            let rows = stmt
+                .query_map(params![service, account_key], |row| {
+                    Ok(FiveHourCycleSummaryRow {
+                        account_key: row.get(0)?,
+                        cycle_start_at: row.get(1)?,
+                        cycle_end_at: row.get(2)?,
+                        first_observed_at: row.get(3)?,
+                        last_observed_at: row.get(4)?,
+                        start_weekly_used_percent: row.get(5)?,
+                        end_weekly_used_percent: row.get(6)?,
+                        start_five_hour_used_percent: row.get(7)?,
+                        end_five_hour_used_percent: row.get(8)?,
+                        active_seconds: row.get(9)?,
+                        idle_seconds: row.get(10)?,
+                        suspected_cap_stall: row.get::<_, i64>(11)? != 0,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .context("collect five_hour_cycle_summaries rows")?;
+            Ok(rows)
+        })
+    }
+
+    pub fn replace_five_hour_cycle_summaries(
+        &self,
+        service: &str,
+        account_key: &str,
+        rows: &[FiveHourCycleSummaryRow],
+    ) -> Result<()> {
+        self.with_conn(|conn| {
+            let tx = conn
+                .unchecked_transaction()
+                .context("start five_hour_cycle_summaries transaction")?;
+            let profile_id = ensure_profile(&tx, service, account_key, None)?;
+            tx.execute(
+                "DELETE FROM five_hour_cycle_summaries WHERE profile_id = ?1",
+                params![profile_id],
+            )
+            .context("clear five_hour_cycle_summaries for profile")?;
+            for row in rows {
+                tx.execute(
+                    "INSERT INTO five_hour_cycle_summaries(
+                        profile_id, cycle_start_at, cycle_end_at, first_observed_at, last_observed_at,
+                        start_weekly_used_percent, end_weekly_used_percent,
+                        start_five_hour_used_percent, end_five_hour_used_percent,
+                        active_seconds, idle_seconds, suspected_cap_stall
+                     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                    params![
+                        profile_id,
+                        row.cycle_start_at,
+                        row.cycle_end_at,
+                        row.first_observed_at,
+                        row.last_observed_at,
+                        row.start_weekly_used_percent,
+                        row.end_weekly_used_percent,
+                        row.start_five_hour_used_percent,
+                        row.end_five_hour_used_percent,
+                        row.active_seconds,
+                        row.idle_seconds,
+                        if row.suspected_cap_stall { 1_i64 } else { 0_i64 },
+                    ],
+                )
+                .context("insert five_hour_cycle_summaries row")?;
+            }
+            tx.commit()
+                .context("commit five_hour_cycle_summaries transaction")?;
+            Ok(())
+        })
+    }
 }
 
 fn open_connection(path: &Path) -> Result<Connection> {
@@ -385,4 +487,3 @@ fn now_unix_seconds() -> i64 {
         .unwrap_or_default()
         .as_secs() as i64
 }
-
