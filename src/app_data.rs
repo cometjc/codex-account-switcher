@@ -36,6 +36,7 @@ pub struct ProfileEntry {
 pub struct ProfileChartData {
     pub seven_day_points: Vec<ChartPoint>,
     pub quota_window_label: String,
+    pub forecast: OwnedUsageForecast,
     pub five_hour_band: OwnedFiveHourBandState,
     pub five_hour_subframe: OwnedFiveHourSubframeState,
     pub is_zero_state: bool,
@@ -46,6 +47,7 @@ impl ProfileChartData {
         Self {
             seven_day_points: Vec::new(),
             quota_window_label: "?d".to_string(),
+            forecast: OwnedUsageForecast::empty(reason),
             five_hour_band: OwnedFiveHourBandState {
                 available: false,
                 used_percent: None,
@@ -64,6 +66,39 @@ impl ProfileChartData {
                 reason: Some(reason.to_string()),
             },
             is_zero_state: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForecastEventKind {
+    Hit,
+    Reset,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForecastConfidence {
+    Low,
+    High,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct OwnedUsageForecast {
+    pub event: Option<ForecastEventKind>,
+    pub eta_seconds: Option<i64>,
+    pub compact_label: Option<String>,
+    pub confidence: ForecastConfidence,
+    pub reason: Option<String>,
+}
+
+impl OwnedUsageForecast {
+    pub fn empty(reason: &str) -> Self {
+        Self {
+            event: None,
+            eta_seconds: None,
+            compact_label: None,
+            confidence: ForecastConfidence::Low,
+            reason: Some(reason.to_string()),
         }
     }
 }

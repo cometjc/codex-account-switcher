@@ -4,7 +4,8 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 
 use crate::app_data::{
-    OwnedFiveHourBandState, OwnedFiveHourSubframeState, ProfileChartData, ProfileEntry, ProfileKind,
+    ForecastConfidence, ForecastEventKind, OwnedFiveHourBandState, OwnedFiveHourSubframeState,
+    OwnedUsageForecast, ProfileChartData, ProfileEntry, ProfileKind,
 };
 use crate::render::ChartPoint;
 use crate::store::{AccountStore, SavedProfile};
@@ -496,6 +497,8 @@ fn build_profile_chart_data(
     });
     let weekly_window = weekly_window_live.or(weekly_window_fallback.as_ref());
     let five_hour_window = five_hour_window_live.or(five_hour_window_fallback.as_ref());
+    let forecast =
+        build_usage_forecast(weekly_window, five_hour_window, &history, usage_service, account_id);
 
     let seven_day_points = weekly_window
         .map(|window| {
@@ -548,6 +551,7 @@ fn build_profile_chart_data(
     Ok(ProfileChartData {
         seven_day_points,
         quota_window_label: format_quota_window_label(weekly_window.map(|window| window.limit_window_seconds)),
+        forecast,
         five_hour_band,
         five_hour_subframe,
         is_zero_state,
@@ -632,6 +636,141 @@ fn format_quota_window_label(window_seconds: Option<i64>) -> String {
     };
     let days = ((window_seconds as f64) / 86_400.0).round().max(1.0) as i64;
     format!("{days}d")
+}
+
+fn build_usage_forecast(
+    weekly_window: Option<&UsageWindow>,
+    five_hour_window: Option<&UsageWindow>,
+    history: &ProfileUsageHistory,
+    usage_service: &UsageService,
+    account_id: &str,
+) -> OwnedUsageForecast {
+    let reset_eta = [
+        weekly_window.map(|window| window.reset_after_seconds),
+        five_hour_window.map(|window| window.reset_after_seconds),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|seconds| *seconds > 0)
+    .min();
+
+    if let Some(five_hour_window) = five_hour_window {
+        let summaries = usage_service
+            .five_hour_cycle_summaries(Some(account_id))
+            .unwrap_or_default();
+        let current_summary = summaries
+            .iter()
+            .find(|summary| summary.cycle_end_at == five_hour_window.reset_at)
+            .or_else(|| summaries.last());
+
+        if let Some(summary) = current_summary {
+            let baseline = summary
+                .start_five_hour_used_percent
+                .unwrap_or_else(|| summary.end_five_hour_used_percent);
+            let delta = (summary.end_five_hour_used_percent - baseline).max(0.0);
+            let active_seconds = summary.active_seconds.max(1) as f64;
+            if delta > 0.0 {
+                let hit_eta = (((100.0 - five_hour_window.used_percent).max(0.0) / delta) * active_seconds)
+                    .ceil() as i64;
+                return select_forecast(
+                    Some(hit_eta),
+                    reset_eta,
+                    ForecastConfidence::High,
+                    Some("five-hour cycle summary"),
+                );
+            }
+        }
+    }
+
+    let weekly_points = history
+        .observations
+        .iter()
+        .filter_map(|obs| obs.weekly_used_percent.map(|used| (obs.observed_at_local, used)))
+        .collect::<Vec<_>>();
+    if let Some(hit_eta) = estimate_hit_eta_from_weekly_points(weekly_points, weekly_window) {
+        return select_forecast(
+            Some(hit_eta),
+            reset_eta,
+            ForecastConfidence::Low,
+            Some("observation-only weekly rate"),
+        );
+    }
+
+    if let Some(reset_eta) = reset_eta {
+        return OwnedUsageForecast {
+            event: Some(ForecastEventKind::Reset),
+            eta_seconds: Some(reset_eta),
+            compact_label: Some(format_forecast_label(ForecastEventKind::Reset, reset_eta, false)),
+            confidence: ForecastConfidence::Low,
+            reason: Some("reset arrives before any measurable hit rate".to_string()),
+        };
+    }
+
+    OwnedUsageForecast::empty("no forecastable usage window")
+}
+
+fn estimate_hit_eta_from_weekly_points(
+    weekly_points: Vec<(i64, f64)>,
+    weekly_window: Option<&UsageWindow>,
+) -> Option<i64> {
+    let weekly_window = weekly_window?;
+    if weekly_points.len() < 2 {
+        return None;
+    }
+    let first = weekly_points.first()?;
+    let last = weekly_points.last()?;
+    let delta_used = (last.1 - first.1).max(0.0);
+    let delta_seconds = (last.0 - first.0).max(1) as f64;
+    if delta_used <= 0.0 {
+        return None;
+    }
+    Some(
+        (((100.0 - weekly_window.used_percent).max(0.0) / delta_used) * delta_seconds).ceil()
+            as i64,
+    )
+}
+
+fn select_forecast(
+    hit_eta: Option<i64>,
+    reset_eta: Option<i64>,
+    confidence: ForecastConfidence,
+    reason: Option<&str>,
+) -> OwnedUsageForecast {
+    let hit_eta = hit_eta.filter(|seconds| *seconds > 0);
+    let reset_eta = reset_eta.filter(|seconds| *seconds > 0);
+    let (event, eta_seconds) = match (hit_eta, reset_eta) {
+        (Some(hit), Some(reset)) if hit <= reset => (Some(ForecastEventKind::Hit), Some(hit)),
+        (_, Some(reset)) => (Some(ForecastEventKind::Reset), Some(reset)),
+        (Some(hit), None) => (Some(ForecastEventKind::Hit), Some(hit)),
+        (None, None) => (None, None),
+    };
+    let compact_label = event.zip(eta_seconds).map(|(event, eta_seconds)| {
+        format_forecast_label(event, eta_seconds, confidence == ForecastConfidence::Low)
+    });
+    OwnedUsageForecast {
+        event,
+        eta_seconds,
+        compact_label,
+        confidence,
+        reason: reason.map(str::to_string),
+    }
+}
+
+fn format_forecast_label(
+    event: ForecastEventKind,
+    eta_seconds: i64,
+    low_confidence: bool,
+) -> String {
+    let event_label = match event {
+        ForecastEventKind::Hit => "hit",
+        ForecastEventKind::Reset => "reset",
+    };
+    let hours = eta_seconds as f64 / 3600.0;
+    if low_confidence {
+        format!("~{event_label} {hours:.1}h")
+    } else {
+        format!("{event_label} {hours:.1}h")
+    }
 }
 
 fn build_weekly_history_from_profile_observations(
@@ -1576,6 +1715,255 @@ mod tests {
             .seven_day_points
             .last()
             .is_some_and(|point| point.x < 1.0));
+
+        let _ = std::fs::remove_file(history_path);
+    }
+
+    #[test]
+    fn forecast_prefers_reset_when_reset_arrives_before_projected_hit() {
+        use crate::app_data::{ForecastConfidence, ForecastEventKind};
+        use crate::usage::{UsageRateLimit, UsageReadResult, UsageResponse, UsageSource, UsageWindow};
+
+        let cache_path = PathBuf::from("dummy_cache_forecast_reset.json");
+        let history_path =
+            std::env::temp_dir().join(format!("test_forecast_reset_{}.json", std::process::id()));
+        let account_id = "claude-reset-first|team";
+
+        let snapshot_1 = 1_775_631_603_i64;
+        let snapshot_2 = 1_775_635_203_i64;
+        let snapshot_3 = 1_775_637_002_i64;
+        let weekly_reset_at = 1_775_725_200_i64;
+        let five_hour_reset_at = 1_775_649_600_i64;
+
+        for (now, weekly_used, five_hour_used) in [
+            (snapshot_1, 44.0, None),
+            (snapshot_2, 45.0, Some(4.0)),
+            (snapshot_3, 46.0, Some(16.0)),
+        ] {
+            let service =
+                UsageService::new(cache_path.clone(), history_path.clone(), 300).with_now_seconds(now);
+            let usage = UsageResponse {
+                email: None,
+                plan_type: Some("team".to_string()),
+                rate_limit: Some(UsageRateLimit {
+                    primary_window: Some(UsageWindow {
+                        used_percent: five_hour_used.unwrap_or(0.0),
+                        limit_window_seconds: 18_000,
+                        reset_at: five_hour_reset_at,
+                        reset_after_seconds: five_hour_reset_at - now,
+                    }),
+                    secondary_window: Some(UsageWindow {
+                        used_percent: weekly_used,
+                        limit_window_seconds: 604_800,
+                        reset_at: weekly_reset_at,
+                        reset_after_seconds: weekly_reset_at - now,
+                    }),
+                }),
+            };
+            service
+                .record_usage_snapshot(
+                    Some(account_id),
+                    &UsageReadResult {
+                        usage: Some(usage),
+                        source: UsageSource::Api,
+                        fetched_at: Some(now),
+                        stale: false,
+                    },
+                )
+                .unwrap();
+        }
+
+        let current_service =
+            UsageService::new(cache_path, history_path.clone(), 300).with_now_seconds(snapshot_3);
+        let current_usage = UsageResponse {
+            email: None,
+            plan_type: Some("team".to_string()),
+            rate_limit: Some(UsageRateLimit {
+                primary_window: Some(UsageWindow {
+                    used_percent: 16.0,
+                    limit_window_seconds: 18_000,
+                    reset_at: five_hour_reset_at,
+                    reset_after_seconds: five_hour_reset_at - snapshot_3,
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: 46.0,
+                    limit_window_seconds: 604_800,
+                    reset_at: weekly_reset_at,
+                    reset_after_seconds: weekly_reset_at - snapshot_3,
+                }),
+            }),
+        };
+
+        let chart_data = build_profile_chart_data(Some(account_id), Some(&current_usage), &current_service).unwrap();
+
+        assert_eq!(chart_data.forecast.event, Some(ForecastEventKind::Reset));
+        assert_eq!(chart_data.forecast.confidence, ForecastConfidence::High);
+        assert!(chart_data.forecast.eta_seconds.is_some_and(|eta| eta > 0 && eta < 18_000));
+        assert_eq!(chart_data.forecast.compact_label.as_deref(), Some("reset 3.5h"));
+
+        let _ = std::fs::remove_file(history_path);
+    }
+
+    #[test]
+    fn forecast_prefers_hit_when_hit_arrives_before_reset() {
+        use crate::app_data::{ForecastConfidence, ForecastEventKind};
+        use crate::usage::{UsageRateLimit, UsageReadResult, UsageResponse, UsageSource, UsageWindow};
+
+        let cache_path = PathBuf::from("dummy_cache_forecast_hit.json");
+        let history_path =
+            std::env::temp_dir().join(format!("test_forecast_hit_{}.json", std::process::id()));
+        let account_id = "claude-hit-first|team";
+
+        let snapshot_1 = 2_000_000_000_i64;
+        let snapshot_2 = snapshot_1 + 1_800;
+        let snapshot_3 = snapshot_1 + 3_600;
+        let weekly_reset_at = snapshot_1 + 86_400;
+        let five_hour_reset_at = snapshot_1 + 18_000;
+
+        for (now, weekly_used, five_hour_used) in [
+            (snapshot_1, 70.0, Some(70.0)),
+            (snapshot_2, 82.0, Some(82.0)),
+            (snapshot_3, 94.0, Some(94.0)),
+        ] {
+            let service =
+                UsageService::new(cache_path.clone(), history_path.clone(), 300).with_now_seconds(now);
+            let usage = UsageResponse {
+                email: None,
+                plan_type: Some("team".to_string()),
+                rate_limit: Some(UsageRateLimit {
+                    primary_window: Some(UsageWindow {
+                        used_percent: five_hour_used.unwrap_or(0.0),
+                        limit_window_seconds: 18_000,
+                        reset_at: five_hour_reset_at,
+                        reset_after_seconds: five_hour_reset_at - now,
+                    }),
+                    secondary_window: Some(UsageWindow {
+                        used_percent: weekly_used,
+                        limit_window_seconds: 604_800,
+                        reset_at: weekly_reset_at,
+                        reset_after_seconds: weekly_reset_at - now,
+                    }),
+                }),
+            };
+            service
+                .record_usage_snapshot(
+                    Some(account_id),
+                    &UsageReadResult {
+                        usage: Some(usage),
+                        source: UsageSource::Api,
+                        fetched_at: Some(now),
+                        stale: false,
+                    },
+                )
+                .unwrap();
+        }
+
+        let current_service =
+            UsageService::new(cache_path, history_path.clone(), 300).with_now_seconds(snapshot_3);
+        let current_usage = UsageResponse {
+            email: None,
+            plan_type: Some("team".to_string()),
+            rate_limit: Some(UsageRateLimit {
+                primary_window: Some(UsageWindow {
+                    used_percent: 94.0,
+                    limit_window_seconds: 18_000,
+                    reset_at: five_hour_reset_at,
+                    reset_after_seconds: five_hour_reset_at - snapshot_3,
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: 94.0,
+                    limit_window_seconds: 604_800,
+                    reset_at: weekly_reset_at,
+                    reset_after_seconds: weekly_reset_at - snapshot_3,
+                }),
+            }),
+        };
+
+        let chart_data = build_profile_chart_data(Some(account_id), Some(&current_usage), &current_service).unwrap();
+
+        assert_eq!(chart_data.forecast.event, Some(ForecastEventKind::Hit));
+        assert_eq!(chart_data.forecast.confidence, ForecastConfidence::High);
+        assert!(chart_data.forecast.eta_seconds.is_some_and(|eta| eta > 0 && eta < 7_200));
+        assert_eq!(chart_data.forecast.compact_label.as_deref(), Some("hit 0.2h"));
+
+        let _ = std::fs::remove_file(history_path);
+    }
+
+    #[test]
+    fn forecast_degrades_for_monthly_profiles_without_five_hour_data() {
+        use crate::app_data::{ForecastConfidence, ForecastEventKind};
+        use crate::usage::{UsageRateLimit, UsageReadResult, UsageResponse, UsageSource, UsageWindow};
+
+        let cache_path = PathBuf::from("dummy_cache_forecast_copilot.json");
+        let history_path =
+            std::env::temp_dir().join(format!("test_forecast_copilot_{}.json", std::process::id()));
+        let account_id = "copilot-teamt5-it";
+        let base = 1_775_629_803_i64;
+        let reset_at = 1_777_593_600_i64;
+        let points = [
+            (base, 82.4),
+            (base + 600, 83.4),
+            (base + 1_201, 84.0),
+            (base + 1_801, 84.7),
+            (base + 2_401, 85.4),
+            (base + 3_000, 85.7),
+            (base + 3_600, 86.0),
+            (base + 7_200, 87.0),
+            (base + 8_399, 87.4),
+            (base + 10_801, 88.0),
+        ];
+
+        for (now, monthly_used) in points {
+            let service =
+                UsageService::new(cache_path.clone(), history_path.clone(), 300).with_now_seconds(now);
+            let usage = UsageResponse {
+                email: Some("teamt5-it".to_string()),
+                plan_type: Some("business".to_string()),
+                rate_limit: Some(UsageRateLimit {
+                    primary_window: None,
+                    secondary_window: Some(UsageWindow {
+                        used_percent: monthly_used,
+                        limit_window_seconds: 2_592_000,
+                        reset_at,
+                        reset_after_seconds: reset_at - now,
+                    }),
+                }),
+            };
+            service
+                .record_usage_snapshot(
+                    Some(account_id),
+                    &UsageReadResult {
+                        usage: Some(usage),
+                        source: UsageSource::Api,
+                        fetched_at: Some(now),
+                        stale: false,
+                    },
+                )
+                .unwrap();
+        }
+
+        let current_service =
+            UsageService::new(cache_path, history_path.clone(), 300).with_now_seconds(base + 10_801);
+        let current_usage = UsageResponse {
+            email: Some("teamt5-it".to_string()),
+            plan_type: Some("business".to_string()),
+            rate_limit: Some(UsageRateLimit {
+                primary_window: None,
+                secondary_window: Some(UsageWindow {
+                    used_percent: 88.0,
+                    limit_window_seconds: 2_592_000,
+                    reset_at,
+                    reset_after_seconds: reset_at - (base + 10_801),
+                }),
+            }),
+        };
+
+        let chart_data = build_profile_chart_data(Some(account_id), Some(&current_usage), &current_service).unwrap();
+
+        assert_eq!(chart_data.forecast.event, Some(ForecastEventKind::Hit));
+        assert_eq!(chart_data.forecast.confidence, ForecastConfidence::Low);
+        assert!(chart_data.forecast.eta_seconds.is_some_and(|eta| eta > 20_000));
+        assert_eq!(chart_data.forecast.compact_label.as_deref(), Some("~hit 6.4h"));
 
         let _ = std::fs::remove_file(history_path);
     }

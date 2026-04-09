@@ -2187,6 +2187,7 @@ mod tests {
             chart_data: crate::app_data::ProfileChartData {
                 seven_day_points: vec![],
                 quota_window_label: "7d".to_string(),
+                forecast: crate::app_data::OwnedUsageForecast::empty("zero-state"),
                 five_hour_band: OwnedFiveHourBandState {
                     available: false,
                     used_percent: None,
@@ -2524,6 +2525,7 @@ mod tests {
             chart_data: ProfileChartData {
                 seven_day_points: vec![ChartPoint { x: 7.0, y: 14.0 }],
                 quota_window_label: "7d".to_string(),
+                forecast: crate::app_data::OwnedUsageForecast::empty("band-only"),
                 five_hour_band: OwnedFiveHourBandState {
                     available: true,
                     used_percent: Some(12.0),
