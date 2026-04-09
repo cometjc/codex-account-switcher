@@ -2,11 +2,10 @@ use super::ChartSeries;
 
 pub(crate) fn full_label_lines(series: &ChartSeries<'_>) -> Vec<String> {
     let mut lines = vec![base_end_label(series)];
-    if let Some(forecast) = series.forecast_label {
-        lines.extend(split_hit_reset_lines(forecast));
-    }
     if let Some(reset_line) = &series.reset_line_display {
         lines.extend(split_hit_reset_lines(&reset_line.text));
+    } else if let Some(forecast) = series.forecast_label {
+        lines.extend(split_hit_reset_lines(forecast));
     }
     lines
 }
