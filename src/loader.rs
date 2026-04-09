@@ -7,6 +7,7 @@ use crate::app_data::{
     ForecastConfidence, ForecastEventKind, OwnedFiveHourBandState, OwnedFiveHourSubframeState,
     OwnedUsageForecast, ProfileChartData, ProfileEntry, ProfileKind,
 };
+use crate::duration::format_duration_short;
 use crate::render::ChartPoint;
 use crate::store::{AccountStore, SavedProfile};
 use crate::usage::{
@@ -770,11 +771,11 @@ fn format_forecast_label(
         ForecastEventKind::Hit => "hit",
         ForecastEventKind::Reset => "reset",
     };
-    let hours = eta_seconds as f64 / 3600.0;
+    let eta = format_duration_short(eta_seconds);
     if low_confidence {
-        format!("~{event_label} {hours:.1}h")
+        format!("~{event_label} {eta}")
     } else {
-        format!("{event_label} {hours:.1}h")
+        format!("{event_label} {eta}")
     }
 }
 
@@ -1804,7 +1805,7 @@ mod tests {
         assert_eq!(chart_data.forecast.event, Some(ForecastEventKind::Reset));
         assert_eq!(chart_data.forecast.confidence, ForecastConfidence::High);
         assert!(chart_data.forecast.eta_seconds.is_some_and(|eta| eta > 0 && eta < 18_000));
-        assert_eq!(chart_data.forecast.compact_label.as_deref(), Some("reset 3.5h"));
+        assert_eq!(chart_data.forecast.compact_label.as_deref(), Some("reset 3h 29m"));
 
         let _ = std::fs::remove_file(history_path);
     }
@@ -1889,7 +1890,7 @@ mod tests {
         assert_eq!(chart_data.forecast.event, Some(ForecastEventKind::Hit));
         assert_eq!(chart_data.forecast.confidence, ForecastConfidence::High);
         assert!(chart_data.forecast.eta_seconds.is_some_and(|eta| eta > 0 && eta < 7_200));
-        assert_eq!(chart_data.forecast.compact_label.as_deref(), Some("hit 0.2h"));
+        assert_eq!(chart_data.forecast.compact_label.as_deref(), Some("hit 15m"));
 
         let _ = std::fs::remove_file(history_path);
     }
@@ -1968,7 +1969,7 @@ mod tests {
         assert_eq!(chart_data.forecast.event, Some(ForecastEventKind::Hit));
         assert_eq!(chart_data.forecast.confidence, ForecastConfidence::Low);
         assert!(chart_data.forecast.eta_seconds.is_some_and(|eta| eta > 20_000));
-        assert_eq!(chart_data.forecast.compact_label.as_deref(), Some("~hit 6.4h"));
+        assert_eq!(chart_data.forecast.compact_label.as_deref(), Some("~hit 6h 25m"));
 
         let _ = std::fs::remove_file(history_path);
     }
