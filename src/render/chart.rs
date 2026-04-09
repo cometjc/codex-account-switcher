@@ -678,6 +678,69 @@ fn best_safe_placement_for_variant(
     best.map(|(x, y, attach_x, _, _)| (x, y, attach_x))
 }
 
+fn best_force_placement_for_variant(
+    anchor: &LabelAnchor,
+    text: &str,
+    graph_area: Rect,
+    label_exclusion_cells: &HashSet<(u16, u16)>,
+    reserved: &HashSet<(u16, u16)>,
+) -> Option<(u16, u16, u16)> {
+    let width = text.chars().count() as u16;
+    if width == 0 || width > graph_area.width {
+        return None;
+    }
+
+    let mut candidates = Vec::new();
+    for step in 0..graph_area.height {
+        let step = step as i16;
+        let offsets = if step == 0 { vec![0] } else { vec![-step, step] };
+        for dy in offsets {
+            let y = anchor.y as i16 + dy;
+            if y < graph_area.top() as i16 || y >= graph_area.bottom() as i16 {
+                continue;
+            }
+            let y = y as u16;
+            for offset in [FALLBACK_LABEL_OFFSET, PREFERRED_LABEL_OFFSET] {
+                let right_x = anchor
+                    .x
+                    .saturating_add(offset)
+                    .min(graph_area.right().saturating_sub(width));
+                if right_x + width <= graph_area.right() {
+                    candidates.push((right_x, y));
+                }
+                let left_x = anchor
+                    .x
+                    .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
+                    .max(graph_area.left());
+                if left_x + width <= graph_area.right() {
+                    candidates.push((left_x, y));
+                }
+            }
+        }
+    }
+
+    let mut best: Option<(u16, u16, u16, u16, u16)> = None;
+    for (x, y) in candidates {
+        if !(0..width).all(|dx| {
+            let cell = (x + dx, y);
+            !reserved.contains(&cell) && !label_exclusion_cells.contains(&cell)
+        }) {
+            continue;
+        }
+        let attach_x = connector_attach_x(x, width, anchor.x);
+        let dy = y.abs_diff(anchor.y);
+        let dx = attach_x.abs_diff(anchor.x);
+        if best
+            .as_ref()
+            .is_none_or(|(_, _, _, best_dy, best_dx)| (dy, dx) < (*best_dy, *best_dx))
+        {
+            best = Some((x, y, attach_x, dy, dx));
+        }
+    }
+
+    best.map(|(x, y, attach_x, _, _)| (x, y, attach_x))
+}
+
 fn layout_end_labels(
     anchors: &[LabelAnchor],
     graph_area: Rect,
@@ -736,66 +799,22 @@ fn layout_end_labels(
         }
 
         let force_variants = std::iter::once(&anchor.text).chain(anchor.fallback_texts.iter());
-        let mut best: Option<(u16, u16, u16, &String, usize, u16, u16)> = None;
+        let mut chosen: Option<(u16, u16, u16, &String)> = None;
 
-        for (variant_idx, text) in force_variants.enumerate() {
-            let width = text.chars().count() as u16;
-            if width == 0 || width > graph_area.width {
-                continue;
-            }
-
-            let mut candidates = Vec::new();
-            for step in 0..graph_area.height {
-                let step = step as i16;
-                let offsets = if step == 0 { vec![0] } else { vec![-step, step] };
-                for dy in offsets {
-                    let y = anchor.y as i16 + dy;
-                    if y < graph_area.top() as i16 || y >= graph_area.bottom() as i16 {
-                        continue;
-                    }
-                    let y = y as u16;
-                    for offset in [FALLBACK_LABEL_OFFSET, PREFERRED_LABEL_OFFSET] {
-                        let right_x = anchor
-                            .x
-                            .saturating_add(offset)
-                            .min(graph_area.right().saturating_sub(width));
-                        if right_x + width <= graph_area.right() {
-                            candidates.push((right_x, y));
-                        }
-                        let left_x = anchor
-                            .x
-                            .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
-                            .max(graph_area.left());
-                        if left_x + width <= graph_area.right() {
-                            candidates.push((left_x, y));
-                        }
-                    }
-                }
-            }
-
-            for (x, y) in candidates {
-                if !(0..width).all(|dx| {
-                    let cell = (x + dx, y);
-                    !reserved.contains(&cell) && !label_exclusion_cells.contains(&cell)
-                }) {
-                    continue;
-                }
-                let attach_x = connector_attach_x(x, width, anchor.x);
-                let dy = y.abs_diff(anchor.y);
-                let dx = attach_x.abs_diff(anchor.x);
-                let candidate = (x, y, attach_x, text, variant_idx, dy, dx);
-                if best
-                    .as_ref()
-                    .is_none_or(|(_, _, _, _, best_variant, best_dy, best_dx)| {
-                        (dy, dx, variant_idx) < (*best_dy, *best_dx, *best_variant)
-                    })
-                {
-                    best = Some(candidate);
-                }
+        for text in force_variants {
+            if let Some((x, y, attach_x)) = best_force_placement_for_variant(
+                anchor,
+                text,
+                graph_area,
+                &label_exclusion_cells,
+                &reserved,
+            ) {
+                chosen = Some((x, y, attach_x, text));
+                break;
             }
         }
 
-        if let Some((x, y, attach_x, text, _, _, _)) = best {
+        if let Some((x, y, attach_x, text)) = chosen {
             let width = text.chars().count() as u16;
             for dx in 0..width {
                 reserved.insert((x + dx, y));
@@ -940,6 +959,99 @@ mod tests {
             .flat_map(|line| line.chars())
             .filter(|symbol| matches!(symbol, '⠁'..='⣿'))
             .count()
+    }
+
+    fn neighboring_priority_state() -> MockState {
+        MockState {
+            selection: SelectionState { selected: None, current: None },
+            chart: ChartState {
+                series: vec![
+                    ChartSeries {
+                        profile: RenderProfile {
+                            id: "beta",
+                            label: "Beta",
+                            is_current: false,
+                            agent_type: "copilot",
+                            window_label: "30d",
+                        },
+                        style: ChartSeriesStyle {
+                            color_slot: 1,
+                            is_selected: false,
+                            is_current: false,
+                            hidden: false,
+                        },
+                        points: vec![ChartPoint { x: 0.0, y: 60.0 }, ChartPoint { x: 4.265625, y: 60.0 }],
+                        last_seven_day_percent: Some(60.0),
+                        five_hour_used_percent: None,
+                        forecast_label: None,
+                        five_hour_subframe: FiveHourSubframeState {
+                            available: false,
+                            start_x: None,
+                            end_x: None,
+                            lower_y: None,
+                            upper_y: None,
+                            reason: Some("no 5h window"),
+                        },
+                        is_zero_state: false,
+                    },
+                    ChartSeries {
+                        profile: RenderProfile {
+                            id: "comet",
+                            label: "comet.jc",
+                            is_current: true,
+                            agent_type: "codex",
+                            window_label: "7d",
+                        },
+                        style: ChartSeriesStyle {
+                            color_slot: 0,
+                            is_selected: true,
+                            is_current: true,
+                            hidden: false,
+                        },
+                        points: vec![ChartPoint { x: 0.0, y: 45.0 }, ChartPoint { x: 4.375, y: 60.0 }],
+                        last_seven_day_percent: Some(60.0),
+                        five_hour_used_percent: Some(0.0),
+                        forecast_label: None,
+                        five_hour_subframe: FiveHourSubframeState {
+                            available: false,
+                            start_x: None,
+                            end_x: None,
+                            lower_y: None,
+                            upper_y: None,
+                            reason: Some("no 5h window"),
+                        },
+                        is_zero_state: false,
+                    },
+                ],
+                seven_day_points: vec![],
+                five_hour_band: FiveHourBandState {
+                    available: false,
+                    used_percent: None,
+                    lower_y: None,
+                    upper_y: None,
+                    delta_seven_day_percent: None,
+                    delta_five_hour_percent: None,
+                    reason: Some("no 5h window"),
+                },
+                five_hour_subframe: FiveHourSubframeState {
+                    available: false,
+                    start_x: None,
+                    end_x: None,
+                    lower_y: None,
+                    upper_y: None,
+                    reason: Some("no 5h window"),
+                },
+                total_points: 4,
+                y_lower: 0.0,
+                y_upper: 100.0,
+                x_lower: 0.0,
+                x_upper: 7.0,
+                solo: false,
+                tab_zoom_label: None,
+                focused: false,
+                fullscreen: false,
+            },
+        }
     }
 
     #[test]
@@ -2457,6 +2569,45 @@ mod tests {
     }
 
     #[test]
+    fn layout_end_labels_force_fallback_preserves_full_compact_minimal_chain() {
+        let anchor = LabelAnchor {
+            text: "FULLFULL".to_string(),
+            fallback_texts: vec!["MID".to_string(), "M".to_string()],
+            color: Color::Cyan,
+            x: 8,
+            y: 3,
+        };
+
+        let occupied = (0..20).map(|x| (x, 3)).collect::<HashSet<_>>();
+        let cases = [
+            (HashSet::from([(0u16, 3u16), (9u16, 3u16)]), "FULLFULL"),
+            (HashSet::from([(0u16, 3u16), (9u16, 3u16), (11u16, 3u16)]), "MID"),
+            (HashSet::from([(0u16, 3u16), (5u16, 3u16), (9u16, 3u16), (11u16, 3u16)]), "M"),
+        ];
+
+        for (blocked, expected) in cases {
+            let labels = layout_end_labels(&[anchor.clone()], Rect::new(0, 3, 20, 1), &occupied, &blocked);
+            assert_eq!(labels.len(), 1, "expected one label for case {expected:?}");
+            assert_eq!(labels[0].text, expected, "expected variant {expected:?}");
+        }
+    }
+
+    #[test]
+    fn layout_end_labels_omits_labels_that_cannot_fit_within_graph_bounds() {
+        let anchors = vec![LabelAnchor {
+            text: "very long full label".to_string(),
+            fallback_texts: vec!["still too wide".to_string(), "too-wide".to_string()],
+            color: Color::Cyan,
+            x: 2,
+            y: 1,
+        }];
+
+        let labels = layout_end_labels(&anchors, Rect::new(0, 0, 4, 3), &HashSet::new(), &HashSet::new());
+
+        assert!(labels.is_empty());
+    }
+
+    #[test]
     fn connector_attach_x_clamps_to_label_span() {
         assert_eq!(connector_attach_x(20, 10, 5), 20);
         assert_eq!(connector_attach_x(20, 10, 26), 26);
@@ -2472,6 +2623,93 @@ mod tests {
         assert!(cells.contains(&(13, 8)));
         assert!(!cells.contains(&(24, 10)));
         assert!(!cells.contains(&(12, 8)));
+    }
+
+    #[test]
+    fn render_chart_keeps_full_end_label_when_left_side_is_the_only_safe_space() {
+        let state = neighboring_priority_state();
+        let lines = render_lines(&state, 72, 18);
+        let joined = lines.join("\n");
+
+        assert!(
+            joined.contains("[codex 7d] comet.jc 60%/0%"),
+            "expected full codex label to appear, got:\n{joined}"
+        );
+    }
+
+    #[test]
+    fn render_chart_applies_full_label_priority_per_anchor() {
+        let state = neighboring_priority_state();
+        let graph_area = chart_graph_area(
+            Rect::new(0, 0, 72, 18),
+            "start",
+            ["0%", "25%", "50%", "75%", "100%"],
+        );
+        assert_eq!(project_x(4.265625, graph_area, [0.0, 7.0]), 45);
+        assert_eq!(project_x(4.375, graph_area, [0.0, 7.0]), 46);
+        assert_eq!(project_y(60.0, graph_area, [0.0, 100.0]), 6);
+
+        let lines = render_lines(&state, 72, 18);
+        let joined = lines.join("\n");
+
+        assert!(
+            joined.contains("[codex 7d] comet.jc 60%/0%"),
+            "expected full codex label, got:\n{joined}"
+        );
+        assert!(
+            joined.contains("[copilot 30d] Beta 60%"),
+            "expected full copilot label, got:\n{joined}"
+        );
+    }
+
+    #[test]
+    fn format_end_label_keeps_forecast_suffix_on_full_variant() {
+        let mut series = neighboring_priority_state().chart.series[1].clone();
+        series.forecast_label = Some("Hit limit · resets in 3h");
+
+        assert_eq!(
+            format_end_label(&series),
+            "[codex 7d] comet.jc 60%/0% Hit limit · resets in 3h"
+        );
+    }
+
+    #[test]
+    fn compact_end_label_variants_omit_forecast_suffix() {
+        let mut series = neighboring_priority_state().chart.series[1].clone();
+        series.forecast_label = Some("Hit limit · resets in 3h");
+
+        let compact = compact_end_label_variants(&series);
+        assert!(
+            compact.iter().all(|line| !line.contains("Hit limit · resets in 3h")),
+            "compact variants should not include forecast suffix, got: {compact:?}"
+        );
+    }
+
+    #[test]
+    fn layout_end_labels_force_fallback_keeps_full_label_with_forecast_suffix() {
+        let mut series = neighboring_priority_state().chart.series[1].clone();
+        series.forecast_label = Some("Hit limit · resets in 3h");
+
+        let anchor = LabelAnchor {
+            text: format_end_label(&series),
+            fallback_texts: compact_end_label_variants(&series),
+            color: Color::Cyan,
+            x: 20,
+            y: 3,
+        };
+        let occupied = (0..64).map(|x| (x, 3)).collect::<HashSet<_>>();
+        // Only block the far-left side; (21,3) was in the original plan spec but its exclusion
+        // expansion to {(20,3),(21,3),(22,3)} makes every 51-char placement impossible in a
+        // 64-wide graph — corrected to single left-side blocker so the full label can fit at x=13.
+        let blocked = HashSet::from([(0u16, 3u16)]);
+
+        let labels = layout_end_labels(&[anchor], Rect::new(0, 3, 64, 1), &occupied, &blocked);
+
+        assert_eq!(labels.len(), 1);
+        assert!(
+            labels[0].text.contains("Hit limit · resets in 3h"),
+            "expected forecast suffix in placed label, got: {:?}", labels[0].text
+        );
     }
 
 
