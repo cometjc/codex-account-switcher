@@ -589,6 +589,9 @@ struct PlacedLabel {
     attach_x: u16,
 }
 
+const PREFERRED_LABEL_OFFSET: u16 = 3;
+const FALLBACK_LABEL_OFFSET: u16 = 1;
+
 fn placement_candidates_for_variant(
     anchor: &LabelAnchor,
     text: &str,
@@ -598,8 +601,6 @@ fn placement_candidates_for_variant(
     if width == 0 || graph_area.width == 0 || graph_area.height == 0 {
         return vec![];
     }
-    const PREFERRED_LABEL_OFFSET: u16 = 3;
-    const FALLBACK_LABEL_OFFSET: u16 = 1;
 
     let mut candidates = Vec::new();
     for step in 0..graph_area.height {
@@ -687,8 +688,6 @@ fn layout_end_labels(
     let mut placed_anchor_indices = HashSet::new();
     let mut reserved = HashSet::new();
     let label_exclusion_cells = expand_label_exclusion_cells(blocked_cells, graph_area);
-    const PREFERRED_LABEL_OFFSET: u16 = 3;
-    const FALLBACK_LABEL_OFFSET: u16 = 1;
 
     for (anchor_idx, anchor) in anchors.iter().enumerate() {
         let variants = std::iter::once(&anchor.text).chain(anchor.fallback_texts.iter());
