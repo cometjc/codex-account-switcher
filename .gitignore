@@ -8,3 +8,4 @@ target/
 .claude/
 .github/hooks/
 docs/superpowers/plans/
+tasks/todo.md
