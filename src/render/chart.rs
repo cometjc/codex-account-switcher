@@ -589,6 +589,94 @@ struct PlacedLabel {
     attach_x: u16,
 }
 
+fn placement_candidates_for_variant(
+    anchor: &LabelAnchor,
+    text: &str,
+    graph_area: Rect,
+) -> Vec<(u16, u16)> {
+    let width = text.chars().count() as u16;
+    if width == 0 || graph_area.width == 0 || graph_area.height == 0 {
+        return vec![];
+    }
+    const PREFERRED_LABEL_OFFSET: u16 = 3;
+    const FALLBACK_LABEL_OFFSET: u16 = 1;
+
+    let mut candidates = Vec::new();
+    for step in 0..graph_area.height {
+        let step = step as i16;
+        let offsets = if step == 0 { vec![0] } else { vec![-step, step] };
+        for dy in offsets {
+            let y = anchor.y as i16 + dy;
+            if y < graph_area.top() as i16 || y >= graph_area.bottom() as i16 {
+                continue;
+            }
+            let y = y as u16;
+            for offset in [PREFERRED_LABEL_OFFSET, FALLBACK_LABEL_OFFSET] {
+                let right_x = anchor.x.saturating_add(offset);
+                if right_x + width <= graph_area.right() {
+                    candidates.push((right_x, y));
+                }
+                let left_x = anchor
+                    .x
+                    .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
+                    .max(graph_area.left());
+                if left_x >= graph_area.left() && left_x + width <= graph_area.right() {
+                    candidates.push((left_x, y));
+                }
+            }
+        }
+    }
+    candidates
+}
+
+fn best_safe_placement_for_variant(
+    anchor: &LabelAnchor,
+    text: &str,
+    graph_area: Rect,
+    occupied_cells: &HashSet<(u16, u16)>,
+    label_exclusion_cells: &HashSet<(u16, u16)>,
+    blocked_cells: &HashSet<(u16, u16)>,
+    reserved: &HashSet<(u16, u16)>,
+) -> Option<(u16, u16, u16)> {
+    let width = text.chars().count() as u16;
+    if width == 0 {
+        return None;
+    }
+
+    let candidates = placement_candidates_for_variant(anchor, text, graph_area);
+    let mut best: Option<(u16, u16, u16, u16, u16)> = None;
+
+    for (x, y) in candidates {
+        let attach_x = connector_attach_x(x, width, anchor.x);
+        let label_cells_ok = (0..width).all(|dx| {
+            let cell = (x + dx, y);
+            !occupied_cells.contains(&cell)
+                && !label_exclusion_cells.contains(&cell)
+                && !reserved.contains(&cell)
+        });
+        if !label_cells_ok {
+            continue;
+        }
+        if !connector_cells(attach_x, y, anchor.x, anchor.y, graph_area)
+            .into_iter()
+            .all(|cell| !blocked_cells.contains(&cell) && !reserved.contains(&cell))
+        {
+            continue;
+        }
+
+        let dy = y.abs_diff(anchor.y);
+        let dx = attach_x.abs_diff(anchor.x);
+        if best
+            .as_ref()
+            .is_none_or(|(_, _, _, best_dy, best_dx)| (dy, dx) < (*best_dy, *best_dx))
+        {
+            best = Some((x, y, attach_x, dy, dx));
+        }
+    }
+
+    best.map(|(x, y, attach_x, _, _)| (x, y, attach_x))
+}
+
 fn layout_end_labels(
     anchors: &[LabelAnchor],
     graph_area: Rect,
@@ -603,74 +691,25 @@ fn layout_end_labels(
     const FALLBACK_LABEL_OFFSET: u16 = 1;
 
     for (anchor_idx, anchor) in anchors.iter().enumerate() {
-        let text_variants = std::iter::once(&anchor.text).chain(anchor.fallback_texts.iter());
-        let mut best: Option<(u16, u16, u16, &String, usize, u16, u16)> = None;
+        let variants = std::iter::once(&anchor.text).chain(anchor.fallback_texts.iter());
+        let mut best: Option<(u16, u16, u16, &String)> = None;
 
-        for (variant_idx, text) in text_variants.enumerate() {
-            let width = text.chars().count() as u16;
-            if width == 0 || graph_area.width == 0 || graph_area.height == 0 {
-                continue;
-            }
-
-            let mut candidates = Vec::new();
-            for step in 0..graph_area.height {
-                let step = step as i16;
-                let offsets = if step == 0 { vec![0] } else { vec![-step, step] };
-                for dy in offsets {
-                    let y = anchor.y as i16 + dy;
-                    if y < graph_area.top() as i16 || y >= graph_area.bottom() as i16 {
-                        continue;
-                    }
-                    let y = y as u16;
-                    for offset in [PREFERRED_LABEL_OFFSET, FALLBACK_LABEL_OFFSET] {
-                        let right_x = anchor.x.saturating_add(offset);
-                        if right_x + width <= graph_area.right() {
-                            candidates.push((right_x, y));
-                        }
-                        let left_x = anchor
-                            .x
-                            .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
-                            .max(graph_area.left());
-                        if left_x >= graph_area.left() && left_x + width <= graph_area.right() {
-                            candidates.push((left_x, y));
-                        }
-                    }
-                }
-            }
-
-            for (x, y) in candidates {
-                let attach_x = connector_attach_x(x, width, anchor.x);
-                let label_cells_ok = (0..width).all(|dx| {
-                    let cell = (x + dx, y);
-                    !occupied_cells.contains(&cell)
-                        && !label_exclusion_cells.contains(&cell)
-                        && !reserved.contains(&cell)
-                });
-                if !label_cells_ok {
-                    continue;
-                }
-                if !connector_cells(attach_x, y, anchor.x, anchor.y, graph_area)
-                    .into_iter()
-                    .all(|cell| !blocked_cells.contains(&cell) && !reserved.contains(&cell))
-                {
-                    continue;
-                }
-
-                let dy = y.abs_diff(anchor.y);
-                let dx = attach_x.abs_diff(anchor.x);
-                let candidate = (x, y, attach_x, text, variant_idx, dy, dx);
-                if best
-                    .as_ref()
-                    .is_none_or(|(_, _, _, _, best_variant, best_dy, best_dx)| {
-                        (dy, dx, variant_idx) < (*best_dy, *best_dx, *best_variant)
-                    })
-                {
-                    best = Some(candidate);
-                }
+        for variant_text in variants {
+            if let Some((x, y, attach_x)) = best_safe_placement_for_variant(
+                anchor,
+                variant_text,
+                graph_area,
+                occupied_cells,
+                &label_exclusion_cells,
+                blocked_cells,
+                &reserved,
+            ) {
+                best = Some((x, y, attach_x, variant_text));
+                break;
             }
         }
 
-        if let Some((x, y, attach_x, text, _, _, _)) = best {
+        if let Some((x, y, attach_x, text)) = best {
             let width = text.chars().count() as u16;
             let connector = connector_cells(attach_x, y, anchor.x, anchor.y, graph_area);
             for cell in connector {
@@ -935,6 +974,48 @@ mod tests {
                 assert!(!occupied.contains(&cell));
                 assert!(!blocked.contains(&cell));
             }
+        }
+    }
+
+    #[test]
+    fn layout_end_labels_prefers_full_variant_over_closer_compact_slot() {
+        let anchors = vec![LabelAnchor {
+            text: "FULLFULL".to_string(),
+            fallback_texts: vec!["MID".to_string(), "M".to_string()],
+            color: Color::Cyan,
+            x: 8,
+            y: 3,
+        }];
+
+        let occupied = HashSet::from([(0, 3), (9, 3)]);
+
+        let labels = layout_end_labels(&anchors, Rect::new(0, 3, 20, 1), &occupied, &HashSet::new());
+
+        assert_eq!(labels.len(), 1);
+        assert_eq!(labels[0].text, "FULLFULL");
+        assert_eq!(labels[0].x, 11);
+    }
+
+    #[test]
+    fn layout_end_labels_preserves_full_compact_minimal_chain() {
+        let anchor = LabelAnchor {
+            text: "FULLFULL".to_string(),
+            fallback_texts: vec!["MID".to_string(), "M".to_string()],
+            color: Color::Yellow,
+            x: 8,
+            y: 3,
+        };
+
+        let cases = [
+            (HashSet::from([(0, 3)]), "FULLFULL"),
+            (HashSet::from([(0, 3), (9, 3), (11, 3)]), "MID"),
+            (HashSet::from([(0, 3), (5, 3), (9, 3), (11, 3)]), "M"),
+        ];
+
+        for (occupied, expected) in cases {
+            let labels = layout_end_labels(&[anchor.clone()], Rect::new(0, 3, 20, 1), &occupied, &HashSet::new());
+            assert_eq!(labels.len(), 1);
+            assert_eq!(labels[0].text, expected);
         }
     }
 
