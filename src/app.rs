@@ -2314,6 +2314,77 @@ mod tests {
     }
 
     #[test]
+    fn account_detail_keeps_metadata_before_five_hour_line() {
+        let profile = ProfileEntry {
+            kind: ProfileKind::Claude,
+            saved_name: Some("team".to_string()),
+            profile_name: "team".to_string(),
+            snapshot: serde_json::json!({}),
+            usage_view: UsageReadResult {
+                usage: Some(UsageResponse {
+                    email: Some("team@example.com".to_string()),
+                    plan_type: Some("pro".to_string()),
+                    rate_limit: Some(crate::usage::UsageRateLimit {
+                        primary_window: Some(crate::usage::UsageWindow {
+                            used_percent: 28.0,
+                            limit_window_seconds: 604_800,
+                            reset_at: 1_800_000_000,
+                            reset_after_seconds: 12_345,
+                        }),
+                        secondary_window: Some(crate::usage::UsageWindow {
+                            used_percent: 64.0,
+                            limit_window_seconds: 18_000,
+                            reset_at: 1_800_000_000,
+                            reset_after_seconds: 3_600,
+                        }),
+                    }),
+                }),
+                source: UsageSource::Api,
+                fetched_at: Some(1_700_000_000),
+                stale: false,
+            },
+            account_id: Some("claude-team".to_string()),
+            is_current: false,
+            chart_data: ProfileChartData::empty("no usage data"),
+        };
+
+        let lines = render_account_detail(Some(&profile), None);
+        let rendered = lines.iter().map(Line::to_string).collect::<Vec<_>>();
+
+        for expected in [
+            "Profile: team",
+            "Service: Claude [claude]",
+            "State: saved",
+            "Last updated: ",
+            "Plan: pro",
+            "Quota: 28% used, reset in ",
+            "5h: 64% used, reset in ",
+        ] {
+            assert!(
+                rendered.iter().any(|line| line.starts_with(expected)),
+                "missing line starting with {expected:?}: {rendered:?}"
+            );
+        }
+
+        let profile_idx = rendered.iter().position(|line| line.starts_with("Profile: ")).unwrap();
+        let service_idx = rendered.iter().position(|line| line.starts_with("Service: ")).unwrap();
+        let state_idx = rendered.iter().position(|line| line.starts_with("State: ")).unwrap();
+        let updated_idx = rendered.iter().position(|line| line.starts_with("Last updated: ")).unwrap();
+        let email_idx = rendered.iter().position(|line| line.starts_with("Email: ")).unwrap();
+        let plan_idx = rendered.iter().position(|line| line.starts_with("Plan: ")).unwrap();
+        let quota_idx = rendered.iter().position(|line| line.starts_with("Quota: ")).unwrap();
+        let fiveh_idx = rendered.iter().position(|line| line.starts_with("5h: ")).unwrap();
+
+        assert!(profile_idx < service_idx);
+        assert!(service_idx < state_idx);
+        assert!(state_idx < updated_idx);
+        assert!(updated_idx < email_idx);
+        assert!(email_idx < plan_idx);
+        assert!(plan_idx < quota_idx);
+        assert!(quota_idx < fiveh_idx);
+    }
+
+    #[test]
     fn account_detail_hides_five_hour_line_for_copilot() {
         let profile = ProfileEntry {
             kind: ProfileKind::Copilot,
