@@ -599,6 +599,30 @@ struct PlacedLabel {
 const PREFERRED_LABEL_OFFSET: u16 = 3;
 const FALLBACK_LABEL_OFFSET: u16 = 1;
 
+fn expand_label_exclusion_cells(
+    blocked_cells: &HashSet<(u16, u16)>,
+    graph_area: Rect,
+) -> HashSet<(u16, u16)> {
+    let mut expanded = HashSet::new();
+    for &(x, y) in blocked_cells {
+        for dx in -1i16..=1 {
+            for dy in -1i16..=1 {
+                let expanded_x = x as i16 + dx;
+                let expanded_y = y as i16 + dy;
+                if expanded_x < graph_area.left() as i16
+                    || expanded_x >= graph_area.right() as i16
+                    || expanded_y < graph_area.top() as i16
+                    || expanded_y >= graph_area.bottom() as i16
+                {
+                    continue;
+                }
+                expanded.insert((expanded_x as u16, expanded_y as u16));
+            }
+        }
+    }
+    expanded
+}
+
 fn layout_end_labels(
     anchors: &[LabelAnchor],
     graph_area: Rect,
@@ -608,6 +632,7 @@ fn layout_end_labels(
     let mut placed = Vec::new();
     let mut placed_anchor_indices = HashSet::new();
     let mut reserved = HashSet::new();
+    let label_exclusion_cells = expand_label_exclusion_cells(blocked_cells, graph_area);
 
     for (anchor_idx, anchor) in anchors.iter().enumerate() {
         let text_variants = std::iter::once(&anchor.text).chain(anchor.fallback_texts.iter());
@@ -648,12 +673,13 @@ fn layout_end_labels(
 
             for (x, y) in candidates {
                 let attach_x = connector_attach_x(x, width, anchor.x);
-                // ensure all cells for the multiline label are free
+                // ensure all cells for the multiline label are free; use expanded exclusion zone
+                // around blocked cells (1-cell safety margin) for safe placement
                 let label_cells_ok = (0..height).all(|line_i| {
                     (0..width).all(|dx| {
                         let cell = (x + dx, y + line_i);
                         !occupied_cells.contains(&cell)
-                            && !blocked_cells.contains(&cell)
+                            && !label_exclusion_cells.contains(&cell)
                             && !reserved.contains(&cell)
                     })
                 });
@@ -673,7 +699,7 @@ fn layout_end_labels(
                 if best
                     .as_ref()
                     .is_none_or(|(_, _, _, _, best_variant, best_dy, best_dx)| {
-                        (dy, dx, variant_idx) < (*best_dy, *best_dx, *best_variant)
+                        (variant_idx, dy, dx) < (*best_variant, *best_dy, *best_dx)
                     })
                 {
                     best = Some(candidate);
@@ -711,62 +737,72 @@ fn layout_end_labels(
             continue;
         }
 
-        let force_variants = std::iter::once(&anchor.text).chain(anchor.fallback_texts.iter());
+        // Force placement: two-phase. Phase 1 avoids blocked cells when possible.
+        // Phase 2 ignores blocked cells if phase 1 found no placement (last-resort).
         let mut best: Option<(u16, u16, u16, &Vec<String>, usize, u16, u16)> = None;
 
-        for (variant_idx, text) in force_variants.enumerate() {
-            let width = text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
-            let height = text.len() as u16;
-            if width == 0 || width > graph_area.width {
-                continue;
-            }
-
-            let mut candidates = Vec::new();
-            for step in 0..graph_area.height {
-                let step = step as i16;
-                let offsets = if step == 0 { vec![0] } else { vec![-step, step] };
-                for dy in offsets {
-                    let y = anchor.y as i16 + dy;
-                    if y < graph_area.top() as i16 || (y as u16).saturating_add(height).saturating_sub(1) >= graph_area.bottom() {
+        for avoid_blocked in [true, false] {
+            if avoid_blocked || best.is_none() {
+                let force_variants = std::iter::once(&anchor.text).chain(anchor.fallback_texts.iter());
+                for (variant_idx, text) in force_variants.enumerate() {
+                    let width = text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
+                    let height = text.len() as u16;
+                    if width == 0 || width > graph_area.width {
                         continue;
                     }
-                    let y = y as u16;
-                    for offset in [FALLBACK_LABEL_OFFSET, PREFERRED_LABEL_OFFSET] {
-                        let right_x = anchor
-                            .x
-                            .saturating_add(offset)
-                            .min(graph_area.right().saturating_sub(width));
-                        if right_x + width <= graph_area.right() {
-                            candidates.push((right_x, y));
-                        }
-                        let left_x = anchor
-                            .x
-                            .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
-                            .max(graph_area.left());
-                        if left_x + width <= graph_area.right() {
-                            candidates.push((left_x, y));
+
+                    let mut candidates = Vec::new();
+                    for step in 0..graph_area.height {
+                        let step = step as i16;
+                        let offsets = if step == 0 { vec![0] } else { vec![-step, step] };
+                        for dy in offsets {
+                            let y = anchor.y as i16 + dy;
+                            if y < graph_area.top() as i16 || (y as u16).saturating_add(height).saturating_sub(1) >= graph_area.bottom() {
+                                continue;
+                            }
+                            let y = y as u16;
+                            for offset in [FALLBACK_LABEL_OFFSET, PREFERRED_LABEL_OFFSET] {
+                                let right_x = anchor
+                                    .x
+                                    .saturating_add(offset)
+                                    .min(graph_area.right().saturating_sub(width));
+                                if right_x + width <= graph_area.right() {
+                                    candidates.push((right_x, y));
+                                }
+                                let left_x = anchor
+                                    .x
+                                    .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
+                                    .max(graph_area.left());
+                                if left_x + width <= graph_area.right() {
+                                    candidates.push((left_x, y));
+                                }
+                            }
                         }
                     }
-                }
-            }
 
-            for (x, y) in candidates {
-                if !(0..height).all(|line_i| {
-                    (0..width).all(|dx| !reserved.contains(&(x + dx, y + line_i)))
-                }) {
-                    continue;
-                }
-                let attach_x = connector_attach_x(x, width, anchor.x);
-                let dy = y.abs_diff(anchor.y);
-                let dx = attach_x.abs_diff(anchor.x);
-                let candidate = (x, y, attach_x, text, variant_idx, dy, dx);
-                if best
-                    .as_ref()
-                    .is_none_or(|(_, _, _, _, best_variant, best_dy, best_dx)| {
-                        (dy, dx, variant_idx) < (*best_dy, *best_dx, *best_variant)
-                    })
-                {
-                    best = Some(candidate);
+                    for (x, y) in candidates {
+                        if !(0..height).all(|line_i| {
+                            (0..width).all(|dx| {
+                                let cell = (x + dx, y + line_i);
+                                !reserved.contains(&cell)
+                                    && (!avoid_blocked || !blocked_cells.contains(&cell))
+                            })
+                        }) {
+                            continue;
+                        }
+                        let attach_x = connector_attach_x(x, width, anchor.x);
+                        let dy = y.abs_diff(anchor.y);
+                        let dx = attach_x.abs_diff(anchor.x);
+                        let candidate = (x, y, attach_x, text, variant_idx, dy, dx);
+                        if best
+                            .as_ref()
+                            .is_none_or(|(_, _, _, _, best_variant, best_dy, best_dx)| {
+                                (variant_idx, dy, dx) < (*best_variant, *best_dy, *best_dx)
+                            })
+                        {
+                            best = Some(candidate);
+                        }
+                    }
                 }
             }
         }
