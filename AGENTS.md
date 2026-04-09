@@ -70,10 +70,11 @@
 1. **Dirty Tree Gate**: Before writing session `plan.md` or implementation files, inspect `git status`; if the current tree is dirty and the dirty paths are not the exact work you are continuing, create and switch to a dedicated worktree first, then do planning and follow-up work there.
 2. **Code-change flow**: 凡是會修改程式、規則、腳本、文件結構或其他 tracked 檔案的工作，都不應再直接靠 `todo.md` 開工；入口改成 `$superpower-dev:do`。
 3. **Local todo scope**: `tasks/todo.md` is local-only scratchpad for non-code housekeeping; do not use it as the authoritative plan for code changes.
-4. **Track Progress**: Mark checklist items complete as you go in the active spec/plan surfaces.
-5. **Explain Changes**: High-level summary at each step.
-6. **Document Results**: Add review/verification outcomes to the active spec/plan surfaces.
-7. **Capture Lessons**: Update `tasks/lessons.md` after corrections.
+4. **AUQ confirmation gate**: 走 `$superpower-dev:do` 時，若需要在執行器或候選 plan 間做確認／歧義消解，必須使用 AUQ（`mcp__ask_user_questions__ask_user_questions`），不要改用純文字提問。
+5. **Track Progress**: Mark checklist items complete as you go in the active spec/plan surfaces.
+6. **Explain Changes**: High-level summary at each step.
+7. **Document Results**: Add review/verification outcomes to the active spec/plan surfaces.
+8. **Capture Lessons**: Update `tasks/lessons.md` after corrections.
 
 ---
 
