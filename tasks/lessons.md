@@ -63,3 +63,4 @@
 - 當使用者糾正 zero-state chart 的呈現語意時，不要把 shared anchor 與 origin point 視為二選一；單一 zero-state 可以保留 shared anchor，但仍必須明確畫出 `(0,0)` 的資料點。
 - 當使用者進一步指定 zero-state anchor 的幾何形狀時，要把「文字存在」和「連接關係正確」分開驗證；像單一 `┌─ xxx`、多個 `┌─/├─` 並貼著原點這種 branch 形狀，必須直接寫進 render regression tests，不能只驗證文案內容。
 - 當使用者指定多個 reset countdown 的選擇規則時，不要偷懶用固定視窗優先序（例如永遠偏 7d）；要把真正的產品語意寫死，例如「兩者都滿時取較長 countdown」，並同步補進 spec 與測試案例。
+- 當 forecast 與 reset line 都需要呈現 ETA 時，禁止在單一模組自行格式化小時小數（如 `67.1h`）；必須共用同一個 duration helper，確保輸出一致為 `xxd xxh` / `xxh xxm` / `xxm` 格式。

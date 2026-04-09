@@ -545,10 +545,7 @@ fn format_end_label(series: &super::ChartSeries<'_>) -> String {
             format_unsigned_percent(series.five_hour_used_percent),
         )
     };
-    match series.forecast_label {
-        Some(forecast) => format!("{base} {forecast}"),
-        None => base,
-    }
+    base
 }
 
 #[cfg(test)]
@@ -573,6 +570,20 @@ fn compact_end_label_variants(series: &super::ChartSeries<'_>) -> Vec<String> {
         }
     }
     variants
+}
+
+#[cfg(test)]
+fn split_hit_reset_lines(text: &str) -> Vec<String> {
+    let mut parts = text
+        .split('·')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        parts.push(text.trim().to_string());
+    }
+    parts
 }
 
 
@@ -636,7 +647,7 @@ fn layout_end_labels(
 
     for (anchor_idx, anchor) in anchors.iter().enumerate() {
         let text_variants = std::iter::once(&anchor.text).chain(anchor.fallback_texts.iter());
-        let mut best: Option<(u16, u16, u16, &Vec<String>, usize, u16, u16)> = None;
+        let mut best: Option<(u16, u16, u16, &Vec<String>, usize, u16, u16, u16, u16)> = None;
 
         for (variant_idx, text) in text_variants.enumerate() {
             let width = text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
@@ -673,8 +684,8 @@ fn layout_end_labels(
 
             for (x, y) in candidates {
                 let attach_x = connector_attach_x(x, width, anchor.x);
-                // ensure all cells for the multiline label are free; use expanded exclusion zone
-                // around blocked cells (1-cell safety margin) for safe placement
+                // Primary placement keeps labels off occupied plot cells.
+                // Re-placement fallback below can overlap occupied cells with scoring.
                 let label_cells_ok = (0..height).all(|line_i| {
                     (0..width).all(|dx| {
                         let cell = (x + dx, y + line_i);
@@ -695,11 +706,18 @@ fn layout_end_labels(
 
                 let dy = y.abs_diff(anchor.y);
                 let dx = attach_x.abs_diff(anchor.x);
-                let candidate = (x, y, attach_x, text, variant_idx, dy, dx);
+                let candidate = (x, y, attach_x, text, variant_idx, 0u16, connector_length(attach_x, y, anchor.x, anchor.y, graph_area), dy, dx);
                 if best
                     .as_ref()
-                    .is_none_or(|(_, _, _, _, best_variant, best_dy, best_dx)| {
-                        (variant_idx, dy, dx) < (*best_variant, *best_dy, *best_dx)
+                    .is_none_or(|(_, _, _, _, best_variant, best_overlap, best_connector, best_dy, best_dx)| {
+                        (
+                            variant_idx,
+                            0u16,
+                            connector_length(attach_x, y, anchor.x, anchor.y, graph_area),
+                            dy,
+                            dx,
+                        )
+                            < (*best_variant, *best_overlap, *best_connector, *best_dy, *best_dx)
                     })
                 {
                     best = Some(candidate);
@@ -707,7 +725,7 @@ fn layout_end_labels(
             }
         }
 
-        if let Some((x, y, attach_x, text, _, _, _)) = best {
+        if let Some((x, y, attach_x, text, _, _, _, _, _)) = best {
             let width = text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
             let height = text.len() as u16;
             let connector = connector_cells(attach_x, y, anchor.x, anchor.y, graph_area);
@@ -739,7 +757,7 @@ fn layout_end_labels(
 
         // Force placement: two-phase. Phase 1 avoids blocked cells when possible.
         // Phase 2 ignores blocked cells if phase 1 found no placement (last-resort).
-        let mut best: Option<(u16, u16, u16, &Vec<String>, usize, u16, u16)> = None;
+        let mut best: Option<(u16, u16, u16, &Vec<String>, usize, u16, u16, u16, u16)> = None;
 
         for avoid_blocked in [true, false] {
             if avoid_blocked || best.is_none() {
@@ -793,11 +811,14 @@ fn layout_end_labels(
                         let attach_x = connector_attach_x(x, width, anchor.x);
                         let dy = y.abs_diff(anchor.y);
                         let dx = attach_x.abs_diff(anchor.x);
-                        let candidate = (x, y, attach_x, text, variant_idx, dy, dx);
+                        let overlap = count_label_overlap(x, y, width, height, occupied_cells);
+                        let connector_len = connector_length(attach_x, y, anchor.x, anchor.y, graph_area);
+                        let candidate = (x, y, attach_x, text, variant_idx, overlap, connector_len, dy, dx);
                         if best
                             .as_ref()
-                            .is_none_or(|(_, _, _, _, best_variant, best_dy, best_dx)| {
-                                (variant_idx, dy, dx) < (*best_variant, *best_dy, *best_dx)
+                            .is_none_or(|(_, _, _, _, best_variant, best_overlap, best_connector, best_dy, best_dx)| {
+                                (variant_idx, overlap, connector_len, dy, dx)
+                                    < (*best_variant, *best_overlap, *best_connector, *best_dy, *best_dx)
                             })
                         {
                             best = Some(candidate);
@@ -807,7 +828,7 @@ fn layout_end_labels(
             }
         }
 
-        if let Some((x, y, attach_x, text, _, _, _)) = best {
+        if let Some((x, y, attach_x, text, _, _, _, _, _)) = best {
             let width = text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
             let height = text.len() as u16;
             for line_i in 0..height {
@@ -830,6 +851,34 @@ fn layout_end_labels(
     }
 
     placed
+}
+
+fn count_label_overlap(
+    x: u16,
+    y: u16,
+    width: u16,
+    height: u16,
+    occupied_cells: &HashSet<(u16, u16)>,
+) -> u16 {
+    let mut overlap = 0u16;
+    for line_i in 0..height {
+        for dx in 0..width {
+            if occupied_cells.contains(&(x + dx, y + line_i)) {
+                overlap = overlap.saturating_add(1);
+            }
+        }
+    }
+    overlap
+}
+
+fn connector_length(
+    attach_x: u16,
+    label_y: u16,
+    anchor_x: u16,
+    anchor_y: u16,
+    graph_area: Rect,
+) -> u16 {
+    connector_cells(attach_x, label_y, anchor_x, anchor_y, graph_area).len() as u16
 }
 
 fn connector_cells(
@@ -1256,7 +1305,8 @@ mod tests {
             chart_labels::full_label_lines(&series),
             vec![
                 "[codex 7d] Alpha 100%/40%".to_string(),
-                "Hit limit · resets in 1h".to_string(),
+                "Hit limit".to_string(),
+                "resets in 1h".to_string(),
             ]
         );
     }
@@ -1311,7 +1361,8 @@ mod tests {
         let anchors = vec![LabelAnchor {
             text: vec![
                 "[codex 7d] Alpha 100%/40%".to_string(),
-                "Hit limit · resets in 1h".to_string(),
+                "Hit limit".to_string(),
+                "resets in 1h".to_string(),
             ],
             fallback_texts: vec![vec!["Alpha 100%".to_string()], vec!["Alpha".to_string()]],
             color: Color::Cyan,
@@ -1326,7 +1377,8 @@ mod tests {
             labels[0].text,
             vec![
                 "[codex 7d] Alpha 100%/40%".to_string(),
-                "Hit limit · resets in 1h".to_string(),
+                "Hit limit".to_string(),
+                "resets in 1h".to_string(),
             ]
         );
     }
@@ -1391,7 +1443,8 @@ mod tests {
             .join("\n");
 
         assert!(joined.contains("[codex 7d] Alpha 100%/40%"));
-        assert!(joined.contains("Hit limit · resets in 1h"));
+        assert!(joined.contains("Hit limit"));
+        assert!(joined.contains("resets in 1h"));
     }
 
     #[test]
@@ -1454,11 +1507,12 @@ mod tests {
             .join("\n");
 
         assert!(joined.contains("[codex 7d] Alpha 100%/40%"));
-        assert!(!joined.contains("Hit limit · resets in 1h"));
+        assert!(!joined.contains("Hit limit"));
+        assert!(!joined.contains("resets in 1h"));
     }
 
     #[test]
-    fn format_end_label_appends_forecast_label_when_available() {
+    fn full_label_lines_splits_hit_reset_forecast_into_multiple_lines() {
         let series = ChartSeries {
             profile: RenderProfile {
                 id: "cc",
@@ -1489,12 +1543,18 @@ mod tests {
             reset_line_display: None,
         };
 
-        assert_eq!(format_end_label(&series), "[claude 7d] CC 46%/16% reset 3.5h");
+        assert_eq!(
+            chart_labels::full_label_lines(&series),
+            vec![
+                "[claude 7d] CC 46%/16%".to_string(),
+                "reset 3.5h".to_string(),
+            ]
+        );
         assert_eq!(compact_end_label_variants(&series), vec!["CC 46%".to_string(), "CC".to_string()]);
     }
 
     #[test]
-    fn format_end_label_appends_forecast_for_copilot_without_five_hour_suffix() {
+    fn full_label_lines_splits_hit_reset_forecast_for_copilot_without_five_hour_suffix() {
         let series = ChartSeries {
             profile: RenderProfile {
                 id: "team",
@@ -1525,7 +1585,13 @@ mod tests {
             reset_line_display: None,
         };
 
-        assert_eq!(format_end_label(&series), "[copilot 30d] teamt5-it 88% ~hit 6.4h");
+        assert_eq!(
+            chart_labels::full_label_lines(&series),
+            vec![
+                "[copilot 30d] teamt5-it 88%".to_string(),
+                "~hit 6.4h".to_string(),
+            ]
+        );
     }
 
     #[test]
@@ -2741,6 +2807,55 @@ mod tests {
     }
 
     #[test]
+    fn layout_end_labels_prefers_fewer_overlap_cells_over_shorter_connector() {
+        let anchors = vec![LabelAnchor {
+            text: vec!["ABCD".to_string()],
+            fallback_texts: vec![],
+            color: Color::Yellow,
+            x: 10,
+            y: 5,
+        }];
+
+        let graph_area = Rect::new(0, 0, 30, 10);
+        let occupied = (0..graph_area.bottom())
+            .flat_map(|y| [(11, y), (12, y), (6, y), (7, y), (8, y), (9, y)])
+            .collect::<HashSet<_>>();
+        let blocked = (graph_area.left()..graph_area.right())
+            .flat_map(|x| (graph_area.top()..graph_area.bottom()).map(move |y| (x, y)))
+            .collect::<HashSet<_>>();
+        let labels = layout_end_labels(&anchors, graph_area, &occupied, &blocked);
+
+        assert_eq!(labels.len(), 1);
+        assert_eq!(labels[0].x, 13, "expected placement with minimal overlap even though connector is longer");
+        assert_eq!(labels[0].y, 5);
+    }
+
+    #[test]
+    fn layout_end_labels_prefers_shorter_connector_when_overlap_is_tied() {
+        let anchors = vec![LabelAnchor {
+            text: vec!["ABCD".to_string()],
+            fallback_texts: vec![],
+            color: Color::Yellow,
+            x: 10,
+            y: 5,
+        }];
+
+        let graph_area = Rect::new(0, 0, 30, 10);
+        let occupied = HashSet::from([
+            (11, 5), (12, 5), // makes y=5, x=11 candidate overlap
+            (6, 5), (7, 5), // makes y=5, x=6 candidate overlap
+        ]);
+        let blocked = (graph_area.left()..graph_area.right())
+            .flat_map(|x| (graph_area.top()..graph_area.bottom()).map(move |y| (x, y)))
+            .collect::<HashSet<_>>();
+        let labels = layout_end_labels(&anchors, graph_area, &occupied, &blocked);
+
+        assert_eq!(labels.len(), 1);
+        assert_eq!(labels[0].x, 11, "expected shorter connector among equal-overlap candidates");
+        assert_eq!(labels[0].y, 4, "expected shifted row for shorter connector");
+    }
+
+    #[test]
     fn layout_end_labels_keeps_one_row_gap_from_blocked_band_cells() {
         let anchors = vec![LabelAnchor {
             text: vec!["tag".to_string()],
@@ -2814,7 +2929,8 @@ mod tests {
         let anchors = vec![LabelAnchor {
             text: vec![
                 "[codex 7d] comet 100%/100%".to_string(),
-                "Hit limit · resets in 1h".to_string(),
+                "Hit limit".to_string(),
+                "resets in 1h".to_string(),
             ],
             fallback_texts: vec![
                 vec!["[codex 7d] comet 100%/100%".to_string()],
@@ -2833,12 +2949,13 @@ mod tests {
     }
 
     #[test]
-    fn layout_end_labels_keeps_two_line_reset_label_with_neighboring_anchor() {
+    fn layout_end_labels_keeps_three_line_reset_label_with_neighboring_anchor() {
         let anchors = vec![
             LabelAnchor {
                 text: vec![
                     "[codex 7d] comet 100%/100%".to_string(),
-                    "Hit limit · resets in 1h".to_string(),
+                    "Hit limit".to_string(),
+                    "resets in 1h".to_string(),
                 ],
                 fallback_texts: vec![
                     vec!["[codex 7d] comet 100%/100%".to_string()],
@@ -2863,9 +2980,9 @@ mod tests {
         assert_eq!(labels.len(), 2, "both neighboring anchors should remain placeable");
         let reset_label = labels
             .iter()
-            .find(|label| label.text.iter().any(|line| line.contains("Hit limit · resets in 1h")))
+            .find(|label| label.text.iter().any(|line| line.contains("Hit limit")) && label.text.iter().any(|line| line.contains("resets in 1h")))
             .expect("reset label should be present");
-        assert_eq!(reset_label.text.len(), 2, "reset label should keep two-line variant when space exists");
+        assert_eq!(reset_label.text.len(), 3, "reset label should keep three-line variant when space exists");
 
         // The neighboring placement must not overlap any occupied text cell.
         let mut occupied = HashSet::new();
@@ -2976,13 +3093,17 @@ mod tests {
     }
 
     #[test]
-    fn format_end_label_keeps_forecast_suffix_on_full_variant() {
+    fn full_label_lines_keeps_hit_reset_as_multiline_forecast() {
         let mut series = neighboring_priority_state().chart.series[1].clone();
         series.forecast_label = Some("Hit limit · resets in 3h");
 
         assert_eq!(
-            format_end_label(&series),
-            "[codex 7d] comet.jc 60%/0% Hit limit · resets in 3h"
+            chart_labels::full_label_lines(&series),
+            vec![
+                "[codex 7d] comet.jc 60%/0%".to_string(),
+                "Hit limit".to_string(),
+                "resets in 3h".to_string(),
+            ]
         );
     }
 
@@ -3002,25 +3123,31 @@ mod tests {
     fn layout_end_labels_force_fallback_keeps_full_label_with_forecast_suffix() {
         let mut series = neighboring_priority_state().chart.series[1].clone();
         series.forecast_label = Some("Hit limit · resets in 3h");
+        let mut full_lines = vec![format_end_label(&series)];
+        full_lines.extend(split_hit_reset_lines(series.forecast_label.unwrap_or_default()));
 
         let anchor = LabelAnchor {
-            text: vec![format_end_label(&series)],
+            text: full_lines,
             fallback_texts: compact_end_label_variants(&series).into_iter().map(|s| vec![s]).collect(),
             color: Color::Cyan,
             x: 20,
             y: 3,
         };
-        let occupied = (0..64).map(|x| (x, 3)).collect::<HashSet<_>>();
+        let graph_area = Rect::new(0, 3, 64, 4);
+        let occupied = (graph_area.left()..graph_area.right())
+            .flat_map(|x| (graph_area.top()..graph_area.bottom()).map(move |y| (x, y)))
+            .collect::<HashSet<_>>();
         // Only block the far-left side; (21,3) was in the original plan spec but its exclusion
         // expansion to {(20,3),(21,3),(22,3)} makes every 51-char placement impossible in a
         // 64-wide graph — corrected to single left-side blocker so the full label can fit at x=13.
         let blocked = HashSet::from([(0u16, 3u16)]);
 
-        let labels = layout_end_labels(&[anchor], Rect::new(0, 3, 64, 1), &occupied, &blocked);
+        let labels = layout_end_labels(&[anchor], graph_area, &occupied, &blocked);
 
         assert_eq!(labels.len(), 1);
+        assert_eq!(labels[0].text[0], "[codex 7d] comet.jc 60%/0%");
         assert!(
-            labels[0].text.iter().any(|s| s.contains("Hit limit · resets in 3h")),
+            labels[0].text.iter().any(|s| s.contains("Hit limit")) && labels[0].text.iter().any(|s| s.contains("resets in 3h")),
             "expected forecast suffix in placed label, got: {:?}", labels[0].text
         );
     }

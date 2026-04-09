@@ -2,8 +2,11 @@ use super::ChartSeries;
 
 pub(crate) fn full_label_lines(series: &ChartSeries<'_>) -> Vec<String> {
     let mut lines = vec![base_end_label(series)];
+    if let Some(forecast) = series.forecast_label {
+        lines.extend(split_hit_reset_lines(forecast));
+    }
     if let Some(reset_line) = &series.reset_line_display {
-        lines.push(reset_line.text.clone());
+        lines.extend(split_hit_reset_lines(&reset_line.text));
     }
     lines
 }
@@ -27,7 +30,7 @@ pub(crate) fn compact_label_variants(series: &ChartSeries<'_>) -> Vec<Vec<String
 
 fn base_end_label(series: &ChartSeries<'_>) -> String {
     let weekly = format_unsigned_percent(series.last_seven_day_percent);
-    let base = if series.profile.agent_type == "copilot" {
+    if series.profile.agent_type == "copilot" {
         format!(
             "[{} {}] {} {}",
             series.profile.agent_type, series.profile.window_label, series.profile.label, weekly
@@ -41,10 +44,6 @@ fn base_end_label(series: &ChartSeries<'_>) -> String {
             weekly,
             format_unsigned_percent(series.five_hour_used_percent),
         )
-    };
-    match series.forecast_label {
-        Some(forecast) => format!("{base} {forecast}"),
-        None => base,
     }
 }
 
@@ -52,4 +51,17 @@ fn format_unsigned_percent(value: Option<f64>) -> String {
     value
         .map(|value| format!("{value:.0}%"))
         .unwrap_or("?%".to_string())
+}
+
+fn split_hit_reset_lines(text: &str) -> Vec<String> {
+    let mut parts = text
+        .split('·')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        parts.push(text.trim().to_string());
+    }
+    parts
 }
