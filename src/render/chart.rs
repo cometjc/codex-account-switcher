@@ -525,7 +525,7 @@ fn band_background_color(color_slot: usize) -> Color {
 
 fn format_end_label(series: &super::ChartSeries<'_>) -> String {
     let weekly = format_unsigned_percent(series.last_seven_day_percent);
-    if series.profile.agent_type == "copilot" {
+    let base = if series.profile.agent_type == "copilot" {
         format!(
             "[{} {}] {} {}",
             series.profile.agent_type, series.profile.window_label, series.profile.label, weekly
@@ -539,6 +539,10 @@ fn format_end_label(series: &super::ChartSeries<'_>) -> String {
             weekly,
             format_unsigned_percent(series.five_hour_used_percent),
         )
+    };
+    match series.forecast_label {
+        Some(forecast) => format!("{base} {forecast}"),
+        None => base,
     }
 }
 
@@ -988,6 +992,7 @@ mod tests {
             points: vec![ChartPoint { x: 7.0, y: 76.0 }],
             last_seven_day_percent: Some(76.0),
             five_hour_used_percent: Some(40.0),
+            forecast_label: None,
             five_hour_subframe: FiveHourSubframeState {
                 available: true,
                 start_x: Some(6.0),
@@ -1021,6 +1026,7 @@ mod tests {
             points: vec![ChartPoint { x: 7.0, y: 70.0 }],
             last_seven_day_percent: Some(70.0),
             five_hour_used_percent: Some(25.0),
+            forecast_label: None,
             five_hour_subframe: FiveHourSubframeState {
                 available: false,
                 start_x: None,
@@ -1033,6 +1039,75 @@ mod tests {
         };
 
         assert_eq!(format_end_label(&series), "[copilot 30d] teamt5-it 70%");
+    }
+
+    #[test]
+    fn format_end_label_appends_forecast_label_when_available() {
+        let series = ChartSeries {
+            profile: RenderProfile {
+                id: "cc",
+                label: "CC",
+                is_current: false,
+                agent_type: "claude",
+                window_label: "7d",
+            },
+            style: ChartSeriesStyle {
+                color_slot: 2,
+                is_selected: false,
+                is_current: false,
+                hidden: false,
+            },
+            points: vec![ChartPoint { x: 7.0, y: 46.0 }],
+            last_seven_day_percent: Some(46.0),
+            five_hour_used_percent: Some(16.0),
+            forecast_label: Some("reset 3.5h"),
+            five_hour_subframe: FiveHourSubframeState {
+                available: true,
+                start_x: Some(6.7),
+                end_x: Some(7.0),
+                lower_y: Some(44.0),
+                upper_y: Some(46.0),
+                reason: None,
+            },
+            is_zero_state: false,
+        };
+
+        assert_eq!(format_end_label(&series), "[claude 7d] CC 46%/16% reset 3.5h");
+        assert_eq!(compact_end_label_variants(&series), vec!["CC 46%".to_string(), "CC".to_string()]);
+    }
+
+    #[test]
+    fn format_end_label_appends_forecast_for_copilot_without_five_hour_suffix() {
+        let series = ChartSeries {
+            profile: RenderProfile {
+                id: "team",
+                label: "teamt5-it",
+                is_current: false,
+                agent_type: "copilot",
+                window_label: "30d",
+            },
+            style: ChartSeriesStyle {
+                color_slot: 1,
+                is_selected: false,
+                is_current: false,
+                hidden: false,
+            },
+            points: vec![ChartPoint { x: 7.0, y: 88.0 }],
+            last_seven_day_percent: Some(88.0),
+            five_hour_used_percent: None,
+            forecast_label: Some("~hit 6.4h"),
+            five_hour_subframe: FiveHourSubframeState {
+                available: false,
+                start_x: None,
+                end_x: None,
+                lower_y: None,
+                upper_y: None,
+                reason: Some("no 5h window"),
+            },
+            is_zero_state: false,
+        };
+
+        assert_eq!(format_end_label(&series), "[copilot 30d] teamt5-it 88% ~hit 6.4h");
     }
 
     #[test]
@@ -1078,6 +1153,7 @@ mod tests {
                     ],
                     last_seven_day_percent: Some(76.0),
                     five_hour_used_percent: Some(40.0),
+                    forecast_label: None,
                     five_hour_subframe: FiveHourSubframeState {
                         available: true,
                         start_x: Some(5.0),
@@ -1181,6 +1257,7 @@ mod tests {
                     points: vec![],
                     last_seven_day_percent: None,
                     five_hour_used_percent: None,
+                    forecast_label: None,
                     five_hour_subframe: FiveHourSubframeState {
                         available: false,
                         start_x: None,
@@ -1272,6 +1349,7 @@ mod tests {
                         points: vec![],
                         last_seven_day_percent: None,
                         five_hour_used_percent: None,
+                        forecast_label: None,
                         five_hour_subframe: FiveHourSubframeState {
                             available: false,
                             start_x: None,
@@ -1299,6 +1377,7 @@ mod tests {
                         points: vec![],
                         last_seven_day_percent: None,
                         five_hour_used_percent: None,
+                        forecast_label: None,
                         five_hour_subframe: FiveHourSubframeState {
                             available: false,
                             start_x: None,
@@ -1386,6 +1465,7 @@ mod tests {
                         points: vec![],
                         last_seven_day_percent: None,
                         five_hour_used_percent: None,
+                        forecast_label: None,
                         five_hour_subframe: FiveHourSubframeState {
                             available: false,
                             start_x: None,
@@ -1416,6 +1496,7 @@ mod tests {
                         ],
                         last_seven_day_percent: Some(5.0),
                         five_hour_used_percent: Some(2.0),
+                        forecast_label: None,
                         five_hour_subframe: FiveHourSubframeState {
                             available: false,
                             start_x: None,
@@ -1511,6 +1592,7 @@ mod tests {
                     ],
                     last_seven_day_percent: Some(7.0),
                     five_hour_used_percent: Some(0.0),
+                    forecast_label: None,
                     five_hour_subframe: FiveHourSubframeState {
                         available: false,
                         start_x: None,
@@ -1601,6 +1683,7 @@ mod tests {
                         ],
                         last_seven_day_percent: Some(5.0),
                         five_hour_used_percent: None,
+                        forecast_label: None,
                         five_hour_subframe: FiveHourSubframeState {
                             available: false,
                             start_x: None,
@@ -1631,6 +1714,7 @@ mod tests {
                         ],
                         last_seven_day_percent: Some(7.0),
                         five_hour_used_percent: Some(0.0),
+                        forecast_label: None,
                         five_hour_subframe: FiveHourSubframeState {
                             available: false,
                             start_x: None,
@@ -1722,6 +1806,7 @@ mod tests {
                     ],
                     last_seven_day_percent: Some(61.0),
                     five_hour_used_percent: None,
+                    forecast_label: None,
                     five_hour_subframe: FiveHourSubframeState {
                         available: false,
                         start_x: None,
@@ -1813,6 +1898,7 @@ mod tests {
                         ],
                         last_seven_day_percent: Some(5.0),
                         five_hour_used_percent: None,
+                        forecast_label: None,
                         five_hour_subframe: FiveHourSubframeState {
                             available: false,
                             start_x: None,
@@ -1843,6 +1929,7 @@ mod tests {
                         ],
                         last_seven_day_percent: Some(7.0),
                         five_hour_used_percent: Some(0.0),
+                        forecast_label: None,
                         five_hour_subframe: FiveHourSubframeState {
                             available: false,
                             start_x: None,
@@ -1953,6 +2040,7 @@ mod tests {
                         ],
                         last_seven_day_percent: Some(24.0),
                         five_hour_used_percent: Some(42.0),
+                        forecast_label: None,
                         five_hour_subframe: FiveHourSubframeState {
                             available: true,
                             start_x: Some(0.22),
@@ -1983,6 +2071,7 @@ mod tests {
                         ],
                         last_seven_day_percent: Some(0.0),
                         five_hour_used_percent: None,
+                        forecast_label: None,
                         five_hour_subframe: FiveHourSubframeState {
                             available: false,
                             start_x: None,
@@ -2076,6 +2165,7 @@ mod tests {
                         points: vec![],
                         last_seven_day_percent: None,
                         five_hour_used_percent: None,
+                        forecast_label: None,
                         five_hour_subframe: FiveHourSubframeState {
                             available: false,
                             start_x: None,
@@ -2112,6 +2202,7 @@ mod tests {
                         ],
                         last_seven_day_percent: Some(33.0),
                         five_hour_used_percent: Some(14.0),
+                        forecast_label: None,
                         five_hour_subframe: FiveHourSubframeState {
                             available: true,
                             start_x: Some(0.25),
@@ -2144,6 +2235,7 @@ mod tests {
                         ],
                         last_seven_day_percent: Some(0.0),
                         five_hour_used_percent: None,
+                        forecast_label: None,
                         five_hour_subframe: FiveHourSubframeState {
                             available: false,
                             start_x: None,

@@ -2014,6 +2014,7 @@ fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: u
             points: profile.chart_data.seven_day_points.clone(),
             last_seven_day_percent: profile.chart_data.seven_day_points.last().map(|point| point.y),
             five_hour_used_percent: profile.chart_data.five_hour_band.used_percent,
+            forecast_label: profile.chart_data.forecast.compact_label.as_deref(),
             five_hour_subframe: FiveHourSubframeState {
                 available: profile.chart_data.five_hour_subframe.available,
                 start_x: profile.chart_data.five_hour_subframe.start_x,

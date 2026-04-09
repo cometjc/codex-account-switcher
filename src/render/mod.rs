@@ -91,6 +91,7 @@ pub struct ChartSeries<'a> {
     pub points: Vec<ChartPoint>,
     pub last_seven_day_percent: Option<f64>,
     pub five_hour_used_percent: Option<f64>,
+    pub forecast_label: Option<&'a str>,
     pub five_hour_subframe: FiveHourSubframeState<'a>,
     pub is_zero_state: bool,
 }
