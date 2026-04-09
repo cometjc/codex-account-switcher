@@ -14,7 +14,15 @@ build:
 
 test:
 	@echo "cargo test ..."; \
-	RUSTFLAGS="$(WARNINGS_AS_ERRORS) $${RUSTFLAGS:-}" cargo test && $(MAKE) install
+	RUSTFLAGS="$(WARNINGS_AS_ERRORS) $${RUSTFLAGS:-}" cargo test && { \
+		git_dir=$$(cd "$$(git rev-parse --git-dir)" && pwd); \
+		common_dir=$$(cd "$$(git rev-parse --git-common-dir)" && pwd); \
+		if [ "$$git_dir" != "$$common_dir" ]; then \
+			echo "linked worktree detected; skipping make install"; \
+		else \
+			$(MAKE) install; \
+		fi; \
+	}
 
 # Run tests, then release-build agent-switch + cursor-export for Windows.
 # Requires: rustup, mingw linker (see .cargo/config.toml).
