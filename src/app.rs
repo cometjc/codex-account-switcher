@@ -1949,6 +1949,44 @@ fn auto_y_lower(profiles: &[ProfileEntry]) -> f64 {
     (((min_y - END_LABEL_Y_PADDING_PERCENT) / 5.0).floor() * 5.0).max(0.0)
 }
 
+fn build_reset_line_display(
+    last_seven_day_percent: Option<f64>,
+    five_hour_used_percent: Option<f64>,
+    weekly_countdown_seconds: Option<i64>,
+    five_hour_countdown_seconds: Option<i64>,
+) -> Option<crate::render::ResetLineDisplay> {
+    let weekly_qualifies = last_seven_day_percent.is_some_and(|value| value >= 100.0);
+    let five_hour_qualifies = five_hour_used_percent.is_some_and(|value| value >= 100.0);
+
+    let weekly_display = weekly_countdown_seconds.map(|seconds| crate::render::ResetLineDisplay {
+        source: crate::render::ResetLineSource::Weekly,
+        text: format!("Hit limit · resets in {}", format_duration_short(seconds)),
+    });
+    let five_hour_display =
+        five_hour_countdown_seconds.map(|seconds| crate::render::ResetLineDisplay {
+            source: crate::render::ResetLineSource::FiveHour,
+            text: format!("Hit limit · resets in {}", format_duration_short(seconds)),
+        });
+
+    match (weekly_qualifies, five_hour_qualifies) {
+        (true, true) => match (weekly_countdown_seconds, five_hour_countdown_seconds) {
+            (Some(weekly), Some(five_hour)) => {
+                if five_hour > weekly {
+                    five_hour_display
+                } else {
+                    weekly_display
+                }
+            }
+            (Some(_), None) => weekly_display,
+            (None, Some(_)) => five_hour_display,
+            (None, None) => None,
+        },
+        (true, false) => weekly_display,
+        (false, true) => five_hour_display,
+        (false, false) => None,
+    }
+}
+
 fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: usize) -> ChartState<'a> {
     let selected_profile = profiles.get(selected_profile_index);
     let selected_label = selected_profile
@@ -1997,33 +2035,45 @@ fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: u
     let series = profiles
         .iter()
         .enumerate()
-        .map(|(index, profile)| ChartSeries {
-            profile: RenderProfile {
-                id: profile.account_id.as_deref().unwrap_or(profile.profile_name.as_str()),
-                label: profile.profile_name.as_str(),
-                is_current: profile.is_current,
-                agent_type: profile.kind.as_str(),
-                window_label: profile.chart_data.quota_window_label.as_str(),
-            },
-            style: ChartSeriesStyle {
-                color_slot: index,
-                is_selected: index == selected_profile_index,
-                is_current: profile.is_current,
-                hidden: false,
-            },
-            points: profile.chart_data.seven_day_points.clone(),
-            last_seven_day_percent: profile.chart_data.seven_day_points.last().map(|point| point.y),
-            five_hour_used_percent: profile.chart_data.five_hour_band.used_percent,
-            forecast_label: profile.chart_data.forecast.compact_label.as_deref(),
-            five_hour_subframe: FiveHourSubframeState {
-                available: profile.chart_data.five_hour_subframe.available,
-                start_x: profile.chart_data.five_hour_subframe.start_x,
-                end_x: profile.chart_data.five_hour_subframe.end_x,
-                lower_y: profile.chart_data.five_hour_subframe.lower_y,
-                upper_y: profile.chart_data.five_hour_subframe.upper_y,
-                reason: profile.chart_data.five_hour_subframe.reason.as_deref(),
-            },
-            is_zero_state: profile.chart_data.is_zero_state,
+        .map(|(index, profile)| {
+            let last_seven_day_percent =
+                profile.chart_data.seven_day_points.last().map(|point| point.y);
+            let five_hour_used_percent = profile.chart_data.five_hour_band.used_percent;
+
+            ChartSeries {
+                profile: RenderProfile {
+                    id: profile.account_id.as_deref().unwrap_or(profile.profile_name.as_str()),
+                    label: profile.profile_name.as_str(),
+                    is_current: profile.is_current,
+                    agent_type: profile.kind.as_str(),
+                    window_label: profile.chart_data.quota_window_label.as_str(),
+                },
+                style: ChartSeriesStyle {
+                    color_slot: index,
+                    is_selected: index == selected_profile_index,
+                    is_current: profile.is_current,
+                    hidden: false,
+                },
+                points: profile.chart_data.seven_day_points.clone(),
+                last_seven_day_percent,
+                five_hour_used_percent,
+                forecast_label: profile.chart_data.forecast.compact_label.as_deref(),
+                five_hour_subframe: FiveHourSubframeState {
+                    available: profile.chart_data.five_hour_subframe.available,
+                    start_x: profile.chart_data.five_hour_subframe.start_x,
+                    end_x: profile.chart_data.five_hour_subframe.end_x,
+                    lower_y: profile.chart_data.five_hour_subframe.lower_y,
+                    upper_y: profile.chart_data.five_hour_subframe.upper_y,
+                    reason: profile.chart_data.five_hour_subframe.reason.as_deref(),
+                },
+                is_zero_state: profile.chart_data.is_zero_state,
+                reset_line_display: build_reset_line_display(
+                    last_seven_day_percent,
+                    five_hour_used_percent,
+                    profile.chart_data.weekly_reset_countdown_seconds,
+                    profile.chart_data.five_hour_reset_countdown_seconds,
+                ),
+            }
         })
         .collect::<Vec<_>>();
 
@@ -2189,6 +2239,8 @@ mod tests {
                 seven_day_points: vec![],
                 quota_window_label: "7d".to_string(),
                 forecast: crate::app_data::OwnedUsageForecast::empty("zero-state"),
+                weekly_reset_countdown_seconds: None,
+                five_hour_reset_countdown_seconds: None,
                 five_hour_band: OwnedFiveHourBandState {
                     available: false,
                     used_percent: None,
@@ -2598,6 +2650,8 @@ mod tests {
                 seven_day_points: vec![ChartPoint { x: 7.0, y: 14.0 }],
                 quota_window_label: "7d".to_string(),
                 forecast: crate::app_data::OwnedUsageForecast::empty("band-only"),
+                weekly_reset_countdown_seconds: None,
+                five_hour_reset_countdown_seconds: None,
                 five_hour_band: OwnedFiveHourBandState {
                     available: true,
                     used_percent: Some(12.0),
@@ -2675,5 +2729,143 @@ mod duration_tests {
         assert_eq!(format_duration_short(30),     "1m");     // < 1m rounds up to 1m
         assert_eq!(format_duration_short(0),      "1m");
         assert_eq!(format_duration_short(-1),     "1m");     // negative clamped
+    }
+}
+
+#[cfg(test)]
+mod chart_reset_line_tests {
+    use super::*;
+    use crate::app_data::{OwnedFiveHourBandState, OwnedFiveHourSubframeState};
+    use crate::render::ChartPoint;
+
+    fn make_profile_with_chart(
+        last_seven_day_percent: Option<f64>,
+        five_hour_used_percent: Option<f64>,
+        weekly_reset_countdown_seconds: Option<i64>,
+        five_hour_reset_countdown_seconds: Option<i64>,
+    ) -> ProfileEntry {
+        ProfileEntry {
+            kind: ProfileKind::Codex,
+            saved_name: Some("alpha".to_string()),
+            profile_name: "Alpha".to_string(),
+            snapshot: serde_json::json!({}),
+            usage_view: UsageReadResult {
+                usage: None,
+                source: UsageSource::None,
+                fetched_at: None,
+                stale: false,
+            },
+            account_id: Some("acct-alpha".to_string()),
+            is_current: true,
+            chart_data: ProfileChartData {
+                seven_day_points: last_seven_day_percent
+                    .map(|value| vec![ChartPoint { x: 7.0, y: value }])
+                    .unwrap_or_default(),
+                quota_window_label: "7d".to_string(),
+                forecast: crate::app_data::OwnedUsageForecast::empty("test"),
+                weekly_reset_countdown_seconds,
+                five_hour_reset_countdown_seconds,
+                five_hour_band: OwnedFiveHourBandState {
+                    available: five_hour_used_percent.is_some(),
+                    used_percent: five_hour_used_percent,
+                    lower_y: None,
+                    upper_y: None,
+                    delta_seven_day_percent: None,
+                    delta_five_hour_percent: None,
+                    reason: None,
+                },
+                five_hour_subframe: OwnedFiveHourSubframeState {
+                    available: false,
+                    start_x: None,
+                    end_x: None,
+                    lower_y: None,
+                    upper_y: None,
+                    reason: None,
+                },
+                is_zero_state: false,
+            },
+        }
+    }
+
+    #[test]
+    fn reset_line_weekly_when_weekly_qualifies() {
+        let profiles = vec![make_profile_with_chart(Some(100.0), Some(40.0), Some(3_600), Some(900))];
+        let state = build_chart_state(&profiles, 0);
+        let reset_line = state.series[0]
+            .reset_line_display
+            .as_ref()
+            .expect("weekly 100% should derive a reset line");
+
+        assert_eq!(reset_line.source, crate::render::ResetLineSource::Weekly);
+        assert_eq!(reset_line.text, "Hit limit · resets in 1h");
+    }
+
+    #[test]
+    fn reset_line_five_hour_when_five_hour_qualifies() {
+        let profiles = vec![make_profile_with_chart(Some(80.0), Some(100.0), Some(3_600), Some(7_200))];
+        let state = build_chart_state(&profiles, 0);
+        let reset_line = state.series[0]
+            .reset_line_display
+            .as_ref()
+            .expect("5h 100% should derive a reset line");
+
+        assert_eq!(reset_line.source, crate::render::ResetLineSource::FiveHour);
+        assert_eq!(reset_line.text, "Hit limit · resets in 2h");
+    }
+
+    #[test]
+    fn reset_line_chooses_longer_when_both_qualify() {
+        let profiles = vec![make_profile_with_chart(Some(140.0), Some(120.0), Some(3_600), Some(7_200))];
+        let state = build_chart_state(&profiles, 0);
+        let reset_line = state.series[0]
+            .reset_line_display
+            .as_ref()
+            .expect("two qualifying windows should pick one reset line");
+
+        assert_eq!(reset_line.source, crate::render::ResetLineSource::FiveHour);
+        assert_eq!(reset_line.text, "Hit limit · resets in 2h");
+    }
+
+    #[test]
+    fn reset_line_uses_renderable_one_when_only_one_countdown_exists() {
+        let five_hour_only = vec![make_profile_with_chart(Some(140.0), Some(120.0), None, Some(7_200))];
+        let five_hour_state = build_chart_state(&five_hour_only, 0);
+        let five_hour_reset = five_hour_state.series[0]
+            .reset_line_display
+            .as_ref()
+            .expect("renderable 5h countdown should win");
+        assert_eq!(five_hour_reset.source, crate::render::ResetLineSource::FiveHour);
+
+        let weekly_only = vec![make_profile_with_chart(Some(140.0), Some(120.0), Some(3_600), None)];
+        let weekly_state = build_chart_state(&weekly_only, 0);
+        let weekly_reset = weekly_state.series[0]
+            .reset_line_display
+            .as_ref()
+            .expect("renderable weekly countdown should win");
+        assert_eq!(weekly_reset.source, crate::render::ResetLineSource::Weekly);
+    }
+
+    #[test]
+    fn reset_line_none_when_neither_usage_value_qualifies() {
+        let profiles = vec![make_profile_with_chart(Some(90.0), Some(80.0), Some(3_600), Some(7_200))];
+        let state = build_chart_state(&profiles, 0);
+
+        assert!(state.series[0].reset_line_display.is_none());
+    }
+
+    #[test]
+    fn reset_line_none_when_no_renderable_countdowns_exist() {
+        let profiles = vec![make_profile_with_chart(Some(140.0), Some(120.0), None, None)];
+        let state = build_chart_state(&profiles, 0);
+
+        assert!(state.series[0].reset_line_display.is_none());
+    }
+
+    #[test]
+    fn zero_state_remains_without_reset_contract() {
+        let app = App::from_profile_names(vec!["Alpha".to_string()], 0);
+        let state = build_chart_state(&app.profiles, 0);
+
+        assert!(state.series[0].reset_line_display.is_none());
     }
 }

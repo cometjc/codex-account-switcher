@@ -1,3 +1,4 @@
+pub mod chart_labels;
 pub mod chart;
 
 use ratatui::layout::Rect;
@@ -84,6 +85,18 @@ pub struct ChartSeriesStyle {
     pub hidden: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResetLineSource {
+    Weekly,
+    FiveHour,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResetLineDisplay {
+    pub source: ResetLineSource,
+    pub text: String, // already formatted "Hit limit · resets in <TIME>"
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChartSeries<'a> {
     pub profile: RenderProfile<'a>,
@@ -94,6 +107,7 @@ pub struct ChartSeries<'a> {
     pub forecast_label: Option<&'a str>,
     pub five_hour_subframe: FiveHourSubframeState<'a>,
     pub is_zero_state: bool,
+    pub reset_line_display: Option<ResetLineDisplay>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

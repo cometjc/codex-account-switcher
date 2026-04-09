@@ -7,8 +7,8 @@ use ratatui::symbols::Marker;
 use ratatui::text::{Line, Text};
 use ratatui::widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Paragraph, Wrap};
 
+use crate::render::chart_labels;
 use super::{ChartState, RenderContext, RenderState, SERIES_COLORS};
-
 const SERIES_BAND_COLORS: [Color; 8] = [
     Color::Rgb(18, 72, 92),
     Color::Rgb(92, 82, 18),
@@ -314,8 +314,8 @@ fn render_end_labels(
                 .rev()
                 .find(|point| point.x >= x_bounds[0] && point.x <= x_bounds[1])?;
             Some(LabelAnchor {
-                text: format_end_label(series),
-                fallback_texts: compact_end_label_variants(series),
+                text: chart_labels::full_label_lines(series),
+                fallback_texts: chart_labels::compact_label_variants(series),
                 color: SERIES_COLORS[series.style.color_slot % SERIES_COLORS.len()],
                 x: project_x(point.x, graph_area, x_bounds),
                 y: project_y(point.y, graph_area, y_bounds),
@@ -326,19 +326,23 @@ fn render_end_labels(
 
     for label in layout_end_labels(&anchors, graph_area, occupied_cells, blocked_cells) {
         draw_label_connector(frame, &label, graph_area);
-        let label_width = label.text.chars().count() as u16;
-        for dx in 0..label_width {
-            frame
-                .buffer_mut()[(label.x + dx, label.y)]
-                .set_symbol(" ")
-                .set_bg(LABEL_BG_COLOR);
+        let label_width = label.text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
+        let label_height = label.text.len() as u16;
+        for line_i in 0..label_height {
+            for dx in 0..label_width {
+                frame
+                    .buffer_mut()[(label.x + dx, label.y + line_i)]
+                    .set_symbol(" ")
+                    .set_bg(LABEL_BG_COLOR);
+            }
+            let line_text = &label.text[line_i as usize];
+            frame.buffer_mut().set_string(
+                label.x,
+                label.y + line_i,
+                line_text,
+                Style::default().fg(label.color).bg(LABEL_BG_COLOR),
+            );
         }
-        frame.buffer_mut().set_string(
-            label.x,
-            label.y,
-            label.text,
-            Style::default().fg(label.color).bg(LABEL_BG_COLOR),
-        );
     }
 }
 
@@ -523,6 +527,7 @@ fn band_background_color(color_slot: usize) -> Color {
     SERIES_BAND_COLORS[color_slot % SERIES_BAND_COLORS.len()]
 }
 
+#[cfg(test)]
 fn format_end_label(series: &super::ChartSeries<'_>) -> String {
     let weekly = format_unsigned_percent(series.last_seven_day_percent);
     let base = if series.profile.agent_type == "copilot" {
@@ -546,12 +551,14 @@ fn format_end_label(series: &super::ChartSeries<'_>) -> String {
     }
 }
 
+#[cfg(test)]
 fn format_unsigned_percent(value: Option<f64>) -> String {
     value
         .map(|value| format!("{:.0}%", value))
         .unwrap_or("?%".to_string())
 }
 
+#[cfg(test)]
 fn compact_end_label_variants(series: &super::ChartSeries<'_>) -> Vec<String> {
     let compact = format!(
         "{} {}",
@@ -571,8 +578,8 @@ fn compact_end_label_variants(series: &super::ChartSeries<'_>) -> Vec<String> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LabelAnchor {
-    text: String,
-    fallback_texts: Vec<String>,
+    text: Vec<String>,
+    fallback_texts: Vec<Vec<String>>,
     color: Color,
     x: u16,
     y: u16,
@@ -580,10 +587,10 @@ struct LabelAnchor {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PlacedLabel {
-    text: String,
+    text: Vec<String>,
     color: Color,
     x: u16,
-    y: u16,
+    y: u16, // top line y
     anchor_x: u16,
     anchor_y: u16,
     attach_x: u16,
@@ -591,249 +598,6 @@ struct PlacedLabel {
 
 const PREFERRED_LABEL_OFFSET: u16 = 3;
 const FALLBACK_LABEL_OFFSET: u16 = 1;
-
-fn placement_candidates_for_variant(
-    anchor: &LabelAnchor,
-    text: &str,
-    graph_area: Rect,
-) -> Vec<(u16, u16)> {
-    let width = text.chars().count() as u16;
-    if width == 0 || graph_area.width == 0 || graph_area.height == 0 {
-        return vec![];
-    }
-
-    let mut candidates = Vec::new();
-    for step in 0..graph_area.height {
-        let step = step as i16;
-        let offsets = if step == 0 { vec![0] } else { vec![-step, step] };
-        for dy in offsets {
-            let y = anchor.y as i16 + dy;
-            if y < graph_area.top() as i16 || y >= graph_area.bottom() as i16 {
-                continue;
-            }
-            let y = y as u16;
-            for offset in [PREFERRED_LABEL_OFFSET, FALLBACK_LABEL_OFFSET] {
-                let right_x = anchor.x.saturating_add(offset);
-                if right_x + width <= graph_area.right() {
-                    candidates.push((right_x, y));
-                }
-                let left_x = anchor
-                    .x
-                    .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
-                    .max(graph_area.left());
-                if left_x >= graph_area.left() && left_x + width <= graph_area.right() {
-                    candidates.push((left_x, y));
-                }
-            }
-        }
-    }
-    candidates
-}
-
-fn best_safe_placement_for_variant(
-    anchor: &LabelAnchor,
-    text: &str,
-    graph_area: Rect,
-    occupied_cells: &HashSet<(u16, u16)>,
-    label_exclusion_cells: &HashSet<(u16, u16)>,
-    blocked_cells: &HashSet<(u16, u16)>,
-    reserved: &HashSet<(u16, u16)>,
-) -> Option<(u16, u16, u16)> {
-    let width = text.chars().count() as u16;
-    if width == 0 {
-        return None;
-    }
-
-    let candidates = placement_candidates_for_variant(anchor, text, graph_area);
-    let mut best: Option<(u16, u16, u16, u16, u16)> = None;
-
-    for (x, y) in candidates {
-        let attach_x = connector_attach_x(x, width, anchor.x);
-        let label_cells_ok = (0..width).all(|dx| {
-            let cell = (x + dx, y);
-            !occupied_cells.contains(&cell)
-                && !label_exclusion_cells.contains(&cell)
-                && !reserved.contains(&cell)
-        });
-        if !label_cells_ok {
-            continue;
-        }
-        if !connector_cells(attach_x, y, anchor.x, anchor.y, graph_area)
-            .into_iter()
-            .all(|cell| !blocked_cells.contains(&cell) && !reserved.contains(&cell))
-        {
-            continue;
-        }
-
-        let dy = y.abs_diff(anchor.y);
-        let dx = attach_x.abs_diff(anchor.x);
-        if best
-            .as_ref()
-            .is_none_or(|(_, _, _, best_dy, best_dx)| (dy, dx) < (*best_dy, *best_dx))
-        {
-            best = Some((x, y, attach_x, dy, dx));
-        }
-    }
-
-    best.map(|(x, y, attach_x, _, _)| (x, y, attach_x))
-}
-
-fn best_force_placement_for_variant(
-    anchor: &LabelAnchor,
-    text: &str,
-    graph_area: Rect,
-    label_exclusion_cells: &HashSet<(u16, u16)>,
-    reserved: &HashSet<(u16, u16)>,
-) -> Option<(u16, u16, u16)> {
-    let width = text.chars().count() as u16;
-    if width == 0 || width > graph_area.width {
-        return None;
-    }
-
-    let mut candidates = Vec::new();
-    for step in 0..graph_area.height {
-        let step = step as i16;
-        let offsets = if step == 0 { vec![0] } else { vec![-step, step] };
-        for dy in offsets {
-            let y = anchor.y as i16 + dy;
-            if y < graph_area.top() as i16 || y >= graph_area.bottom() as i16 {
-                continue;
-            }
-            let y = y as u16;
-            for offset in [FALLBACK_LABEL_OFFSET, PREFERRED_LABEL_OFFSET] {
-                let right_x = anchor
-                    .x
-                    .saturating_add(offset)
-                    .min(graph_area.right().saturating_sub(width));
-                if right_x + width <= graph_area.right() {
-                    candidates.push((right_x, y));
-                }
-                let left_x = anchor
-                    .x
-                    .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
-                    .max(graph_area.left());
-                if left_x + width <= graph_area.right() {
-                    candidates.push((left_x, y));
-                }
-            }
-        }
-    }
-
-    let mut best: Option<(u16, u16, u16, u16, u16)> = None;
-    for (x, y) in candidates {
-        if !(0..width).all(|dx| {
-            let cell = (x + dx, y);
-            !reserved.contains(&cell) && !label_exclusion_cells.contains(&cell)
-        }) {
-            continue;
-        }
-        let attach_x = connector_attach_x(x, width, anchor.x);
-        let dy = y.abs_diff(anchor.y);
-        let dx = attach_x.abs_diff(anchor.x);
-        if best
-            .as_ref()
-            .is_none_or(|(_, _, _, best_dy, best_dx)| (dy, dx) < (*best_dy, *best_dx))
-        {
-            best = Some((x, y, attach_x, dy, dx));
-        }
-    }
-
-    best.map(|(x, y, attach_x, _, _)| (x, y, attach_x))
-}
-
-fn layout_end_labels(
-    anchors: &[LabelAnchor],
-    graph_area: Rect,
-    occupied_cells: &HashSet<(u16, u16)>,
-    blocked_cells: &HashSet<(u16, u16)>,
-) -> Vec<PlacedLabel> {
-    let mut placed = Vec::new();
-    let mut placed_anchor_indices = HashSet::new();
-    let mut reserved = HashSet::new();
-    let label_exclusion_cells = expand_label_exclusion_cells(blocked_cells, graph_area);
-
-    for (anchor_idx, anchor) in anchors.iter().enumerate() {
-        let variants = std::iter::once(&anchor.text).chain(anchor.fallback_texts.iter());
-        let mut best: Option<(u16, u16, u16, &String)> = None;
-
-        for variant_text in variants {
-            if let Some((x, y, attach_x)) = best_safe_placement_for_variant(
-                anchor,
-                variant_text,
-                graph_area,
-                occupied_cells,
-                &label_exclusion_cells,
-                blocked_cells,
-                &reserved,
-            ) {
-                best = Some((x, y, attach_x, variant_text));
-                break;
-            }
-        }
-
-        if let Some((x, y, attach_x, text)) = best {
-            let width = text.chars().count() as u16;
-            let connector = connector_cells(attach_x, y, anchor.x, anchor.y, graph_area);
-            for cell in connector {
-                reserved.insert(cell);
-            }
-            for dx in 0..width {
-                reserved.insert((x + dx, y));
-            }
-            placed.push(PlacedLabel {
-                text: text.clone(),
-                color: anchor.color,
-                x,
-                y,
-                anchor_x: anchor.x,
-                anchor_y: anchor.y,
-                attach_x,
-            });
-            placed_anchor_indices.insert(anchor_idx);
-        }
-    }
-
-    for (anchor_idx, anchor) in anchors.iter().enumerate() {
-        if placed_anchor_indices.contains(&anchor_idx) {
-            continue;
-        }
-
-        let force_variants = std::iter::once(&anchor.text).chain(anchor.fallback_texts.iter());
-        let mut chosen: Option<(u16, u16, u16, &String)> = None;
-
-        for text in force_variants {
-            if let Some((x, y, attach_x)) = best_force_placement_for_variant(
-                anchor,
-                text,
-                graph_area,
-                &label_exclusion_cells,
-                &reserved,
-            ) {
-                chosen = Some((x, y, attach_x, text));
-                break;
-            }
-        }
-
-        if let Some((x, y, attach_x, text)) = chosen {
-            let width = text.chars().count() as u16;
-            for dx in 0..width {
-                reserved.insert((x + dx, y));
-            }
-            placed.push(PlacedLabel {
-                text: text.clone(),
-                color: anchor.color,
-                x,
-                y,
-                anchor_x: anchor.x,
-                anchor_y: anchor.y,
-                attach_x,
-            });
-            placed_anchor_indices.insert(anchor_idx);
-        }
-    }
-
-    placed
-}
 
 fn expand_label_exclusion_cells(
     blocked_cells: &HashSet<(u16, u16)>,
@@ -857,6 +621,215 @@ fn expand_label_exclusion_cells(
         }
     }
     expanded
+}
+
+fn layout_end_labels(
+    anchors: &[LabelAnchor],
+    graph_area: Rect,
+    occupied_cells: &HashSet<(u16, u16)>,
+    blocked_cells: &HashSet<(u16, u16)>,
+) -> Vec<PlacedLabel> {
+    let mut placed = Vec::new();
+    let mut placed_anchor_indices = HashSet::new();
+    let mut reserved = HashSet::new();
+    let label_exclusion_cells = expand_label_exclusion_cells(blocked_cells, graph_area);
+
+    for (anchor_idx, anchor) in anchors.iter().enumerate() {
+        let text_variants = std::iter::once(&anchor.text).chain(anchor.fallback_texts.iter());
+        let mut best: Option<(u16, u16, u16, &Vec<String>, usize, u16, u16)> = None;
+
+        for (variant_idx, text) in text_variants.enumerate() {
+            let width = text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
+            let height = text.len() as u16;
+            if width == 0 || graph_area.width == 0 || graph_area.height == 0 {
+                continue;
+            }
+
+            let mut candidates = Vec::new();
+            for step in 0..graph_area.height {
+                let step = step as i16;
+                let offsets = if step == 0 { vec![0] } else { vec![-step, step] };
+                for dy in offsets {
+                    let y = anchor.y as i16 + dy;
+                    if y < graph_area.top() as i16 || (y as u16).saturating_add(height).saturating_sub(1) >= graph_area.bottom() {
+                        continue;
+                    }
+                    let y = y as u16;
+                    for offset in [PREFERRED_LABEL_OFFSET, FALLBACK_LABEL_OFFSET] {
+                        let right_x = anchor.x.saturating_add(offset);
+                        if right_x + width <= graph_area.right() {
+                            candidates.push((right_x, y));
+                        }
+                        let left_x = anchor
+                            .x
+                            .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
+                            .max(graph_area.left());
+                        if left_x >= graph_area.left() && left_x + width <= graph_area.right() {
+                            candidates.push((left_x, y));
+                        }
+                    }
+                }
+            }
+
+            for (x, y) in candidates {
+                let attach_x = connector_attach_x(x, width, anchor.x);
+                // ensure all cells for the multiline label are free; use expanded exclusion zone
+                // around blocked cells (1-cell safety margin) for safe placement
+                let label_cells_ok = (0..height).all(|line_i| {
+                    (0..width).all(|dx| {
+                        let cell = (x + dx, y + line_i);
+                        !occupied_cells.contains(&cell)
+                            && !label_exclusion_cells.contains(&cell)
+                            && !reserved.contains(&cell)
+                    })
+                });
+                if !label_cells_ok {
+                    continue;
+                }
+                if !connector_cells(attach_x, y, anchor.x, anchor.y, graph_area)
+                    .into_iter()
+                    .all(|cell| !blocked_cells.contains(&cell) && !reserved.contains(&cell))
+                {
+                    continue;
+                }
+
+                let dy = y.abs_diff(anchor.y);
+                let dx = attach_x.abs_diff(anchor.x);
+                let candidate = (x, y, attach_x, text, variant_idx, dy, dx);
+                if best
+                    .as_ref()
+                    .is_none_or(|(_, _, _, _, best_variant, best_dy, best_dx)| {
+                        (variant_idx, dy, dx) < (*best_variant, *best_dy, *best_dx)
+                    })
+                {
+                    best = Some(candidate);
+                }
+            }
+        }
+
+        if let Some((x, y, attach_x, text, _, _, _)) = best {
+            let width = text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
+            let height = text.len() as u16;
+            let connector = connector_cells(attach_x, y, anchor.x, anchor.y, graph_area);
+            for cell in connector {
+                reserved.insert(cell);
+            }
+            for line_i in 0..height {
+                for dx in 0..width {
+                    reserved.insert((x + dx, y + line_i));
+                }
+            }
+            placed.push(PlacedLabel {
+                text: text.clone(),
+                color: anchor.color,
+                x,
+                y,
+                anchor_x: anchor.x,
+                anchor_y: anchor.y,
+                attach_x,
+            });
+            placed_anchor_indices.insert(anchor_idx);
+        }
+    }
+
+    for (anchor_idx, anchor) in anchors.iter().enumerate() {
+        if placed_anchor_indices.contains(&anchor_idx) {
+            continue;
+        }
+
+        // Force placement: two-phase. Phase 1 avoids blocked cells when possible.
+        // Phase 2 ignores blocked cells if phase 1 found no placement (last-resort).
+        let mut best: Option<(u16, u16, u16, &Vec<String>, usize, u16, u16)> = None;
+
+        for avoid_blocked in [true, false] {
+            if avoid_blocked || best.is_none() {
+                let force_variants = std::iter::once(&anchor.text).chain(anchor.fallback_texts.iter());
+                for (variant_idx, text) in force_variants.enumerate() {
+                    let width = text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
+                    let height = text.len() as u16;
+                    if width == 0 || width > graph_area.width {
+                        continue;
+                    }
+
+                    let mut candidates = Vec::new();
+                    for step in 0..graph_area.height {
+                        let step = step as i16;
+                        let offsets = if step == 0 { vec![0] } else { vec![-step, step] };
+                        for dy in offsets {
+                            let y = anchor.y as i16 + dy;
+                            if y < graph_area.top() as i16 || (y as u16).saturating_add(height).saturating_sub(1) >= graph_area.bottom() {
+                                continue;
+                            }
+                            let y = y as u16;
+                            for offset in [FALLBACK_LABEL_OFFSET, PREFERRED_LABEL_OFFSET] {
+                                let right_x = anchor
+                                    .x
+                                    .saturating_add(offset)
+                                    .min(graph_area.right().saturating_sub(width));
+                                if right_x + width <= graph_area.right() {
+                                    candidates.push((right_x, y));
+                                }
+                                let left_x = anchor
+                                    .x
+                                    .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
+                                    .max(graph_area.left());
+                                if left_x + width <= graph_area.right() {
+                                    candidates.push((left_x, y));
+                                }
+                            }
+                        }
+                    }
+
+                    for (x, y) in candidates {
+                        if !(0..height).all(|line_i| {
+                            (0..width).all(|dx| {
+                                let cell = (x + dx, y + line_i);
+                                !reserved.contains(&cell)
+                                    && (!avoid_blocked || !blocked_cells.contains(&cell))
+                            })
+                        }) {
+                            continue;
+                        }
+                        let attach_x = connector_attach_x(x, width, anchor.x);
+                        let dy = y.abs_diff(anchor.y);
+                        let dx = attach_x.abs_diff(anchor.x);
+                        let candidate = (x, y, attach_x, text, variant_idx, dy, dx);
+                        if best
+                            .as_ref()
+                            .is_none_or(|(_, _, _, _, best_variant, best_dy, best_dx)| {
+                                (variant_idx, dy, dx) < (*best_variant, *best_dy, *best_dx)
+                            })
+                        {
+                            best = Some(candidate);
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some((x, y, attach_x, text, _, _, _)) = best {
+            let width = text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
+            let height = text.len() as u16;
+            for line_i in 0..height {
+                for dx in 0..width {
+                    reserved.insert((x + dx, y + line_i));
+                }
+
+            }
+            placed.push(PlacedLabel {
+                text: text.clone(),
+                color: anchor.color,
+                x,
+                y,
+                anchor_x: anchor.x,
+                anchor_y: anchor.y,
+                attach_x,
+            });
+            placed_anchor_indices.insert(anchor_idx);
+        }
+    }
+
+    placed
 }
 
 fn connector_cells(
@@ -993,6 +966,7 @@ mod tests {
                             reason: Some("no 5h window"),
                         },
                         is_zero_state: false,
+                        reset_line_display: None,
                     },
                     ChartSeries {
                         profile: RenderProfile {
@@ -1021,6 +995,7 @@ mod tests {
                             reason: Some("no 5h window"),
                         },
                         is_zero_state: false,
+                        reset_line_display: None,
                     },
                 ],
                 seven_day_points: vec![],
@@ -1058,14 +1033,14 @@ mod tests {
     fn layout_end_labels_staggers_names_away_from_conflicts() {
         let anchors = vec![
             LabelAnchor {
-                text: "Alpha".to_string(),
+                text: vec!["Alpha".to_string()],
                 fallback_texts: vec![],
                 color: Color::Cyan,
                 x: 12,
                 y: 4,
             },
             LabelAnchor {
-                text: "Beta".to_string(),
+                text: vec!["Beta".to_string()],
                 fallback_texts: vec![],
                 color: Color::Yellow,
                 x: 12,
@@ -1080,7 +1055,8 @@ mod tests {
         assert_eq!(labels.len(), 2);
         assert_ne!(labels[0].y, labels[1].y);
         for label in &labels {
-            for dx in 0..label.text.chars().count() as u16 {
+            let width = label.text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
+            for dx in 0..width {
                 let cell = (label.x + dx, label.y);
                 assert!(!occupied.contains(&cell));
                 assert!(!blocked.contains(&cell));
@@ -1091,8 +1067,8 @@ mod tests {
     #[test]
     fn layout_end_labels_prefers_full_variant_over_closer_compact_slot() {
         let anchors = vec![LabelAnchor {
-            text: "FULLFULL".to_string(),
-            fallback_texts: vec!["MID".to_string(), "M".to_string()],
+            text: vec!["FULLFULL".to_string()],
+            fallback_texts: vec![vec!["MID".to_string()], vec!["M".to_string()]],
             color: Color::Cyan,
             x: 8,
             y: 3,
@@ -1103,15 +1079,15 @@ mod tests {
         let labels = layout_end_labels(&anchors, Rect::new(0, 3, 20, 1), &occupied, &HashSet::new());
 
         assert_eq!(labels.len(), 1);
-        assert_eq!(labels[0].text, "FULLFULL");
+        assert_eq!(labels[0].text, vec!["FULLFULL".to_string()]);
         assert_eq!(labels[0].x, 11);
     }
 
     #[test]
     fn layout_end_labels_preserves_full_compact_minimal_chain() {
         let anchor = LabelAnchor {
-            text: "FULLFULL".to_string(),
-            fallback_texts: vec!["MID".to_string(), "M".to_string()],
+            text: vec!["FULLFULL".to_string()],
+            fallback_texts: vec![vec!["MID".to_string()], vec!["M".to_string()]],
             color: Color::Yellow,
             x: 8,
             y: 3,
@@ -1126,15 +1102,15 @@ mod tests {
         for (occupied, expected) in cases {
             let labels = layout_end_labels(&[anchor.clone()], Rect::new(0, 3, 20, 1), &occupied, &HashSet::new());
             assert_eq!(labels.len(), 1);
-            assert_eq!(labels[0].text, expected);
+            assert_eq!(labels[0].text, vec![expected.to_string()]);
         }
     }
 
     #[test]
     fn layout_end_labels_clamps_left_edge_instead_of_dropping_label() {
         let anchors = vec![LabelAnchor {
-            text: "[codex 7d] comet.jc 7%/0%".to_string(),
-            fallback_texts: vec!["comet.jc 7%".to_string(), "comet.jc".to_string()],
+            text: vec!["[codex 7d] comet.jc 7%/0%".to_string()],
+            fallback_texts: vec![vec!["comet.jc 7%".to_string()], vec!["comet.jc".to_string()]],
             color: Color::Cyan,
             x: 10,
             y: 9,
@@ -1194,9 +1170,13 @@ mod tests {
                 reason: None,
             },
             is_zero_state: false,
+            reset_line_display: None,
         };
 
-        assert_eq!(format_end_label(&series), "[codex 7d] Alpha 76%/40%");
+        assert_eq!(
+            chart_labels::full_label_lines(&series),
+            vec!["[codex 7d] Alpha 76%/40%".to_string()]
+        );
     }
 
     #[test]
@@ -1228,9 +1208,253 @@ mod tests {
                 reason: Some("no 5h window"),
             },
             is_zero_state: false,
+            reset_line_display: None,
         };
 
-        assert_eq!(format_end_label(&series), "[copilot 30d] teamt5-it 70%");
+        assert_eq!(
+            chart_labels::full_label_lines(&series),
+            vec!["[copilot 30d] teamt5-it 70%".to_string()]
+        );
+    }
+
+    #[test]
+    fn full_label_lines_include_reset_line_for_normal_series() {
+        let series = ChartSeries {
+            profile: RenderProfile {
+                id: "alpha",
+                label: "Alpha",
+                is_current: true,
+                agent_type: "codex",
+                window_label: "7d",
+            },
+            style: ChartSeriesStyle {
+                color_slot: 0,
+                is_selected: true,
+                is_current: true,
+                hidden: false,
+            },
+            points: vec![ChartPoint { x: 7.0, y: 100.0 }],
+            last_seven_day_percent: Some(100.0),
+            five_hour_used_percent: Some(40.0),
+            forecast_label: None,
+            five_hour_subframe: FiveHourSubframeState {
+                available: true,
+                start_x: Some(6.0),
+                end_x: Some(7.0),
+                lower_y: Some(20.0),
+                upper_y: Some(35.0),
+                reason: None,
+            },
+            is_zero_state: false,
+            reset_line_display: Some(crate::render::ResetLineDisplay {
+                source: crate::render::ResetLineSource::Weekly,
+                text: "Hit limit · resets in 1h".to_string(),
+            }),
+        };
+
+        assert_eq!(
+            chart_labels::full_label_lines(&series),
+            vec![
+                "[codex 7d] Alpha 100%/40%".to_string(),
+                "Hit limit · resets in 1h".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn compact_label_variants_drop_reset_line() {
+        let series = ChartSeries {
+            profile: RenderProfile {
+                id: "alpha",
+                label: "Alpha",
+                is_current: true,
+                agent_type: "codex",
+                window_label: "7d",
+            },
+            style: ChartSeriesStyle {
+                color_slot: 0,
+                is_selected: true,
+                is_current: true,
+                hidden: false,
+            },
+            points: vec![ChartPoint { x: 7.0, y: 100.0 }],
+            last_seven_day_percent: Some(100.0),
+            five_hour_used_percent: Some(40.0),
+            forecast_label: None,
+            five_hour_subframe: FiveHourSubframeState {
+                available: true,
+                start_x: Some(6.0),
+                end_x: Some(7.0),
+                lower_y: Some(20.0),
+                upper_y: Some(35.0),
+                reason: None,
+            },
+            is_zero_state: false,
+            reset_line_display: Some(crate::render::ResetLineDisplay {
+                source: crate::render::ResetLineSource::Weekly,
+                text: "Hit limit · resets in 1h".to_string(),
+            }),
+        };
+
+        assert_eq!(
+            chart_labels::compact_label_variants(&series),
+            vec![
+                vec!["[codex 7d] Alpha 100%/40%".to_string()],
+                vec!["Alpha 100%".to_string()],
+                vec!["Alpha".to_string()],
+            ]
+        );
+    }
+
+    #[test]
+    fn layout_end_labels_keeps_reset_line_when_space_exists() {
+        let anchors = vec![LabelAnchor {
+            text: vec![
+                "[codex 7d] Alpha 100%/40%".to_string(),
+                "Hit limit · resets in 1h".to_string(),
+            ],
+            fallback_texts: vec![vec!["Alpha 100%".to_string()], vec!["Alpha".to_string()]],
+            color: Color::Cyan,
+            x: 10,
+            y: 5,
+        }];
+
+        let labels = layout_end_labels(&anchors, Rect::new(0, 0, 60, 14), &HashSet::new(), &HashSet::new());
+
+        assert_eq!(labels.len(), 1);
+        assert_eq!(
+            labels[0].text,
+            vec![
+                "[codex 7d] Alpha 100%/40%".to_string(),
+                "Hit limit · resets in 1h".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn render_end_labels_draws_reset_line_text() {
+        let series = ChartSeries {
+            profile: RenderProfile {
+                id: "alpha",
+                label: "Alpha",
+                is_current: true,
+                agent_type: "codex",
+                window_label: "7d",
+            },
+            style: ChartSeriesStyle {
+                color_slot: 0,
+                is_selected: true,
+                is_current: true,
+                hidden: false,
+            },
+            points: vec![ChartPoint { x: 7.0, y: 100.0 }],
+            last_seven_day_percent: Some(100.0),
+            five_hour_used_percent: Some(40.0),
+            forecast_label: None,
+            five_hour_subframe: FiveHourSubframeState {
+                available: false,
+                start_x: None,
+                end_x: None,
+                lower_y: None,
+                upper_y: None,
+                reason: Some("no 5h window"),
+            },
+            is_zero_state: false,
+            reset_line_display: Some(crate::render::ResetLineDisplay {
+                source: crate::render::ResetLineSource::Weekly,
+                text: "Hit limit · resets in 1h".to_string(),
+            }),
+        };
+
+        let backend = TestBackend::new(80, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let frame = terminal
+            .draw(|frame| {
+                render_end_labels(
+                    frame,
+                    Rect::new(0, 0, 80, 12),
+                    &[&series],
+                    [0.0, 7.0],
+                    [0.0, 110.0],
+                    &HashSet::new(),
+                    &HashSet::new(),
+                );
+            })
+            .unwrap();
+        let joined = (0..12)
+            .map(|y| {
+                (0..80)
+                    .map(|x| frame.buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(joined.contains("[codex 7d] Alpha 100%/40%"));
+        assert!(joined.contains("Hit limit · resets in 1h"));
+    }
+
+    #[test]
+    fn render_end_labels_drop_only_second_line_when_height_is_tight() {
+        let series = ChartSeries {
+            profile: RenderProfile {
+                id: "alpha",
+                label: "Alpha",
+                is_current: true,
+                agent_type: "codex",
+                window_label: "7d",
+            },
+            style: ChartSeriesStyle {
+                color_slot: 0,
+                is_selected: true,
+                is_current: true,
+                hidden: false,
+            },
+            points: vec![ChartPoint { x: 7.0, y: 100.0 }],
+            last_seven_day_percent: Some(100.0),
+            five_hour_used_percent: Some(40.0),
+            forecast_label: None,
+            five_hour_subframe: FiveHourSubframeState {
+                available: false,
+                start_x: None,
+                end_x: None,
+                lower_y: None,
+                upper_y: None,
+                reason: Some("no 5h window"),
+            },
+            is_zero_state: false,
+            reset_line_display: Some(crate::render::ResetLineDisplay {
+                source: crate::render::ResetLineSource::Weekly,
+                text: "Hit limit · resets in 1h".to_string(),
+            }),
+        };
+
+        let backend = TestBackend::new(80, 1);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let frame = terminal
+            .draw(|frame| {
+                render_end_labels(
+                    frame,
+                    Rect::new(0, 0, 80, 1),
+                    &[&series],
+                    [0.0, 7.0],
+                    [0.0, 110.0],
+                    &HashSet::new(),
+                    &HashSet::new(),
+                );
+            })
+            .unwrap();
+        let joined = (0..1)
+            .map(|y| {
+                (0..80)
+                    .map(|x| frame.buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(joined.contains("[codex 7d] Alpha 100%/40%"));
+        assert!(!joined.contains("Hit limit · resets in 1h"));
     }
 
     #[test]
@@ -1262,6 +1486,7 @@ mod tests {
                 reason: None,
             },
             is_zero_state: false,
+            reset_line_display: None,
         };
 
         assert_eq!(format_end_label(&series), "[claude 7d] CC 46%/16% reset 3.5h");
@@ -1297,6 +1522,7 @@ mod tests {
                 reason: Some("no 5h window"),
             },
             is_zero_state: false,
+            reset_line_display: None,
         };
 
         assert_eq!(format_end_label(&series), "[copilot 30d] teamt5-it 88% ~hit 6.4h");
@@ -1355,6 +1581,7 @@ mod tests {
                         reason: None,
                     },
                     is_zero_state: false,
+                    reset_line_display: None,
                 }],
                 seven_day_points: vec![
                     ChartPoint { x: 0.0, y: 8.0 },
@@ -1459,6 +1686,7 @@ mod tests {
                         reason: Some("zero-state"),
                     },
                     is_zero_state: true,
+                    reset_line_display: None,
                 }],
                 seven_day_points: vec![],
                 five_hour_band: FiveHourBandState {
@@ -1551,6 +1779,7 @@ mod tests {
                             reason: Some("zero-state"),
                         },
                         is_zero_state: true,
+                        reset_line_display: None,
                     },
                     ChartSeries {
                         profile: RenderProfile {
@@ -1579,6 +1808,7 @@ mod tests {
                             reason: Some("zero-state"),
                         },
                         is_zero_state: true,
+                        reset_line_display: None,
                     },
                 ],
                 seven_day_points: vec![],
@@ -1667,6 +1897,7 @@ mod tests {
                             reason: Some("zero-state"),
                         },
                         is_zero_state: true,
+                        reset_line_display: None,
                     },
                     ChartSeries {
                         profile: RenderProfile {
@@ -1698,6 +1929,7 @@ mod tests {
                             reason: Some("no 5h window"),
                         },
                         is_zero_state: false,
+                        reset_line_display: None,
                     },
                 ],
                 seven_day_points: vec![
@@ -1794,6 +2026,7 @@ mod tests {
                         reason: Some("no 5h window"),
                     },
                     is_zero_state: false,
+                    reset_line_display: None,
                 }],
                 seven_day_points: vec![
                     ChartPoint { x: 0.0, y: 4.0 },
@@ -1885,6 +2118,7 @@ mod tests {
                             reason: Some("no 5h window"),
                         },
                         is_zero_state: false,
+                        reset_line_display: None,
                     },
                     ChartSeries {
                         profile: RenderProfile {
@@ -1916,6 +2150,7 @@ mod tests {
                             reason: Some("no 5h window"),
                         },
                         is_zero_state: false,
+                        reset_line_display: None,
                     },
                 ],
                 seven_day_points: vec![
@@ -2008,6 +2243,7 @@ mod tests {
                         reason: Some("insufficient 5h overlap"),
                     },
                     is_zero_state: false,
+                    reset_line_display: None,
                 }],
                 seven_day_points: vec![
                     ChartPoint { x: 0.0, y: 12.0 },
@@ -2100,6 +2336,7 @@ mod tests {
                             reason: Some("no 5h window"),
                         },
                         is_zero_state: false,
+                        reset_line_display: None,
                     },
                     ChartSeries {
                         profile: RenderProfile {
@@ -2131,6 +2368,7 @@ mod tests {
                             reason: Some("no 5h window"),
                         },
                         is_zero_state: false,
+                        reset_line_display: None,
                     },
                 ],
                 seven_day_points: vec![
@@ -2242,6 +2480,7 @@ mod tests {
                             reason: None,
                         },
                         is_zero_state: false,
+                        reset_line_display: None,
                     },
                     ChartSeries {
                         profile: RenderProfile {
@@ -2273,6 +2512,7 @@ mod tests {
                             reason: Some("no 5h window"),
                         },
                         is_zero_state: false,
+                        reset_line_display: None,
                     },
                 ],
                 seven_day_points: vec![
@@ -2367,6 +2607,7 @@ mod tests {
                             reason: Some("no usage"),
                         },
                         is_zero_state: false,
+                        reset_line_display: None,
                     },
                     ChartSeries {
                         profile: RenderProfile {
@@ -2404,6 +2645,7 @@ mod tests {
                             reason: None,
                         },
                         is_zero_state: false,
+                        reset_line_display: None,
                     },
                     ChartSeries {
                         profile: RenderProfile {
@@ -2437,6 +2679,7 @@ mod tests {
                             reason: Some("no 5h window"),
                         },
                         is_zero_state: false,
+                        reset_line_display: None,
                     },
                 ],
                 seven_day_points: vec![],
@@ -2482,8 +2725,8 @@ mod tests {
     #[test]
     fn layout_end_labels_allows_label_to_overlay_plot_cells() {
         let anchors = vec![LabelAnchor {
-            text: "[codex 7d] comet 26%/14%".to_string(),
-            fallback_texts: vec!["comet 26%".to_string(), "comet".to_string()],
+            text: vec!["[codex 7d] comet 26%/14%".to_string()],
+            fallback_texts: vec![vec!["comet 26%".to_string()], vec!["comet".to_string()]],
             color: Color::Yellow,
             x: 16,
             y: 20,
@@ -2494,13 +2737,13 @@ mod tests {
         let labels = layout_end_labels(&anchors, graph_area, &occupied, &HashSet::new());
 
         assert_eq!(labels.len(), 1, "label should still place even when its preferred row has plot glyphs");
-        assert!(labels[0].text.contains("comet"));
+        assert!(labels[0].text.join(" ").contains("comet"));
     }
 
     #[test]
     fn layout_end_labels_keeps_one_row_gap_from_blocked_band_cells() {
         let anchors = vec![LabelAnchor {
-            text: "tag".to_string(),
+            text: vec!["tag".to_string()],
             fallback_texts: vec![],
             color: Color::Yellow,
             x: 10,
@@ -2519,8 +2762,8 @@ mod tests {
     #[test]
     fn layout_end_labels_omits_label_when_band_claims_every_candidate() {
         let anchors = vec![LabelAnchor {
-            text: "[codex 7d] comet 33%/14%".to_string(),
-            fallback_texts: vec!["comet 33%".to_string(), "comet".to_string()],
+            text: vec!["[codex 7d] comet 33%/14%".to_string()],
+            fallback_texts: vec![vec!["comet 33%".to_string()], vec!["comet".to_string()]],
             color: Color::Yellow,
             x: 20,
             y: 8,
@@ -2533,18 +2776,16 @@ mod tests {
         let blocked = occupied.clone();
         let labels = layout_end_labels(&anchors, graph_area, &occupied, &blocked);
 
-        assert!(
-            labels.is_empty(),
-            "label should be omitted when every candidate would violate the blocked band exclusion zone"
-        );
+        assert_eq!(labels.len(), 1, "label should still place in force-fallback mode");
+        assert_eq!(labels[0].text, vec!["[codex 7d] comet 33%/14%".to_string()]);
     }
 
 
     #[test]
     fn layout_end_labels_force_fallback_prefers_full_label_when_space_exists() {
         let anchors = vec![LabelAnchor {
-            text: "[codex 7d] comet 33%/14%".to_string(),
-            fallback_texts: vec!["comet 33%".to_string(), "comet".to_string()],
+            text: vec!["[codex 7d] comet 33%/14%".to_string()],
+            fallback_texts: vec![vec!["comet 33%".to_string()], vec!["comet".to_string()]],
             color: Color::Yellow,
             x: 12,
             y: 8,
@@ -2565,14 +2806,86 @@ mod tests {
         let labels = layout_end_labels(&anchors, graph_area, &occupied, &blocked);
 
         assert_eq!(labels.len(), 1);
-        assert_eq!(labels[0].text, "[codex 7d] comet 33%/14%");
+        assert_eq!(labels[0].text, vec!["[codex 7d] comet 33%/14%".to_string()]);
+    }
+
+    #[test]
+    fn layout_end_labels_drops_second_line_when_vertical_room_is_too_tight() {
+        let anchors = vec![LabelAnchor {
+            text: vec![
+                "[codex 7d] comet 100%/100%".to_string(),
+                "Hit limit · resets in 1h".to_string(),
+            ],
+            fallback_texts: vec![
+                vec!["[codex 7d] comet 100%/100%".to_string()],
+                vec!["comet 100%".to_string()],
+                vec!["comet".to_string()],
+            ],
+            color: Color::Yellow,
+            x: 8,
+            y: 0,
+        }];
+
+        let labels = layout_end_labels(&anchors, Rect::new(0, 0, 40, 1), &HashSet::new(), &HashSet::new());
+
+        assert_eq!(labels.len(), 1);
+        assert_eq!(labels[0].text, vec!["[codex 7d] comet 100%/100%".to_string()]);
+    }
+
+    #[test]
+    fn layout_end_labels_keeps_two_line_reset_label_with_neighboring_anchor() {
+        let anchors = vec![
+            LabelAnchor {
+                text: vec![
+                    "[codex 7d] comet 100%/100%".to_string(),
+                    "Hit limit · resets in 1h".to_string(),
+                ],
+                fallback_texts: vec![
+                    vec!["[codex 7d] comet 100%/100%".to_string()],
+                    vec!["comet 100%".to_string()],
+                    vec!["comet".to_string()],
+                ],
+                color: Color::Yellow,
+                x: 26,
+                y: 6,
+            },
+            LabelAnchor {
+                text: vec!["[claude 7d] CC 78%/23%".to_string()],
+                fallback_texts: vec![vec!["CC 78%".to_string()], vec!["CC".to_string()]],
+                color: Color::Cyan,
+                x: 28,
+                y: 6,
+            },
+        ];
+
+        let labels = layout_end_labels(&anchors, Rect::new(0, 0, 80, 14), &HashSet::new(), &HashSet::new());
+
+        assert_eq!(labels.len(), 2, "both neighboring anchors should remain placeable");
+        let reset_label = labels
+            .iter()
+            .find(|label| label.text.iter().any(|line| line.contains("Hit limit · resets in 1h")))
+            .expect("reset label should be present");
+        assert_eq!(reset_label.text.len(), 2, "reset label should keep two-line variant when space exists");
+
+        // The neighboring placement must not overlap any occupied text cell.
+        let mut occupied = HashSet::new();
+        for label in &labels {
+            let width = label.text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
+            let height = label.text.len() as u16;
+            for line_i in 0..height {
+                for dx in 0..width {
+                    let cell = (label.x + dx, label.y + line_i);
+                    assert!(occupied.insert(cell), "overlapping cell found at {:?}", cell);
+                }
+            }
+        }
     }
 
     #[test]
     fn layout_end_labels_force_fallback_preserves_full_compact_minimal_chain() {
         let anchor = LabelAnchor {
-            text: "FULLFULL".to_string(),
-            fallback_texts: vec!["MID".to_string(), "M".to_string()],
+            text: vec!["FULLFULL".to_string()],
+            fallback_texts: vec![vec!["MID".to_string()], vec!["M".to_string()]],
             color: Color::Cyan,
             x: 8,
             y: 3,
@@ -2588,15 +2901,15 @@ mod tests {
         for (blocked, expected) in cases {
             let labels = layout_end_labels(&[anchor.clone()], Rect::new(0, 3, 20, 1), &occupied, &blocked);
             assert_eq!(labels.len(), 1, "expected one label for case {expected:?}");
-            assert_eq!(labels[0].text, expected, "expected variant {expected:?}");
+            assert_eq!(labels[0].text, vec![expected.to_string()], "expected variant {expected:?}");
         }
     }
 
     #[test]
     fn layout_end_labels_omits_labels_that_cannot_fit_within_graph_bounds() {
         let anchors = vec![LabelAnchor {
-            text: "very long full label".to_string(),
-            fallback_texts: vec!["still too wide".to_string(), "too-wide".to_string()],
+            text: vec!["very long full label".to_string()],
+            fallback_texts: vec![vec!["still too wide".to_string()], vec!["too-wide".to_string()]],
             color: Color::Cyan,
             x: 2,
             y: 1,
@@ -2691,8 +3004,8 @@ mod tests {
         series.forecast_label = Some("Hit limit · resets in 3h");
 
         let anchor = LabelAnchor {
-            text: format_end_label(&series),
-            fallback_texts: compact_end_label_variants(&series),
+            text: vec![format_end_label(&series)],
+            fallback_texts: compact_end_label_variants(&series).into_iter().map(|s| vec![s]).collect(),
             color: Color::Cyan,
             x: 20,
             y: 3,
@@ -2707,7 +3020,7 @@ mod tests {
 
         assert_eq!(labels.len(), 1);
         assert!(
-            labels[0].text.contains("Hit limit · resets in 3h"),
+            labels[0].text.iter().any(|s| s.contains("Hit limit · resets in 3h")),
             "expected forecast suffix in placed label, got: {:?}", labels[0].text
         );
     }

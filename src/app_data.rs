@@ -37,6 +37,9 @@ pub struct ProfileChartData {
     pub seven_day_points: Vec<ChartPoint>,
     pub quota_window_label: String,
     pub forecast: OwnedUsageForecast,
+    // Optional prepared countdowns for chart reset-line feature. None when unavailable or <= 0.
+    pub weekly_reset_countdown_seconds: Option<i64>,
+    pub five_hour_reset_countdown_seconds: Option<i64>,
     pub five_hour_band: OwnedFiveHourBandState,
     pub five_hour_subframe: OwnedFiveHourSubframeState,
     pub is_zero_state: bool,
@@ -48,6 +51,8 @@ impl ProfileChartData {
             seven_day_points: Vec::new(),
             quota_window_label: "?d".to_string(),
             forecast: OwnedUsageForecast::empty(reason),
+            weekly_reset_countdown_seconds: None,
+            five_hour_reset_countdown_seconds: None,
             five_hour_band: OwnedFiveHourBandState {
                 available: false,
                 used_percent: None,

@@ -548,10 +548,15 @@ fn build_profile_chart_data(
         )
     };
 
+    let weekly_reset_countdown_seconds = weekly_window.and_then(|w| if w.reset_after_seconds > 0 { Some(w.reset_after_seconds) } else { None });
+    let five_hour_reset_countdown_seconds = five_hour_window.and_then(|w| if w.reset_after_seconds > 0 { Some(w.reset_after_seconds) } else { None });
+
     Ok(ProfileChartData {
         seven_day_points,
         quota_window_label: format_quota_window_label(weekly_window.map(|window| window.limit_window_seconds)),
         forecast,
+        weekly_reset_countdown_seconds,
+        five_hour_reset_countdown_seconds,
         five_hour_band,
         five_hour_subframe,
         is_zero_state,
@@ -1979,6 +1984,125 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn chart_prepares_reset_countdowns_from_live_windows() {
+        use crate::usage::{UsageRateLimit, UsageResponse, UsageWindow};
+        let cache_path = PathBuf::from("dummy_reset_live_cache.json");
+        let history_path = std::env::temp_dir().join(format!("test_reset_live_history_{}.json", std::process::id()));
+        let now = 1_700_000_000;
+        let usage_service = UsageService::new(cache_path, history_path.clone(), 300);
+
+        let usage = UsageResponse {
+            email: None,
+            plan_type: None,
+            rate_limit: Some(UsageRateLimit {
+                primary_window: Some(UsageWindow {
+                    used_percent: 20.0,
+                    limit_window_seconds: 18_000,
+                    reset_after_seconds: 3_600,
+                    reset_at: now + 3_600,
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: 40.0,
+                    limit_window_seconds: 604_800,
+                    reset_after_seconds: 300_000,
+                    reset_at: now + 300_000,
+                }),
+            }),
+        };
+
+        let account_id = "reset-live|test";
+        let chart_data = build_profile_chart_data(Some(account_id), Some(&usage), &usage_service.with_now_seconds(now)).unwrap();
+        assert_eq!(chart_data.five_hour_reset_countdown_seconds, Some(3_600));
+        assert_eq!(chart_data.weekly_reset_countdown_seconds, Some(300_000));
+
+        let _ = std::fs::remove_file(history_path);
+    }
+
+    #[test]
+    fn chart_fallback_windows_do_not_provide_reset_countdowns() {
+        use crate::usage::{UsageRateLimit, UsageResponse, UsageWindow, UsageReadResult, UsageSource};
+        let cache_path = PathBuf::from("dummy_reset_fallback_cache.json");
+        let history_path = std::env::temp_dir().join(format!("test_reset_fallback_history_{}.json", std::process::id()));
+        let usage_service = UsageService::new(cache_path, history_path.clone(), 300);
+        let now = 1_700_000_000;
+
+        let usage = UsageResponse {
+            email: None,
+            plan_type: None,
+            rate_limit: Some(UsageRateLimit {
+                primary_window: Some(UsageWindow {
+                    used_percent: 20.0,
+                    limit_window_seconds: 18_000,
+                    reset_after_seconds: 3_600,
+                    reset_at: now + 3_600,
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: 40.0,
+                    limit_window_seconds: 604_800,
+                    reset_after_seconds: 300_000,
+                    reset_at: now + 300_000,
+                }),
+            }),
+        };
+
+        let account_id = "reset-fallback|test";
+        // Record a snapshot to create history; fallback windows are synthesized with reset_after_seconds = 0
+        usage_service.clone()
+            .with_now_seconds(now)
+            .record_usage_snapshot(
+                Some(account_id),
+                &UsageReadResult {
+                    usage: Some(usage.clone()),
+                    source: UsageSource::Api,
+                    fetched_at: Some(now),
+                    stale: false,
+                },
+            )
+            .unwrap();
+
+        let chart_data = build_profile_chart_data(Some(account_id), None, &usage_service).unwrap();
+        assert_eq!(chart_data.weekly_reset_countdown_seconds, None);
+        assert_eq!(chart_data.five_hour_reset_countdown_seconds, None);
+
+        let _ = std::fs::remove_file(history_path);
+    }
+
+    #[test]
+    fn chart_ignores_nonpositive_live_reset_after_seconds() {
+        use crate::usage::{UsageRateLimit, UsageResponse, UsageWindow};
+        let cache_path = PathBuf::from("dummy_reset_nonpositive_cache.json");
+        let history_path = std::env::temp_dir().join(format!("test_reset_nonpositive_history_{}.json", std::process::id()));
+        let usage_service = UsageService::new(cache_path, history_path.clone(), 300);
+        let now = 1_700_000_000;
+
+        let usage = UsageResponse {
+            email: None,
+            plan_type: None,
+            rate_limit: Some(UsageRateLimit {
+                primary_window: Some(UsageWindow {
+                    used_percent: 20.0,
+                    limit_window_seconds: 18_000,
+                    reset_after_seconds: 0,
+                    reset_at: now + 3_600,
+                }),
+                secondary_window: Some(UsageWindow {
+                    used_percent: 40.0,
+                    limit_window_seconds: 604_800,
+                    reset_after_seconds: 0,
+                    reset_at: now + 300_000,
+                }),
+            }),
+        };
+
+        let account_id = "reset-nonpositive|test";
+        let chart_data = build_profile_chart_data(Some(account_id), Some(&usage), &usage_service.with_now_seconds(now)).unwrap();
+        assert_eq!(chart_data.weekly_reset_countdown_seconds, None);
+        assert_eq!(chart_data.five_hour_reset_countdown_seconds, None);
+
+        let _ = std::fs::remove_file(history_path);
     }
 
     fn sample_usage(plan: &str) -> UsageResponse {
