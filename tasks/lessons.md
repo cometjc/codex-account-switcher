@@ -45,6 +45,7 @@
 - 該口令的終點不能只看當前 execution 是否 no-op；要看相關 plan 是否真的跑完。若 execution 沒 lane 可跑但 plan 還有未完成項，應繼續 replan / reopen truthful work，而不是把「execution 暫時空了」誤報成整輪完成。
 - 當使用者糾正回覆語言時，要立刻切換到指定語言，並把這個偏好上升成明確本地規則寫進 `AGENTS.md`，避免後續回覆再漂回預設語言。
 - 當使用者明確點名某條 lane 要「繼續推進」並要求在指定 worktree 內工作時，main agent 應只在那個 worktree 收斂、驗證與提交，不要把變更回寫到主線工作樹。
+- 當使用者指出某個 plan / worktree 正由另一個 agent 執行時，要把它視為保留中的 execution surface：不要去改那個 worktree、不要更新它的 plan 內容，改成只整理其他孤兒 worktree 或相鄰 plans。
 - 遇到 auth/refresh 類問題時，不能因為文件寫有 auto-refresh 就假設現有 snapshot 一定能被自動救回；必須先實跑 refresh endpoint，分清楚是 access token 過期，還是 refresh token 本身已失效/重用，再決定是修 code path 還是要求重新登入/reseed。
 - 本 repo 驗證預設必須使用 `make test`（會連動 `make install`）；除非使用者明確要求或是純快速本地檢查，否則不要只跑 `cargo test`。
 - 規則入口與 thin adapter（例如 `AGENTS.md` 與 `CLAUDE.md`）的同一主題不可互相矛盾；若發現不一致，先修正 adapter 對齊權威入口，再執行驗證命令。
