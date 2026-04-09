@@ -2833,6 +2833,55 @@ mod tests {
     }
 
     #[test]
+    fn layout_end_labels_keeps_two_line_reset_label_with_neighboring_anchor() {
+        let anchors = vec![
+            LabelAnchor {
+                text: vec![
+                    "[codex 7d] comet 100%/100%".to_string(),
+                    "Hit limit · resets in 1h".to_string(),
+                ],
+                fallback_texts: vec![
+                    vec!["[codex 7d] comet 100%/100%".to_string()],
+                    vec!["comet 100%".to_string()],
+                    vec!["comet".to_string()],
+                ],
+                color: Color::Yellow,
+                x: 26,
+                y: 6,
+            },
+            LabelAnchor {
+                text: vec!["[claude 7d] CC 78%/23%".to_string()],
+                fallback_texts: vec![vec!["CC 78%".to_string()], vec!["CC".to_string()]],
+                color: Color::Cyan,
+                x: 28,
+                y: 6,
+            },
+        ];
+
+        let labels = layout_end_labels(&anchors, Rect::new(0, 0, 80, 14), &HashSet::new(), &HashSet::new());
+
+        assert_eq!(labels.len(), 2, "both neighboring anchors should remain placeable");
+        let reset_label = labels
+            .iter()
+            .find(|label| label.text.iter().any(|line| line.contains("Hit limit · resets in 1h")))
+            .expect("reset label should be present");
+        assert_eq!(reset_label.text.len(), 2, "reset label should keep two-line variant when space exists");
+
+        // The neighboring placement must not overlap any occupied text cell.
+        let mut occupied = HashSet::new();
+        for label in &labels {
+            let width = label.text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
+            let height = label.text.len() as u16;
+            for line_i in 0..height {
+                for dx in 0..width {
+                    let cell = (label.x + dx, label.y + line_i);
+                    assert!(occupied.insert(cell), "overlapping cell found at {:?}", cell);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn layout_end_labels_force_fallback_preserves_full_compact_minimal_chain() {
         let anchor = LabelAnchor {
             text: vec!["FULLFULL".to_string()],
