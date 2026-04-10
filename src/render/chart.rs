@@ -994,65 +994,80 @@ fn candidate_positions_for_label(
 
     let mut out = Vec::new();
 
-    for step in 0..graph_area.height {
-        let step = step as i16;
-        let offsets = if step == 0 {
-            vec![0]
-        } else {
-            vec![-step, step]
-        };
-        for dy in offsets {
-            let y = anchor.y as i16 + dy;
-            if y < graph_area.top() as i16
-                || (y as u16).saturating_add(height).saturating_sub(1) >= graph_area.bottom()
-            {
-                continue;
-            }
-            let y = y as u16;
-            let mut row_candidates = Vec::new();
-            let mut seen = HashSet::new();
-
-            for &offset in offset_priority {
-                let right_x = anchor.x.saturating_add(offset);
-                if right_x + width <= label_area_right && seen.insert(right_x) {
-                    row_candidates.push((right_x, y));
+    let push_side_candidates = |right_side: bool, out: &mut Vec<(u16, u16)>| {
+        for step in 0..graph_area.height {
+            let step = step as i16;
+            let offsets = if step == 0 {
+                vec![0]
+            } else {
+                vec![-step, step]
+            };
+            for dy in offsets {
+                let y = anchor.y as i16 + dy;
+                if y < graph_area.top() as i16
+                    || (y as u16).saturating_add(height).saturating_sub(1) >= graph_area.bottom()
+                {
+                    continue;
                 }
-                let left_x = anchor
-                    .x
-                    .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
-                    .max(graph_area.left());
-                if left_x + width <= anchor.x && seen.insert(left_x) {
-                    row_candidates.push((left_x, y));
-                }
-            }
+                let y = y as u16;
+                let mut row_candidates = Vec::new();
+                let mut seen = HashSet::new();
 
-            let mut offset = 1u16;
-            while offset <= LABEL_SEARCH_X_LIMIT {
-                let right_x = anchor.x.saturating_add(offset);
-                if right_x + width <= label_area_right && seen.insert(right_x) {
-                    row_candidates.push((right_x, y));
-                }
+                if right_side {
+                    for &offset in offset_priority {
+                        let right_x = anchor.x.saturating_add(offset);
+                        if right_x + width <= label_area_right && seen.insert(right_x) {
+                            row_candidates.push((right_x, y));
+                        }
+                    }
 
-                if width <= anchor.x {
-                    let left_x = anchor
-                        .x
-                        .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
-                        .max(graph_area.left());
-                    if left_x + width <= anchor.x && seen.insert(left_x) {
-                        row_candidates.push((left_x, y));
+                    let mut offset = 1u16;
+                    while offset <= LABEL_SEARCH_X_LIMIT {
+                        let right_x = anchor.x.saturating_add(offset);
+                        if right_x + width <= label_area_right && seen.insert(right_x) {
+                            row_candidates.push((right_x, y));
+                        }
+                        offset = offset.saturating_add(2);
+                    }
+                } else {
+                    for &offset in offset_priority {
+                        let left_x = anchor
+                            .x
+                            .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
+                            .max(graph_area.left());
+                        if left_x + width <= anchor.x && seen.insert(left_x) {
+                            row_candidates.push((left_x, y));
+                        }
+                    }
+
+                    let mut offset = 1u16;
+                    while offset <= LABEL_SEARCH_X_LIMIT {
+                        if width <= anchor.x {
+                            let left_x = anchor
+                                .x
+                                .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
+                                .max(graph_area.left());
+                            if left_x + width <= anchor.x && seen.insert(left_x) {
+                                row_candidates.push((left_x, y));
+                            }
+                        }
+                        offset = offset.saturating_add(2);
                     }
                 }
 
-                offset = offset.saturating_add(2);
-            }
-
-            for candidate in row_candidates {
-                out.push(candidate);
-                if out.len() >= max_candidates {
-                    return out;
+                for candidate in row_candidates {
+                    out.push(candidate);
+                    if out.len() >= max_candidates {
+                        return;
+                    }
                 }
             }
         }
+    };
+
+    push_side_candidates(true, &mut out);
+    if out.len() < max_candidates {
+        push_side_candidates(false, &mut out);
     }
 
     out
@@ -3753,6 +3768,38 @@ mod tests {
             "label should still place even when its preferred row has plot glyphs"
         );
         assert!(labels[0].text.join(" ").contains("comet"));
+    }
+
+    #[test]
+    fn candidate_positions_for_label_keeps_right_side_ahead_of_left_side() {
+        let anchor = LabelAnchor {
+            key: "test".to_string(),
+            text: vec!["tag".to_string()],
+            fallback_texts: vec![],
+            color: Color::Yellow,
+            x: 10,
+            y: 6,
+        };
+
+        let candidates = candidate_positions_for_label(
+            &anchor,
+            4,
+            1,
+            Rect::new(0, 0, 40, 12),
+            40,
+            &[PREFERRED_LABEL_OFFSET, FALLBACK_LABEL_OFFSET],
+            2,
+        );
+
+        assert_eq!(candidates.len(), 2);
+        assert!(
+            candidates.iter().all(|(x, _)| *x >= anchor.x),
+            "expected right-side candidates to fill the cap before any left-side candidate, got: {candidates:?}"
+        );
+        assert!(
+            candidates[1].0 > anchor.x,
+            "expected the second candidate to still be on the right side, got: {candidates:?}"
+        );
     }
 
     #[test]
