@@ -720,7 +720,7 @@ fn layout_end_labels(
                     continue;
                 }
                 let connector = connector_cells(attach_x, y, anchor.x, anchor.y, graph_area);
-                if !connector.iter().all(|cell| !blocked_cells.contains(cell) && !reserved.contains(cell)) {
+                if !connector.iter().all(|cell| !reserved.contains(cell)) {
                     continue;
                 }
                 let conn_total = connector.len() as u16;
