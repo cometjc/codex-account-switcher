@@ -917,14 +917,19 @@ fn connector_cells(
 
 fn draw_label_connector(frame: &mut Frame, label: &PlacedLabel, graph_area: Rect, label_area_right: u16) {
     let style = Style::default().fg(label.color).add_modifier(Modifier::DIM);
+    let has_horizontal = label.attach_x != label.anchor_x;
+    let has_vertical = label.y != label.anchor_y;
 
     for x in label.anchor_x.min(label.attach_x)..=label.anchor_x.max(label.attach_x) {
         if x == label.anchor_x || x < graph_area.left() || x >= label_area_right {
             continue;
         }
+        if has_vertical && x == label.attach_x {
+            continue; // corner drawn separately
+        }
         let cell = &mut frame.buffer_mut()[(x, label.anchor_y)];
         if cell.symbol() == " " {
-            cell.set_symbol("-").set_style(style);
+            cell.set_symbol("─").set_style(style);
         }
     }
     for y in label.anchor_y.min(label.y)..=label.anchor_y.max(label.y) {
@@ -933,7 +938,25 @@ fn draw_label_connector(frame: &mut Frame, label: &PlacedLabel, graph_area: Rect
         }
         let cell = &mut frame.buffer_mut()[(label.attach_x, y)];
         if cell.symbol() == " " {
-            cell.set_symbol("|").set_style(style);
+            cell.set_symbol("│").set_style(style);
+        }
+    }
+    if has_horizontal && has_vertical {
+        let corner = match (label.attach_x > label.anchor_x, label.y > label.anchor_y) {
+            (true,  true)  => "╮",
+            (true,  false) => "╯",
+            (false, true)  => "╭",
+            (false, false) => "╰",
+        };
+        if label.attach_x < label_area_right
+            && label.attach_x >= graph_area.left()
+            && label.anchor_y >= graph_area.top()
+            && label.anchor_y < graph_area.bottom()
+        {
+            let cell = &mut frame.buffer_mut()[(label.attach_x, label.anchor_y)];
+            if cell.symbol() == " " {
+                cell.set_symbol(corner).set_style(style);
+            }
         }
     }
 }
