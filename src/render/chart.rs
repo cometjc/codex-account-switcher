@@ -181,8 +181,19 @@ fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_stat
                 .bounds(y_bounds)
                 .labels([y_label_lo.as_str(), y_label_q1.as_str(), y_label_mid.as_str(), y_label_q3.as_str(), y_label_hi.as_str()]),
         );
-    frame.render_widget(chart, area);
-    let graph_area = chart_graph_area(area, x_label_lo.as_str(), [y_label_lo.as_str(), y_label_q1.as_str(), y_label_mid.as_str(), y_label_q3.as_str(), y_label_hi.as_str()]);
+    // Reserve a right-side label zone so end labels always fit without fallback.
+    // Only apply the zone when the area is wide enough to leave a usable plot.
+    let raw_zone = right_label_zone_width(&visible_series);
+    let zone_width = if raw_zone < area.width / 2 { raw_zone } else { 0 };
+    let [plot_area, _label_zone] = Layout::horizontal([
+        Constraint::Min(0),
+        Constraint::Length(zone_width),
+    ])
+    .areas(area);
+    let label_area_right = area.right();
+
+    frame.render_widget(chart, plot_area);
+    let graph_area = chart_graph_area(plot_area, x_label_lo.as_str(), [y_label_lo.as_str(), y_label_q1.as_str(), y_label_mid.as_str(), y_label_q3.as_str(), y_label_hi.as_str()]);
     let blocked_cells = apply_band_backgrounds(frame, graph_area, &band_rects, x_bounds, y_bounds);
     let occupied_cells = collect_occupied_plot_cells(frame, graph_area);
     let zero_state_series = visible_series
@@ -209,7 +220,7 @@ fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_stat
     }
 
     let occupied_cells = collect_occupied_plot_cells(frame, graph_area);
-    render_end_labels(frame, graph_area, &normal_series, x_bounds, y_bounds, &occupied_cells, &blocked_cells);
+    render_end_labels(frame, graph_area, label_area_right, &normal_series, x_bounds, y_bounds, &occupied_cells, &blocked_cells);
     render_zero_state_origin_marker(frame, graph_area, x_bounds, y_bounds, &zero_state_series);
 }
 
@@ -316,6 +327,7 @@ fn right_label_zone_width(visible_series: &[&super::ChartSeries<'_>]) -> u16 {
 fn render_end_labels(
     frame: &mut Frame,
     graph_area: Rect,
+    label_area_right: u16,
     visible_series: &[&super::ChartSeries<'_>],
     x_bounds: [f64; 2],
     y_bounds: [f64; 2],
@@ -341,8 +353,8 @@ fn render_end_labels(
         .collect::<Vec<_>>();
     anchors.sort_by_key(|anchor| anchor.y);
 
-    for label in layout_end_labels(&anchors, graph_area, occupied_cells, blocked_cells) {
-        draw_label_connector(frame, &label, graph_area);
+    for label in layout_end_labels(&anchors, graph_area, label_area_right, occupied_cells, blocked_cells) {
+        draw_label_connector(frame, &label, graph_area, label_area_right);
         let label_width = label.text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
         let label_height = label.text.len() as u16;
         for line_i in 0..label_height {
@@ -654,6 +666,7 @@ fn expand_label_exclusion_cells(
 fn layout_end_labels(
     anchors: &[LabelAnchor],
     graph_area: Rect,
+    label_area_right: u16,
     occupied_cells: &HashSet<(u16, u16)>,
     blocked_cells: &HashSet<(u16, u16)>,
 ) -> Vec<PlacedLabel> {
@@ -921,11 +934,11 @@ fn connector_cells(
     cells
 }
 
-fn draw_label_connector(frame: &mut Frame, label: &PlacedLabel, graph_area: Rect) {
+fn draw_label_connector(frame: &mut Frame, label: &PlacedLabel, graph_area: Rect, label_area_right: u16) {
     let style = Style::default().fg(label.color).add_modifier(Modifier::DIM);
 
     for x in label.anchor_x.min(label.attach_x)..=label.anchor_x.max(label.attach_x) {
-        if x == label.anchor_x || x < graph_area.left() || x >= graph_area.right() {
+        if x == label.anchor_x || x < graph_area.left() || x >= label_area_right {
             continue;
         }
         let cell = &mut frame.buffer_mut()[(x, label.anchor_y)];
@@ -1116,7 +1129,7 @@ mod tests {
         let occupied = HashSet::from([(13, 4), (14, 4), (15, 4), (16, 4), (17, 4)]);
         let blocked = HashSet::from([(13, 5), (14, 5), (15, 5), (16, 5), (17, 5)]);
 
-        let labels = layout_end_labels(&anchors, Rect::new(0, 0, 24, 10), &occupied, &blocked);
+        let labels = layout_end_labels(&anchors, Rect::new(0, 0, 24, 10), Rect::new(0, 0, 24, 10).right(), &occupied, &blocked);
 
         assert_eq!(labels.len(), 2);
         assert_ne!(labels[0].y, labels[1].y);
@@ -1142,7 +1155,7 @@ mod tests {
 
         let occupied = HashSet::from([(0, 3), (9, 3)]);
 
-        let labels = layout_end_labels(&anchors, Rect::new(0, 3, 20, 1), &occupied, &HashSet::new());
+        let labels = layout_end_labels(&anchors, Rect::new(0, 3, 20, 1), Rect::new(0, 3, 20, 1).right(), &occupied, &HashSet::new());
 
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].text, vec!["FULLFULL".to_string()]);
@@ -1166,7 +1179,7 @@ mod tests {
         ];
 
         for (occupied, expected) in cases {
-            let labels = layout_end_labels(&[anchor.clone()], Rect::new(0, 3, 20, 1), &occupied, &HashSet::new());
+            let labels = layout_end_labels(&[anchor.clone()], Rect::new(0, 3, 20, 1), Rect::new(0, 3, 20, 1).right(), &occupied, &HashSet::new());
             assert_eq!(labels.len(), 1);
             assert_eq!(labels[0].text, vec![expected.to_string()]);
         }
@@ -1186,7 +1199,7 @@ mod tests {
             (13, 9), (14, 9), (15, 9), (16, 9), (17, 9), (18, 9), (19, 9), (20, 9),
             (21, 9), (22, 9), (23, 9), (24, 9), (25, 9), (26, 9), (27, 9), (28, 9),
         ]);
-        let labels = layout_end_labels(&anchors, Rect::new(8, 0, 32, 10), &occupied, &HashSet::new());
+        let labels = layout_end_labels(&anchors, Rect::new(8, 0, 32, 10), Rect::new(8, 0, 32, 10).right(), &occupied, &HashSet::new());
 
         assert_eq!(labels.len(), 1, "label should still render when left-edge clamping is required");
         assert!(labels[0].x >= 8);
@@ -1387,7 +1400,7 @@ mod tests {
             y: 5,
         }];
 
-        let labels = layout_end_labels(&anchors, Rect::new(0, 0, 60, 14), &HashSet::new(), &HashSet::new());
+        let labels = layout_end_labels(&anchors, Rect::new(0, 0, 60, 14), Rect::new(0, 0, 60, 14).right(), &HashSet::new(), &HashSet::new());
 
         assert_eq!(labels.len(), 1);
         assert_eq!(
@@ -1442,6 +1455,7 @@ mod tests {
                 render_end_labels(
                     frame,
                     Rect::new(0, 0, 80, 12),
+                    Rect::new(0, 0, 80, 12).right(),
                     &[&series],
                     [0.0, 7.0],
                     [0.0, 110.0],
@@ -1506,6 +1520,7 @@ mod tests {
                 render_end_labels(
                     frame,
                     Rect::new(0, 0, 80, 1),
+                    Rect::new(0, 0, 80, 1).right(),
                     &[&series],
                     [0.0, 7.0],
                     [0.0, 110.0],
@@ -2817,7 +2832,7 @@ mod tests {
 
         let graph_area = Rect::new(0, 0, 80, 30);
         let occupied = (17..26).map(|x| (x, 20)).collect::<HashSet<_>>();
-        let labels = layout_end_labels(&anchors, graph_area, &occupied, &HashSet::new());
+        let labels = layout_end_labels(&anchors, graph_area, graph_area.right(), &occupied, &HashSet::new());
 
         assert_eq!(labels.len(), 1, "label should still place even when its preferred row has plot glyphs");
         assert!(labels[0].text.join(" ").contains("comet"));
@@ -2840,7 +2855,7 @@ mod tests {
         let blocked = (graph_area.left()..graph_area.right())
             .flat_map(|x| (graph_area.top()..graph_area.bottom()).map(move |y| (x, y)))
             .collect::<HashSet<_>>();
-        let labels = layout_end_labels(&anchors, graph_area, &occupied, &blocked);
+        let labels = layout_end_labels(&anchors, graph_area, graph_area.right(), &occupied, &blocked);
 
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].x, 13, "expected placement with minimal overlap even though connector is longer");
@@ -2865,7 +2880,7 @@ mod tests {
         let blocked = (graph_area.left()..graph_area.right())
             .flat_map(|x| (graph_area.top()..graph_area.bottom()).map(move |y| (x, y)))
             .collect::<HashSet<_>>();
-        let labels = layout_end_labels(&anchors, graph_area, &occupied, &blocked);
+        let labels = layout_end_labels(&anchors, graph_area, graph_area.right(), &occupied, &blocked);
 
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].x, 11, "expected shorter connector among equal-overlap candidates");
@@ -2884,7 +2899,7 @@ mod tests {
 
         let graph_area = Rect::new(10, 0, 12, 10);
         let blocked = (10..=15).map(|x| (x, 5)).collect::<HashSet<_>>();
-        let labels = layout_end_labels(&anchors, graph_area, &HashSet::new(), &blocked);
+        let labels = layout_end_labels(&anchors, graph_area, graph_area.right(), &HashSet::new(), &blocked);
 
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].y, 3, "label should skip the blocked row and its 1-cell safety margin");
@@ -2906,7 +2921,7 @@ mod tests {
             .flat_map(|x| (0..12).map(move |y| (x, y)))
             .collect::<HashSet<_>>();
         let blocked = occupied.clone();
-        let labels = layout_end_labels(&anchors, graph_area, &occupied, &blocked);
+        let labels = layout_end_labels(&anchors, graph_area, graph_area.right(), &occupied, &blocked);
 
         assert_eq!(labels.len(), 1, "label should still place in force-fallback mode");
         assert_eq!(labels[0].text, vec!["[codex 7d] comet 33%/14%".to_string()]);
@@ -2935,7 +2950,7 @@ mod tests {
             })
             .collect::<HashSet<_>>();
 
-        let labels = layout_end_labels(&anchors, graph_area, &occupied, &blocked);
+        let labels = layout_end_labels(&anchors, graph_area, graph_area.right(), &occupied, &blocked);
 
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].text, vec!["[codex 7d] comet 33%/14%".to_string()]);
@@ -2959,7 +2974,7 @@ mod tests {
             y: 0,
         }];
 
-        let labels = layout_end_labels(&anchors, Rect::new(0, 0, 40, 1), &HashSet::new(), &HashSet::new());
+        let labels = layout_end_labels(&anchors, Rect::new(0, 0, 40, 1), Rect::new(0, 0, 40, 1).right(), &HashSet::new(), &HashSet::new());
 
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].text, vec!["[codex 7d] comet 100%/100%".to_string()]);
@@ -2992,7 +3007,7 @@ mod tests {
             },
         ];
 
-        let labels = layout_end_labels(&anchors, Rect::new(0, 0, 80, 14), &HashSet::new(), &HashSet::new());
+        let labels = layout_end_labels(&anchors, Rect::new(0, 0, 80, 14), Rect::new(0, 0, 80, 14).right(), &HashSet::new(), &HashSet::new());
 
         assert_eq!(labels.len(), 2, "both neighboring anchors should remain placeable");
         let reset_label = labels
@@ -3033,7 +3048,7 @@ mod tests {
         ];
 
         for (blocked, expected) in cases {
-            let labels = layout_end_labels(&[anchor.clone()], Rect::new(0, 3, 20, 1), &occupied, &blocked);
+            let labels = layout_end_labels(&[anchor.clone()], Rect::new(0, 3, 20, 1), Rect::new(0, 3, 20, 1).right(), &occupied, &blocked);
             assert_eq!(labels.len(), 1, "expected one label for case {expected:?}");
             assert_eq!(labels[0].text, vec![expected.to_string()], "expected variant {expected:?}");
         }
@@ -3049,7 +3064,7 @@ mod tests {
             y: 1,
         }];
 
-        let labels = layout_end_labels(&anchors, Rect::new(0, 0, 4, 3), &HashSet::new(), &HashSet::new());
+        let labels = layout_end_labels(&anchors, Rect::new(0, 0, 4, 3), Rect::new(0, 0, 4, 3).right(), &HashSet::new(), &HashSet::new());
 
         assert!(labels.is_empty());
     }
@@ -3159,7 +3174,7 @@ mod tests {
         // 64-wide graph — corrected to single left-side blocker so the full label can fit at x=13.
         let blocked = HashSet::from([(0u16, 3u16)]);
 
-        let labels = layout_end_labels(&[anchor], graph_area, &occupied, &blocked);
+        let labels = layout_end_labels(&[anchor], graph_area, graph_area.right(), &occupied, &blocked);
 
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].text[0], "[codex 7d] comet.jc 60%/0%");
