@@ -1,5 +1,5 @@
-pub mod chart_labels;
 pub mod chart;
+pub mod chart_labels;
 
 use ratatui::layout::Rect;
 use ratatui::prelude::{Color, Frame};
@@ -85,7 +85,7 @@ pub struct ChartSeriesStyle {
     pub hidden: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ResetLineSource {
     Weekly,
     FiveHour,
@@ -140,12 +140,14 @@ pub struct ChartState<'a> {
     pub total_points: usize,
     pub y_lower: f64,
     pub y_upper: f64,
-    pub x_lower: f64,          // X-axis left bound (days ago from origin)
-    pub x_upper: f64,          // X-axis right bound: 7.0=now, less when panned into past
-    pub solo: bool,             // if true, only render selected series
+    pub x_lower: f64,                    // X-axis left bound (days ago from origin)
+    pub x_upper: f64,                    // X-axis right bound: 7.0=now, less when panned into past
+    pub solo: bool,                      // if true, only render selected series
     pub tab_zoom_label: Option<&'a str>, // Some(name) = tab-zoomed to this profile
-    pub focused: bool,          // true when Plot pane has keyboard focus
-    pub fullscreen: bool,       // true when fullscreen mode is active
+    pub focused: bool,                   // true when Plot pane has keyboard focus
+    pub fullscreen: bool,                // true when fullscreen mode is active
+    pub layout_data_version: u64,
+    pub layout_viewport_version: u64,
 }
 
 pub trait RenderState {

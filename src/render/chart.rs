@@ -8,8 +8,8 @@ use ratatui::symbols::Marker;
 use ratatui::text::{Line, Text};
 use ratatui::widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Paragraph, Wrap};
 
-use crate::render::chart_labels;
 use super::{ChartState, RenderContext, RenderState, SERIES_COLORS};
+use crate::render::chart_labels;
 const SERIES_BAND_COLORS: [Color; 8] = [
     Color::Rgb(18, 72, 92),
     Color::Rgb(92, 82, 18),
@@ -34,9 +34,7 @@ pub fn render_chart<State: RenderState>(frame: &mut Frame, context: &RenderConte
                 .borders(Borders::ALL)
                 .style(Style::default().bg(Color::Rgb(20, 20, 20)))
         } else {
-            Block::default()
-                .title("Usage chart")
-                .borders(Borders::ALL)
+            Block::default().title("Usage chart").borders(Borders::ALL)
         };
         let inner = block.inner(context.area);
         frame.render_widget(block, context.area);
@@ -70,12 +68,16 @@ pub fn render_chart<State: RenderState>(frame: &mut Frame, context: &RenderConte
         "{}Window view:{} · ←→=pan · =/- zoom-x · ↑↓=pan-y · [/]=zoom-y · z=reset · 1/3/7=snap",
         view_prefix, window_label
     );
-    let band_summary = Paragraph::new(Text::from(vec![Line::from(hint_line)]))
-        .wrap(Wrap { trim: true });
+    let band_summary =
+        Paragraph::new(Text::from(vec![Line::from(hint_line)])).wrap(Wrap { trim: true });
     frame.render_widget(band_summary, band_area);
 }
 
-fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_state: &ChartState<'_>) {
+fn render_usage_chart(
+    frame: &mut Frame,
+    area: ratatui::layout::Rect,
+    chart_state: &ChartState<'_>,
+) {
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -148,7 +150,6 @@ fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_stat
         })
         .collect::<Vec<_>>();
 
-
     let x_range = x_bounds[1] - x_bounds[0];
     let format_x_label = |value: f64| {
         let percent = ((value / 7.0) * 100.0).round() as i32;
@@ -158,34 +159,51 @@ fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_stat
             value => format!("{value}%"),
         }
     };
-    let x_label_lo  = format_x_label(x_bounds[0]);
-    let x_label_q1  = format_x_label(x_bounds[0] + x_range * 0.25);
+    let x_label_lo = format_x_label(x_bounds[0]);
+    let x_label_q1 = format_x_label(x_bounds[0] + x_range * 0.25);
     let x_label_mid = format_x_label(x_bounds[0] + x_range * 0.5);
-    let x_label_q3  = format_x_label(x_bounds[0] + x_range * 0.75);
-    let x_label_hi  = format_x_label(x_bounds[1]);
+    let x_label_q3 = format_x_label(x_bounds[0] + x_range * 0.75);
+    let x_label_hi = format_x_label(x_bounds[1]);
     let y_range = y_bounds[1] - y_bounds[0];
-    let y_label_lo  = format!("{:.0}%", y_bounds[0]);
-    let y_label_q1  = format!("{:.0}%", y_bounds[0] + y_range * 0.25);
+    let y_label_lo = format!("{:.0}%", y_bounds[0]);
+    let y_label_q1 = format!("{:.0}%", y_bounds[0] + y_range * 0.25);
     let y_label_mid = format!("{:.0}%", y_bounds[0] + y_range * 0.5);
-    let y_label_q3  = format!("{:.0}%", y_bounds[0] + y_range * 0.75);
-    let y_label_hi  = format!("{:.0}%", y_bounds[1]);
+    let y_label_q3 = format!("{:.0}%", y_bounds[0] + y_range * 0.75);
+    let y_label_hi = format!("{:.0}%", y_bounds[1]);
     let chart = Chart::new(datasets)
         .x_axis(
             Axis::default()
                 .title("window-relative")
                 .bounds(x_bounds)
-                .labels([x_label_lo.as_str(), x_label_q1.as_str(), x_label_mid.as_str(), x_label_q3.as_str(), x_label_hi.as_str()]),
+                .labels([
+                    x_label_lo.as_str(),
+                    x_label_q1.as_str(),
+                    x_label_mid.as_str(),
+                    x_label_q3.as_str(),
+                    x_label_hi.as_str(),
+                ]),
         )
-        .y_axis(
-            Axis::default()
-                .title("usage%")
-                .bounds(y_bounds)
-                .labels([y_label_lo.as_str(), y_label_q1.as_str(), y_label_mid.as_str(), y_label_q3.as_str(), y_label_hi.as_str()]),
-        );
+        .y_axis(Axis::default().title("usage%").bounds(y_bounds).labels([
+            y_label_lo.as_str(),
+            y_label_q1.as_str(),
+            y_label_mid.as_str(),
+            y_label_q3.as_str(),
+            y_label_hi.as_str(),
+        ]));
     let label_area_right = area.right();
 
     frame.render_widget(chart, area);
-    let graph_area = chart_graph_area(area, x_label_lo.as_str(), [y_label_lo.as_str(), y_label_q1.as_str(), y_label_mid.as_str(), y_label_q3.as_str(), y_label_hi.as_str()]);
+    let graph_area = chart_graph_area(
+        area,
+        x_label_lo.as_str(),
+        [
+            y_label_lo.as_str(),
+            y_label_q1.as_str(),
+            y_label_mid.as_str(),
+            y_label_q3.as_str(),
+            y_label_hi.as_str(),
+        ],
+    );
     let blocked_cells = apply_band_backgrounds(frame, graph_area, &band_rects, x_bounds, y_bounds);
     let occupied_cells = collect_occupied_plot_cells(frame, graph_area);
     let zero_state_series = visible_series
@@ -212,7 +230,16 @@ fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_stat
     }
 
     let occupied_cells = collect_occupied_plot_cells(frame, graph_area);
-    render_end_labels(frame, graph_area, label_area_right, &normal_series, x_bounds, y_bounds, &occupied_cells, &blocked_cells);
+    render_end_labels(
+        frame,
+        graph_area,
+        label_area_right,
+        &normal_series,
+        x_bounds,
+        y_bounds,
+        &occupied_cells,
+        &blocked_cells,
+    );
     render_zero_state_origin_marker(frame, graph_area, x_bounds, y_bounds, &zero_state_series);
 }
 
@@ -222,8 +249,14 @@ fn chart_graph_area(area: Rect, first_x_label: &str, y_labels: [&str; 5]) -> Rec
     if y > area.top() {
         y = y.saturating_sub(1);
     }
-    let max_y_label_width = y_labels.iter().map(|label| label.chars().count() as u16).max().unwrap_or(0);
-    let left_of_y_axis = max_y_label_width.max(first_x_label.chars().count() as u16).saturating_sub(1);
+    let max_y_label_width = y_labels
+        .iter()
+        .map(|label| label.chars().count() as u16)
+        .max()
+        .unwrap_or(0);
+    let left_of_y_axis = max_y_label_width
+        .max(first_x_label.chars().count() as u16)
+        .saturating_sub(1);
     x = x.saturating_add(left_of_y_axis);
     if y > area.top() {
         y = y.saturating_sub(1);
@@ -346,14 +379,24 @@ fn render_end_labels(
         .collect::<Vec<_>>();
     anchors.sort_by_key(|anchor| anchor.y);
 
-    for label in layout_end_labels(&anchors, graph_area, label_area_right, occupied_cells, blocked_cells) {
+    for label in layout_end_labels(
+        &anchors,
+        graph_area,
+        label_area_right,
+        occupied_cells,
+        blocked_cells,
+    ) {
         draw_label_connector(frame, &label, graph_area, label_area_right);
-        let label_width = label.text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
+        let label_width = label
+            .text
+            .iter()
+            .map(|s| s.chars().count())
+            .max()
+            .unwrap_or(0) as u16;
         let label_height = label.text.len() as u16;
         for line_i in 0..label_height {
             for dx in 0..label_width {
-                frame
-                    .buffer_mut()[(label.x + dx, label.y + line_i)]
+                frame.buffer_mut()[(label.x + dx, label.y + line_i)]
                     .set_symbol(" ")
                     .set_bg(LABEL_BG_COLOR);
             }
@@ -421,7 +464,9 @@ fn render_zero_state_labels(
         }
 
         let clipped = label.chars().take(available).collect::<String>();
-        frame.buffer_mut().set_string(label_x, *row, clipped, branch_style);
+        frame
+            .buffer_mut()
+            .set_string(label_x, *row, clipped, branch_style);
     }
 }
 
@@ -499,9 +544,12 @@ fn render_zero_state_origin_marker(
         .unwrap_or(zero_state_series[0]);
     let marker_x = project_x(0.0, graph_area, x_bounds);
     let marker_y = project_y(0.0, graph_area, y_bounds);
-    frame.buffer_mut()[(marker_x, marker_y)].set_symbol("•").set_style(
-        Style::default().fg(SERIES_COLORS[marker_series.style.color_slot % SERIES_COLORS.len()]),
-    );
+    frame.buffer_mut()[(marker_x, marker_y)]
+        .set_symbol("•")
+        .set_style(
+            Style::default()
+                .fg(SERIES_COLORS[marker_series.style.color_slot % SERIES_COLORS.len()]),
+        );
 }
 
 fn project_x(x: f64, graph_area: Rect, x_bounds: [f64; 2]) -> u16 {
@@ -512,13 +560,19 @@ fn project_x(x: f64, graph_area: Rect, x_bounds: [f64; 2]) -> u16 {
     graph_area.left() + ((graph_area.width - 1) as f64 * ratio).round() as u16
 }
 
-fn project_band_x_bounds(start_x: f64, end_x: f64, graph_area: Rect, x_bounds: [f64; 2]) -> (u16, u16) {
+fn project_band_x_bounds(
+    start_x: f64,
+    end_x: f64,
+    graph_area: Rect,
+    x_bounds: [f64; 2],
+) -> (u16, u16) {
     if graph_area.width <= 1 || (x_bounds[1] - x_bounds[0]).abs() < f64::EPSILON {
         return (graph_area.left(), graph_area.left());
     }
 
     let span = (graph_area.width - 1) as f64;
-    let to_raw = |value: f64| ((value - x_bounds[0]) / (x_bounds[1] - x_bounds[0])).clamp(0.0, 1.0) * span;
+    let to_raw =
+        |value: f64| ((value - x_bounds[0]) / (x_bounds[1] - x_bounds[0])).clamp(0.0, 1.0) * span;
     let raw_left = to_raw(start_x.min(end_x));
     let raw_right = to_raw(start_x.max(end_x));
 
@@ -608,7 +662,6 @@ fn split_hit_reset_lines(text: &str) -> Vec<String> {
     parts
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LabelAnchor {
     text: Vec<String>,
@@ -654,7 +707,11 @@ fn candidate_positions_for_label(
 
     for step in 0..graph_area.height {
         let step = step as i16;
-        let offsets = if step == 0 { vec![0] } else { vec![-step, step] };
+        let offsets = if step == 0 {
+            vec![0]
+        } else {
+            vec![-step, step]
+        };
         for dy in offsets {
             let y = anchor.y as i16 + dy;
             if y < graph_area.top() as i16
@@ -815,13 +872,20 @@ fn layout_end_labels(
                 let conn_total = connector.len() as u16;
                 let conn_cost = connector_cost((anchor.x, anchor.y), &connector);
                 let score = variant_idx as u32 * 20 + conn_cost;
-                let dir_rank = if attach_x > anchor.x { 0u8 }
-                               else if attach_x < anchor.x { 1u8 }
-                               else if y > anchor.y { 2u8 }
-                               else { 3u8 };
+                let dir_rank = if attach_x > anchor.x {
+                    0u8
+                } else if attach_x < anchor.x {
+                    1u8
+                } else if y > anchor.y {
+                    2u8
+                } else {
+                    3u8
+                };
                 let dy = y.abs_diff(anchor.y);
                 let dx = attach_x.abs_diff(anchor.x);
-                let candidate = (score, dir_rank, 0u16, conn_total, dy, dx, x, y, attach_x, text, connector);
+                let candidate = (
+                    score, dir_rank, 0u16, conn_total, dy, dx, x, y, attach_x, text, connector,
+                );
                 if best.as_ref().is_none_or(|(bs, bd, bo, bct, bdy, bdx, ..)| {
                     (score, dir_rank, 0u16, conn_total, dy, dx) < (*bs, *bd, *bo, *bct, *bdy, *bdx)
                 }) {
@@ -878,7 +942,8 @@ fn layout_end_labels(
 
         for avoid_blocked in [true, false] {
             if avoid_blocked || best.is_none() {
-                let force_variants = std::iter::once(&anchor.text).chain(anchor.fallback_texts.iter());
+                let force_variants =
+                    std::iter::once(&anchor.text).chain(anchor.fallback_texts.iter());
                 for (variant_idx, text) in force_variants.enumerate() {
                     let width = text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
                     let height = text.len() as u16;
@@ -925,15 +990,24 @@ fn layout_end_labels(
                         let conn_cost = connector_cost((anchor.x, anchor.y), &connector);
                         let overlap = count_label_overlap(x, y, width, height, occupied_cells);
                         let score = variant_idx as u32 * 20 + overlap as u32 + conn_cost;
-                        let dir_rank = if attach_x > anchor.x { 0u8 }
-                                       else if attach_x < anchor.x { 1u8 }
-                                       else if y > anchor.y { 2u8 }
-                                       else { 3u8 };
+                        let dir_rank = if attach_x > anchor.x {
+                            0u8
+                        } else if attach_x < anchor.x {
+                            1u8
+                        } else if y > anchor.y {
+                            2u8
+                        } else {
+                            3u8
+                        };
                         let dy = y.abs_diff(anchor.y);
                         let dx = attach_x.abs_diff(anchor.x);
-                        let candidate = (score, dir_rank, overlap, conn_total, dy, dx, x, y, attach_x, text, connector);
+                        let candidate = (
+                            score, dir_rank, overlap, conn_total, dy, dx, x, y, attach_x, text,
+                            connector,
+                        );
                         if best.as_ref().is_none_or(|(bs, bd, bo, bct, bdy, bdx, ..)| {
-                            (score, dir_rank, overlap, conn_total, dy, dx) < (*bs, *bd, *bo, *bct, *bdy, *bdx)
+                            (score, dir_rank, overlap, conn_total, dy, dx)
+                                < (*bs, *bd, *bo, *bct, *bdy, *bdx)
                         }) {
                             best = Some(candidate);
                         }
@@ -952,7 +1026,6 @@ fn layout_end_labels(
                 for dx in 0..width {
                     reserved.insert((x + dx, y + line_i));
                 }
-
             }
             placed.push(PlacedLabel {
                 text: text.clone(),
@@ -988,7 +1061,6 @@ fn count_label_overlap(
     }
     overlap
 }
-
 
 fn connector_goal_y(anchor_y: u16, label_y: u16, label_height: u16) -> u16 {
     if label_y > anchor_y {
@@ -1039,7 +1111,8 @@ fn route_connector_path(
         reserved.contains(&(x, y)) || in_label_rect(x, y)
     };
 
-    let heuristic = |x: u16, y: u16| -> u32 { x.abs_diff(goal.0) as u32 + y.abs_diff(goal.1) as u32 };
+    let heuristic =
+        |x: u16, y: u16| -> u32 { x.abs_diff(goal.0) as u32 + y.abs_diff(goal.1) as u32 };
     let mut heap: BinaryHeap<(Reverse<u32>, u32, u16, u16)> = BinaryHeap::new();
     let mut best_cost: HashMap<(u16, u16), u32> = HashMap::new();
     let mut prev: HashMap<(u16, u16), (u16, u16)> = HashMap::new();
@@ -1076,7 +1149,12 @@ fn route_connector_path(
             if next_cost < *best_cost.get(&(nx, ny)).unwrap_or(&u32::MAX) {
                 best_cost.insert((nx, ny), next_cost);
                 prev.insert((nx, ny), (x, y));
-                heap.push((Reverse(next_cost.saturating_add(heuristic(nx, ny))), next_cost, nx, ny));
+                heap.push((
+                    Reverse(next_cost.saturating_add(heuristic(nx, ny))),
+                    next_cost,
+                    nx,
+                    ny,
+                ));
             }
         }
     }
@@ -1117,10 +1195,19 @@ fn connector_cells(
     .unwrap_or_default()
 }
 
-fn draw_label_connector(frame: &mut Frame, label: &PlacedLabel, graph_area: Rect, label_area_right: u16) {
+fn draw_label_connector(
+    frame: &mut Frame,
+    label: &PlacedLabel,
+    graph_area: Rect,
+    label_area_right: u16,
+) {
     let style = Style::default().fg(label.color).add_modifier(Modifier::DIM);
     for (idx, &(x, y)) in label.connector_path.iter().enumerate() {
-        if x < graph_area.left() || x >= label_area_right || y < graph_area.top() || y >= graph_area.bottom() {
+        if x < graph_area.left()
+            || x >= label_area_right
+            || y < graph_area.top()
+            || y >= graph_area.bottom()
+        {
             continue;
         }
         let prev = if idx == 0 {
@@ -1161,11 +1248,10 @@ fn connector_attach_x(label_x: u16, label_width: u16, anchor_x: u16) -> u16 {
     anchor_x.clamp(label_x, end_x)
 }
 
-
 #[cfg(test)]
 mod tests {
-    use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
 
     use super::*;
     use crate::render::{
@@ -1206,14 +1292,16 @@ mod tests {
     }
 
     fn visible_chart_glyph_count(lines: &[String]) -> usize {
-        lines.iter()
+        lines
+            .iter()
             .flat_map(|line| line.chars())
             .filter(|symbol| matches!(symbol, '⠁'..='⣿'))
             .count()
     }
 
     fn rightmost_chart_glyph_column(lines: &[String]) -> Option<usize> {
-        lines.iter()
+        lines
+            .iter()
             .flat_map(|line| {
                 line.chars()
                     .enumerate()
@@ -1226,7 +1314,10 @@ mod tests {
 
     fn neighboring_priority_state() -> MockState {
         MockState {
-            selection: SelectionState { selected: None, current: None },
+            selection: SelectionState {
+                selected: None,
+                current: None,
+            },
             chart: ChartState {
                 series: vec![
                     ChartSeries {
@@ -1243,7 +1334,13 @@ mod tests {
                             is_current: false,
                             hidden: false,
                         },
-                        points: vec![ChartPoint { x: 0.0, y: 60.0 }, ChartPoint { x: 4.265625, y: 60.0 }],
+                        points: vec![
+                            ChartPoint { x: 0.0, y: 60.0 },
+                            ChartPoint {
+                                x: 4.265625,
+                                y: 60.0,
+                            },
+                        ],
                         last_seven_day_percent: Some(60.0),
                         five_hour_used_percent: None,
                         forecast_label: None,
@@ -1272,7 +1369,10 @@ mod tests {
                             is_current: true,
                             hidden: false,
                         },
-                        points: vec![ChartPoint { x: 0.0, y: 45.0 }, ChartPoint { x: 4.375, y: 60.0 }],
+                        points: vec![
+                            ChartPoint { x: 0.0, y: 45.0 },
+                            ChartPoint { x: 4.375, y: 60.0 },
+                        ],
                         last_seven_day_percent: Some(60.0),
                         five_hour_used_percent: Some(0.0),
                         forecast_label: None,
@@ -1315,6 +1415,8 @@ mod tests {
                 tab_zoom_label: None,
                 focused: false,
                 fullscreen: false,
+                layout_data_version: 0,
+                layout_viewport_version: 0,
             },
         }
     }
@@ -1340,12 +1442,23 @@ mod tests {
         let occupied = HashSet::from([(13, 4), (14, 4), (15, 4), (16, 4), (17, 4)]);
         let blocked = HashSet::from([(13, 5), (14, 5), (15, 5), (16, 5), (17, 5)]);
 
-        let labels = layout_end_labels(&anchors, Rect::new(0, 0, 24, 10), Rect::new(0, 0, 24, 10).right(), &occupied, &blocked);
+        let labels = layout_end_labels(
+            &anchors,
+            Rect::new(0, 0, 24, 10),
+            Rect::new(0, 0, 24, 10).right(),
+            &occupied,
+            &blocked,
+        );
 
         assert_eq!(labels.len(), 2);
         assert_ne!(labels[0].y, labels[1].y);
         for label in &labels {
-            let width = label.text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
+            let width = label
+                .text
+                .iter()
+                .map(|s| s.chars().count())
+                .max()
+                .unwrap_or(0) as u16;
             for dx in 0..width {
                 let cell = (label.x + dx, label.y);
                 assert!(!occupied.contains(&cell));
@@ -1366,7 +1479,13 @@ mod tests {
 
         let occupied = HashSet::from([(0, 3), (9, 3)]);
 
-        let labels = layout_end_labels(&anchors, Rect::new(0, 3, 20, 1), Rect::new(0, 3, 20, 1).right(), &occupied, &HashSet::new());
+        let labels = layout_end_labels(
+            &anchors,
+            Rect::new(0, 3, 20, 1),
+            Rect::new(0, 3, 20, 1).right(),
+            &occupied,
+            &HashSet::new(),
+        );
 
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].text, vec!["FULLFULL".to_string()]);
@@ -1390,7 +1509,13 @@ mod tests {
         ];
 
         for (occupied, expected) in cases {
-            let labels = layout_end_labels(&[anchor.clone()], Rect::new(0, 3, 20, 1), Rect::new(0, 3, 20, 1).right(), &occupied, &HashSet::new());
+            let labels = layout_end_labels(
+                &[anchor.clone()],
+                Rect::new(0, 3, 20, 1),
+                Rect::new(0, 3, 20, 1).right(),
+                &occupied,
+                &HashSet::new(),
+            );
             assert_eq!(labels.len(), 1);
             assert_eq!(labels[0].text, vec![expected.to_string()]);
         }
@@ -1432,19 +1557,46 @@ mod tests {
     fn layout_end_labels_clamps_left_edge_instead_of_dropping_label() {
         let anchors = vec![LabelAnchor {
             text: vec!["[codex 7d] comet.jc 7%/0%".to_string()],
-            fallback_texts: vec![vec!["comet.jc 7%".to_string()], vec!["comet.jc".to_string()]],
+            fallback_texts: vec![
+                vec!["comet.jc 7%".to_string()],
+                vec!["comet.jc".to_string()],
+            ],
             color: Color::Cyan,
             x: 10,
             y: 9,
         }];
 
         let occupied = HashSet::from([
-            (13, 9), (14, 9), (15, 9), (16, 9), (17, 9), (18, 9), (19, 9), (20, 9),
-            (21, 9), (22, 9), (23, 9), (24, 9), (25, 9), (26, 9), (27, 9), (28, 9),
+            (13, 9),
+            (14, 9),
+            (15, 9),
+            (16, 9),
+            (17, 9),
+            (18, 9),
+            (19, 9),
+            (20, 9),
+            (21, 9),
+            (22, 9),
+            (23, 9),
+            (24, 9),
+            (25, 9),
+            (26, 9),
+            (27, 9),
+            (28, 9),
         ]);
-        let labels = layout_end_labels(&anchors, Rect::new(8, 0, 32, 10), Rect::new(8, 0, 32, 10).right(), &occupied, &HashSet::new());
+        let labels = layout_end_labels(
+            &anchors,
+            Rect::new(8, 0, 32, 10),
+            Rect::new(8, 0, 32, 10).right(),
+            &occupied,
+            &HashSet::new(),
+        );
 
-        assert_eq!(labels.len(), 1, "label should still render when left-edge clamping is required");
+        assert_eq!(
+            labels.len(),
+            1,
+            "label should still render when left-edge clamping is required"
+        );
         assert!(labels[0].x >= 8);
     }
 
@@ -1471,7 +1623,7 @@ mod tests {
                 label: "Alpha",
                 is_current: true,
                 agent_type: "codex",
-            window_label: "7d",
+                window_label: "7d",
             },
             style: ChartSeriesStyle {
                 color_slot: 0,
@@ -1643,7 +1795,13 @@ mod tests {
             y: 5,
         }];
 
-        let labels = layout_end_labels(&anchors, Rect::new(0, 0, 60, 14), Rect::new(0, 0, 60, 14).right(), &HashSet::new(), &HashSet::new());
+        let labels = layout_end_labels(
+            &anchors,
+            Rect::new(0, 0, 60, 14),
+            Rect::new(0, 0, 60, 14).right(),
+            &HashSet::new(),
+            &HashSet::new(),
+        );
 
         assert_eq!(labels.len(), 1);
         assert_eq!(
@@ -1825,7 +1983,10 @@ mod tests {
                 "reset 3.5h".to_string(),
             ]
         );
-        assert_eq!(compact_end_label_variants(&series), vec!["CC 46%".to_string(), "CC".to_string()]);
+        assert_eq!(
+            compact_end_label_variants(&series),
+            vec!["CC 46%".to_string(), "CC".to_string()]
+        );
     }
 
     #[test]
@@ -1878,14 +2039,14 @@ mod tests {
                     label: "Alpha",
                     is_current: false,
                     agent_type: "codex",
-                window_label: "7d",
+                    window_label: "7d",
                 }),
                 current: Some(RenderProfile {
                     id: "beta",
                     label: "Beta",
                     is_current: true,
                     agent_type: "codex",
-                window_label: "7d",
+                    window_label: "7d",
                 }),
             },
             chart: ChartState {
@@ -1895,7 +2056,7 @@ mod tests {
                         label: "Alpha",
                         is_current: false,
                         agent_type: "codex",
-                    window_label: "7d",
+                        window_label: "7d",
                     },
                     style: ChartSeriesStyle {
                         color_slot: 0,
@@ -1957,6 +2118,8 @@ mod tests {
                 tab_zoom_label: None,
                 focused: false,
                 fullscreen: false,
+                layout_data_version: 0,
+                layout_viewport_version: 0,
             },
         };
 
@@ -2014,7 +2177,10 @@ mod tests {
                         is_current: true,
                         hidden: false,
                     },
-                    points: vec![ChartPoint { x: 0.0, y: 20.0 }, ChartPoint { x: 7.0, y: 80.0 }],
+                    points: vec![
+                        ChartPoint { x: 0.0, y: 20.0 },
+                        ChartPoint { x: 7.0, y: 80.0 },
+                    ],
                     last_seven_day_percent: Some(80.0),
                     five_hour_used_percent: Some(50.0),
                     forecast_label: None,
@@ -2029,7 +2195,10 @@ mod tests {
                     is_zero_state: false,
                     reset_line_display: None,
                 }],
-                seven_day_points: vec![ChartPoint { x: 0.0, y: 20.0 }, ChartPoint { x: 7.0, y: 80.0 }],
+                seven_day_points: vec![
+                    ChartPoint { x: 0.0, y: 20.0 },
+                    ChartPoint { x: 7.0, y: 80.0 },
+                ],
                 five_hour_band: FiveHourBandState {
                     available: false,
                     used_percent: None,
@@ -2056,6 +2225,8 @@ mod tests {
                 tab_zoom_label: None,
                 focused: false,
                 fullscreen: true,
+                layout_data_version: 0,
+                layout_viewport_version: 0,
             },
         };
 
@@ -2144,6 +2315,8 @@ mod tests {
                 tab_zoom_label: None,
                 focused: false,
                 fullscreen: false,
+                layout_data_version: 0,
+                layout_viewport_version: 0,
             },
         };
 
@@ -2157,7 +2330,10 @@ mod tests {
             joined.contains("•"),
             "expected a dedicated zero-state marker at the chart origin, got:\n{joined}"
         );
-        assert!(!joined.contains("|comet"), "single zero-state series should not fan out a branch label, got:\n{joined}");
+        assert!(
+            !joined.contains("|comet"),
+            "single zero-state series should not fan out a branch label, got:\n{joined}"
+        );
     }
 
     #[test]
@@ -2267,15 +2443,26 @@ mod tests {
                 tab_zoom_label: None,
                 focused: false,
                 fullscreen: false,
+                layout_data_version: 0,
+                layout_viewport_version: 0,
             },
         };
 
         let lines = render_lines(&state, 72, 18);
         let joined = lines.join("\n");
 
-        assert!(joined.contains("┌─ [codex] Alpha"), "expected first zero-state branch to use ┌─ geometry, got:\n{joined}");
-        assert!(joined.contains("├─ [copilot] Beta"), "expected second zero-state branch to use ├─ geometry, got:\n{joined}");
-        assert!(joined.contains("•"), "expected origin marker below the zero-state branches, got:\n{joined}");
+        assert!(
+            joined.contains("┌─ [codex] Alpha"),
+            "expected first zero-state branch to use ┌─ geometry, got:\n{joined}"
+        );
+        assert!(
+            joined.contains("├─ [copilot] Beta"),
+            "expected second zero-state branch to use ├─ geometry, got:\n{joined}"
+        );
+        assert!(
+            joined.contains("•"),
+            "expected origin marker below the zero-state branches, got:\n{joined}"
+        );
     }
 
     #[test]
@@ -2342,10 +2529,7 @@ mod tests {
                             is_current: false,
                             hidden: false,
                         },
-                        points: vec![
-                            ChartPoint { x: 0.0, y: 3.0 },
-                            ChartPoint { x: 7.0, y: 5.0 },
-                        ],
+                        points: vec![ChartPoint { x: 0.0, y: 3.0 }, ChartPoint { x: 7.0, y: 5.0 }],
                         last_seven_day_percent: Some(5.0),
                         five_hour_used_percent: Some(2.0),
                         forecast_label: None,
@@ -2391,6 +2575,8 @@ mod tests {
                 tab_zoom_label: None,
                 focused: false,
                 fullscreen: false,
+                layout_data_version: 0,
+                layout_viewport_version: 0,
             },
         };
 
@@ -2400,9 +2586,15 @@ mod tests {
             joined.contains("┌─ [codex] Alpha reset / no usage yet"),
             "single zero-state series should keep a connected labeled anchor even when other series are visible, got:\n{joined}"
         );
-        assert!(joined.contains("•"), "expected the zero-state origin marker to remain visible, got:\n{joined}");
+        assert!(
+            joined.contains("•"),
+            "expected the zero-state origin marker to remain visible, got:\n{joined}"
+        );
         assert!(!joined.contains("|Alpha"), "single zero-state series should not fan out a branch label when mixed with normal series, got:\n{joined}");
-        assert!(joined.contains("[copilot 30d] Beta 5%"), "expected normal end label to remain unchanged, got:\n{joined}");
+        assert!(
+            joined.contains("[copilot 30d] Beta 5%"),
+            "expected normal end label to remain unchanged, got:\n{joined}"
+        );
     }
 
     #[test]
@@ -2439,10 +2631,7 @@ mod tests {
                         is_current: true,
                         hidden: false,
                     },
-                    points: vec![
-                        ChartPoint { x: 0.0, y: 4.0 },
-                        ChartPoint { x: 7.0, y: 7.0 },
-                    ],
+                    points: vec![ChartPoint { x: 0.0, y: 4.0 }, ChartPoint { x: 7.0, y: 7.0 }],
                     last_seven_day_percent: Some(7.0),
                     five_hour_used_percent: Some(0.0),
                     forecast_label: None,
@@ -2487,13 +2676,18 @@ mod tests {
                 tab_zoom_label: None,
                 focused: false,
                 fullscreen: false,
+                layout_data_version: 0,
+                layout_viewport_version: 0,
             },
         };
 
         let lines = render_lines(&state, 32, 18);
         let joined = lines.join("\n");
 
-        assert!(joined.contains("comet.jc"), "expected compact label to remain visible, got:\n{joined}");
+        assert!(
+            joined.contains("comet.jc"),
+            "expected compact label to remain visible, got:\n{joined}"
+        );
     }
 
     #[test]
@@ -2531,10 +2725,7 @@ mod tests {
                             is_current: false,
                             hidden: false,
                         },
-                        points: vec![
-                            ChartPoint { x: 0.0, y: 3.0 },
-                            ChartPoint { x: 7.0, y: 5.0 },
-                        ],
+                        points: vec![ChartPoint { x: 0.0, y: 3.0 }, ChartPoint { x: 7.0, y: 5.0 }],
                         last_seven_day_percent: Some(5.0),
                         five_hour_used_percent: None,
                         forecast_label: None,
@@ -2563,10 +2754,7 @@ mod tests {
                             is_current: true,
                             hidden: false,
                         },
-                        points: vec![
-                            ChartPoint { x: 0.0, y: 4.0 },
-                            ChartPoint { x: 7.0, y: 7.0 },
-                        ],
+                        points: vec![ChartPoint { x: 0.0, y: 4.0 }, ChartPoint { x: 7.0, y: 7.0 }],
                         last_seven_day_percent: Some(7.0),
                         five_hour_used_percent: Some(0.0),
                         forecast_label: None,
@@ -2612,13 +2800,18 @@ mod tests {
                 tab_zoom_label: None,
                 focused: false,
                 fullscreen: false,
+                layout_data_version: 0,
+                layout_viewport_version: 0,
             },
         };
 
         let lines = render_lines(&state, 34, 18);
         let joined = lines.join("\n");
 
-        assert!(joined.contains("comet.jc"), "expected comet label to remain visible beside neighboring series, got:\n{joined}");
+        assert!(
+            joined.contains("comet.jc"),
+            "expected comet label to remain visible beside neighboring series, got:\n{joined}"
+        );
     }
 
     #[test]
@@ -2630,14 +2823,14 @@ mod tests {
                     label: "Alpha",
                     is_current: true,
                     agent_type: "codex",
-                window_label: "7d",
+                    window_label: "7d",
                 }),
                 current: Some(RenderProfile {
                     id: "alpha",
                     label: "Alpha",
                     is_current: true,
                     agent_type: "codex",
-                window_label: "7d",
+                    window_label: "7d",
                 }),
             },
             chart: ChartState {
@@ -2647,7 +2840,7 @@ mod tests {
                         label: "Alpha",
                         is_current: true,
                         agent_type: "codex",
-                    window_label: "7d",
+                        window_label: "7d",
                     },
                     style: ChartSeriesStyle {
                         color_slot: 0,
@@ -2705,6 +2898,8 @@ mod tests {
                 tab_zoom_label: None,
                 focused: false,
                 fullscreen: false,
+                layout_data_version: 0,
+                layout_viewport_version: 0,
             },
         };
 
@@ -2749,10 +2944,7 @@ mod tests {
                             is_current: false,
                             hidden: false,
                         },
-                        points: vec![
-                            ChartPoint { x: 0.0, y: 3.0 },
-                            ChartPoint { x: 7.0, y: 5.0 },
-                        ],
+                        points: vec![ChartPoint { x: 0.0, y: 3.0 }, ChartPoint { x: 7.0, y: 5.0 }],
                         last_seven_day_percent: Some(5.0),
                         five_hour_used_percent: None,
                         forecast_label: None,
@@ -2781,10 +2973,7 @@ mod tests {
                             is_current: true,
                             hidden: false,
                         },
-                        points: vec![
-                            ChartPoint { x: 0.0, y: 4.0 },
-                            ChartPoint { x: 7.0, y: 7.0 },
-                        ],
+                        points: vec![ChartPoint { x: 0.0, y: 4.0 }, ChartPoint { x: 7.0, y: 7.0 }],
                         last_seven_day_percent: Some(7.0),
                         five_hour_used_percent: Some(0.0),
                         forecast_label: None,
@@ -2830,6 +3019,8 @@ mod tests {
                 tab_zoom_label: None,
                 focused: false,
                 fullscreen: false,
+                layout_data_version: 0,
+                layout_viewport_version: 0,
             },
         };
 
@@ -2855,7 +3046,6 @@ mod tests {
             "expected end-label cells to use a non-reset background for readability"
         );
     }
-
 
     #[test]
     fn render_chart_keeps_label_visible_even_when_own_5h_band_overlaps_connector() {
@@ -2975,6 +3165,8 @@ mod tests {
                 tab_zoom_label: None,
                 focused: false,
                 fullscreen: false,
+                layout_data_version: 0,
+                layout_viewport_version: 0,
             },
         };
 
@@ -2986,7 +3178,6 @@ mod tests {
             "expected comet label to remain visible even when its own 5h band overlaps the connector, got:\n{joined}"
         );
     }
-
 
     #[test]
     fn render_chart_keeps_codex_label_visible_with_live_like_initial_state() {
@@ -3138,6 +3329,8 @@ mod tests {
                 tab_zoom_label: None,
                 focused: false,
                 fullscreen: true,
+                layout_data_version: 0,
+                layout_viewport_version: 0,
             },
         };
 
@@ -3149,7 +3342,6 @@ mod tests {
             "expected live-like layout to keep codex label visible, got:\n{joined}"
         );
     }
-
 
     #[test]
     fn layout_end_labels_allows_label_to_overlay_plot_cells() {
@@ -3163,9 +3355,19 @@ mod tests {
 
         let graph_area = Rect::new(0, 0, 80, 30);
         let occupied = (17..26).map(|x| (x, 20)).collect::<HashSet<_>>();
-        let labels = layout_end_labels(&anchors, graph_area, graph_area.right(), &occupied, &HashSet::new());
+        let labels = layout_end_labels(
+            &anchors,
+            graph_area,
+            graph_area.right(),
+            &occupied,
+            &HashSet::new(),
+        );
 
-        assert_eq!(labels.len(), 1, "label should still place even when its preferred row has plot glyphs");
+        assert_eq!(
+            labels.len(),
+            1,
+            "label should still place even when its preferred row has plot glyphs"
+        );
         assert!(labels[0].text.join(" ").contains("comet"));
     }
 
@@ -3186,10 +3388,19 @@ mod tests {
         let blocked = (graph_area.left()..graph_area.right())
             .flat_map(|x| (graph_area.top()..graph_area.bottom()).map(move |y| (x, y)))
             .collect::<HashSet<_>>();
-        let labels = layout_end_labels(&anchors, graph_area, graph_area.right(), &occupied, &blocked);
+        let labels = layout_end_labels(
+            &anchors,
+            graph_area,
+            graph_area.right(),
+            &occupied,
+            &blocked,
+        );
 
         assert_eq!(labels.len(), 1);
-        assert_eq!(labels[0].x, 13, "expected placement with minimal overlap even though connector is longer");
+        assert_eq!(
+            labels[0].x, 13,
+            "expected placement with minimal overlap even though connector is longer"
+        );
         assert_eq!(labels[0].y, 5);
     }
 
@@ -3205,16 +3416,27 @@ mod tests {
 
         let graph_area = Rect::new(0, 0, 30, 10);
         let occupied = HashSet::from([
-            (11, 5), (12, 5), // makes y=5, x=11 candidate overlap
-            (6, 5), (7, 5), // makes y=5, x=6 candidate overlap
+            (11, 5),
+            (12, 5), // makes y=5, x=11 candidate overlap
+            (6, 5),
+            (7, 5), // makes y=5, x=6 candidate overlap
         ]);
         let blocked = (graph_area.left()..graph_area.right())
             .flat_map(|x| (graph_area.top()..graph_area.bottom()).map(move |y| (x, y)))
             .collect::<HashSet<_>>();
-        let labels = layout_end_labels(&anchors, graph_area, graph_area.right(), &occupied, &blocked);
+        let labels = layout_end_labels(
+            &anchors,
+            graph_area,
+            graph_area.right(),
+            &occupied,
+            &blocked,
+        );
 
         assert_eq!(labels.len(), 1);
-        assert_eq!(labels[0].x, 11, "expected shorter connector among equal-overlap candidates");
+        assert_eq!(
+            labels[0].x, 11,
+            "expected shorter connector among equal-overlap candidates"
+        );
         assert_eq!(labels[0].y, 4, "expected shifted row for shorter connector");
     }
 
@@ -3230,12 +3452,20 @@ mod tests {
 
         let graph_area = Rect::new(10, 0, 12, 10);
         let blocked = (10..=15).map(|x| (x, 5)).collect::<HashSet<_>>();
-        let labels = layout_end_labels(&anchors, graph_area, graph_area.right(), &HashSet::new(), &blocked);
+        let labels = layout_end_labels(
+            &anchors,
+            graph_area,
+            graph_area.right(),
+            &HashSet::new(),
+            &blocked,
+        );
 
         assert_eq!(labels.len(), 1);
-        assert_eq!(labels[0].y, 3, "label should skip the blocked row and its 1-cell safety margin");
+        assert_eq!(
+            labels[0].y, 3,
+            "label should skip the blocked row and its 1-cell safety margin"
+        );
     }
-
 
     #[test]
     fn layout_end_labels_omits_label_when_band_claims_every_candidate() {
@@ -3252,12 +3482,21 @@ mod tests {
             .flat_map(|x| (0..12).map(move |y| (x, y)))
             .collect::<HashSet<_>>();
         let blocked = occupied.clone();
-        let labels = layout_end_labels(&anchors, graph_area, graph_area.right(), &occupied, &blocked);
+        let labels = layout_end_labels(
+            &anchors,
+            graph_area,
+            graph_area.right(),
+            &occupied,
+            &blocked,
+        );
 
-        assert_eq!(labels.len(), 1, "label should still place in force-fallback mode");
+        assert_eq!(
+            labels.len(),
+            1,
+            "label should still place in force-fallback mode"
+        );
         assert_eq!(labels[0].text, vec!["[codex 7d] comet 33%/14%".to_string()]);
     }
-
 
     #[test]
     fn layout_end_labels_force_fallback_prefers_full_label_when_space_exists() {
@@ -3281,7 +3520,13 @@ mod tests {
             })
             .collect::<HashSet<_>>();
 
-        let labels = layout_end_labels(&anchors, graph_area, graph_area.right(), &occupied, &blocked);
+        let labels = layout_end_labels(
+            &anchors,
+            graph_area,
+            graph_area.right(),
+            &occupied,
+            &blocked,
+        );
 
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].text, vec!["[codex 7d] comet 33%/14%".to_string()]);
@@ -3305,10 +3550,19 @@ mod tests {
             y: 0,
         }];
 
-        let labels = layout_end_labels(&anchors, Rect::new(0, 0, 40, 1), Rect::new(0, 0, 40, 1).right(), &HashSet::new(), &HashSet::new());
+        let labels = layout_end_labels(
+            &anchors,
+            Rect::new(0, 0, 40, 1),
+            Rect::new(0, 0, 40, 1).right(),
+            &HashSet::new(),
+            &HashSet::new(),
+        );
 
         assert_eq!(labels.len(), 1);
-        assert_eq!(labels[0].text, vec!["[codex 7d] comet 100%/100%".to_string()]);
+        assert_eq!(
+            labels[0].text,
+            vec!["[codex 7d] comet 100%/100%".to_string()]
+        );
     }
 
     #[test]
@@ -3338,24 +3592,50 @@ mod tests {
             },
         ];
 
-        let labels = layout_end_labels(&anchors, Rect::new(0, 0, 80, 14), Rect::new(0, 0, 80, 14).right(), &HashSet::new(), &HashSet::new());
+        let labels = layout_end_labels(
+            &anchors,
+            Rect::new(0, 0, 80, 14),
+            Rect::new(0, 0, 80, 14).right(),
+            &HashSet::new(),
+            &HashSet::new(),
+        );
 
-        assert_eq!(labels.len(), 2, "both neighboring anchors should remain placeable");
+        assert_eq!(
+            labels.len(),
+            2,
+            "both neighboring anchors should remain placeable"
+        );
         let reset_label = labels
             .iter()
-            .find(|label| label.text.iter().any(|line| line.contains("Hit limit")) && label.text.iter().any(|line| line.contains("resets in 1h")))
+            .find(|label| {
+                label.text.iter().any(|line| line.contains("Hit limit"))
+                    && label.text.iter().any(|line| line.contains("resets in 1h"))
+            })
             .expect("reset label should be present");
-        assert_eq!(reset_label.text.len(), 3, "reset label should keep three-line variant when space exists");
+        assert_eq!(
+            reset_label.text.len(),
+            3,
+            "reset label should keep three-line variant when space exists"
+        );
 
         // The neighboring placement must not overlap any occupied text cell.
         let mut occupied = HashSet::new();
         for label in &labels {
-            let width = label.text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
+            let width = label
+                .text
+                .iter()
+                .map(|s| s.chars().count())
+                .max()
+                .unwrap_or(0) as u16;
             let height = label.text.len() as u16;
             for line_i in 0..height {
                 for dx in 0..width {
                     let cell = (label.x + dx, label.y + line_i);
-                    assert!(occupied.insert(cell), "overlapping cell found at {:?}", cell);
+                    assert!(
+                        occupied.insert(cell),
+                        "overlapping cell found at {:?}",
+                        cell
+                    );
                 }
             }
         }
@@ -3374,14 +3654,30 @@ mod tests {
         let occupied = (0..20).map(|x| (x, 3)).collect::<HashSet<_>>();
         let cases = [
             (HashSet::from([(0u16, 3u16), (9u16, 3u16)]), "FULLFULL"),
-            (HashSet::from([(0u16, 3u16), (9u16, 3u16), (11u16, 3u16)]), "MID"),
-            (HashSet::from([(0u16, 3u16), (5u16, 3u16), (9u16, 3u16), (11u16, 3u16)]), "MID"),
+            (
+                HashSet::from([(0u16, 3u16), (9u16, 3u16), (11u16, 3u16)]),
+                "MID",
+            ),
+            (
+                HashSet::from([(0u16, 3u16), (5u16, 3u16), (9u16, 3u16), (11u16, 3u16)]),
+                "MID",
+            ),
         ];
 
         for (blocked, expected) in cases {
-            let labels = layout_end_labels(&[anchor.clone()], Rect::new(0, 3, 20, 1), Rect::new(0, 3, 20, 1).right(), &occupied, &blocked);
+            let labels = layout_end_labels(
+                &[anchor.clone()],
+                Rect::new(0, 3, 20, 1),
+                Rect::new(0, 3, 20, 1).right(),
+                &occupied,
+                &blocked,
+            );
             assert_eq!(labels.len(), 1, "expected one label for case {expected:?}");
-            assert_eq!(labels[0].text, vec![expected.to_string()], "expected variant {expected:?}");
+            assert_eq!(
+                labels[0].text,
+                vec![expected.to_string()],
+                "expected variant {expected:?}"
+            );
         }
     }
 
@@ -3389,13 +3685,22 @@ mod tests {
     fn layout_end_labels_omits_labels_that_cannot_fit_within_graph_bounds() {
         let anchors = vec![LabelAnchor {
             text: vec!["very long full label".to_string()],
-            fallback_texts: vec![vec!["still too wide".to_string()], vec!["too-wide".to_string()]],
+            fallback_texts: vec![
+                vec!["still too wide".to_string()],
+                vec!["too-wide".to_string()],
+            ],
             color: Color::Cyan,
             x: 2,
             y: 1,
         }];
 
-        let labels = layout_end_labels(&anchors, Rect::new(0, 0, 4, 3), Rect::new(0, 0, 4, 3).right(), &HashSet::new(), &HashSet::new());
+        let labels = layout_end_labels(
+            &anchors,
+            Rect::new(0, 0, 4, 3),
+            Rect::new(0, 0, 4, 3).right(),
+            &HashSet::new(),
+            &HashSet::new(),
+        );
 
         assert!(labels.is_empty());
     }
@@ -3477,7 +3782,9 @@ mod tests {
 
         let compact = compact_end_label_variants(&series);
         assert!(
-            compact.iter().all(|line| !line.contains("Hit limit · resets in 3h")),
+            compact
+                .iter()
+                .all(|line| !line.contains("Hit limit · resets in 3h")),
             "compact variants should not include forecast suffix, got: {compact:?}"
         );
     }
@@ -3487,11 +3794,16 @@ mod tests {
         let mut series = neighboring_priority_state().chart.series[1].clone();
         series.forecast_label = Some("Hit limit · resets in 3h");
         let mut full_lines = vec![format_end_label(&series)];
-        full_lines.extend(split_hit_reset_lines(series.forecast_label.unwrap_or_default()));
+        full_lines.extend(split_hit_reset_lines(
+            series.forecast_label.unwrap_or_default(),
+        ));
 
         let anchor = LabelAnchor {
             text: full_lines,
-            fallback_texts: compact_end_label_variants(&series).into_iter().map(|s| vec![s]).collect(),
+            fallback_texts: compact_end_label_variants(&series)
+                .into_iter()
+                .map(|s| vec![s])
+                .collect(),
             color: Color::Cyan,
             x: 20,
             y: 3,
@@ -3504,39 +3816,83 @@ mod tests {
         // (variant_idx=0, score=conn_cost) beats compact variants (variant_idx≥1, score=20+conn_cost).
         let blocked = HashSet::from([(19u16, 3u16), (21u16, 3u16)]);
 
-        let labels = layout_end_labels(&[anchor], graph_area, graph_area.right(), &occupied, &blocked);
+        let labels = layout_end_labels(
+            &[anchor],
+            graph_area,
+            graph_area.right(),
+            &occupied,
+            &blocked,
+        );
 
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].text[0], "[codex 7d] comet.jc 60%/0%");
         assert!(
-            labels[0].text.iter().any(|s| s.contains("Hit limit")) && labels[0].text.iter().any(|s| s.contains("resets in 3h")),
-            "expected forecast suffix in placed label, got: {:?}", labels[0].text
+            labels[0].text.iter().any(|s| s.contains("Hit limit"))
+                && labels[0].text.iter().any(|s| s.contains("resets in 3h")),
+            "expected forecast suffix in placed label, got: {:?}",
+            labels[0].text
         );
     }
 
     #[test]
     fn right_label_zone_width_returns_max_first_line_width() {
         let s1 = ChartSeries {
-            profile: RenderProfile { id: "id", label: "CC", is_current: true, agent_type: "claude", window_label: "7d" },
+            profile: RenderProfile {
+                id: "id",
+                label: "CC",
+                is_current: true,
+                agent_type: "claude",
+                window_label: "7d",
+            },
             points: vec![ChartPoint { x: 6.0, y: 0.14 }],
             last_seven_day_percent: Some(14.0),
             five_hour_used_percent: Some(100.0),
             reset_line_display: None,
             forecast_label: None,
             is_zero_state: false,
-            style: ChartSeriesStyle { color_slot: 0, is_current: true, is_selected: false, hidden: false },
-            five_hour_subframe: FiveHourSubframeState { available: false, start_x: None, end_x: None, lower_y: None, upper_y: None, reason: None },
+            style: ChartSeriesStyle {
+                color_slot: 0,
+                is_current: true,
+                is_selected: false,
+                hidden: false,
+            },
+            five_hour_subframe: FiveHourSubframeState {
+                available: false,
+                start_x: None,
+                end_x: None,
+                lower_y: None,
+                upper_y: None,
+                reason: None,
+            },
         };
         let s2 = ChartSeries {
-            profile: RenderProfile { id: "id2", label: "teamt5-it", is_current: true, agent_type: "copilot", window_label: "7d" },
+            profile: RenderProfile {
+                id: "id2",
+                label: "teamt5-it",
+                is_current: true,
+                agent_type: "copilot",
+                window_label: "7d",
+            },
             points: vec![ChartPoint { x: 6.0, y: 0.14 }],
             last_seven_day_percent: Some(14.0),
             five_hour_used_percent: None,
             reset_line_display: None,
             forecast_label: None,
             is_zero_state: false,
-            style: ChartSeriesStyle { color_slot: 1, is_current: false, is_selected: false, hidden: false },
-            five_hour_subframe: FiveHourSubframeState { available: false, start_x: None, end_x: None, lower_y: None, upper_y: None, reason: None },
+            style: ChartSeriesStyle {
+                color_slot: 1,
+                is_current: false,
+                is_selected: false,
+                hidden: false,
+            },
+            five_hour_subframe: FiveHourSubframeState {
+                available: false,
+                start_x: None,
+                end_x: None,
+                lower_y: None,
+                upper_y: None,
+                reason: None,
+            },
         };
         let refs: Vec<&ChartSeries<'_>> = vec![&s1, &s2];
         // "[claude 7d] CC 14%/100%" = 24 chars
@@ -3562,14 +3918,18 @@ mod tests {
         let occupied: HashSet<(u16, u16)> = HashSet::new();
         let blocked: HashSet<(u16, u16)> = HashSet::new();
 
-        let placed = layout_end_labels(&[anchor], graph_area, label_area_right, &occupied, &blocked);
+        let placed =
+            layout_end_labels(&[anchor], graph_area, label_area_right, &occupied, &blocked);
 
         assert_eq!(placed.len(), 1);
         // Full label must be used (not compact fallback)
         assert_eq!(placed[0].text, vec!["[claude 7d] acct 16%/100%"]);
         // Label must be placed in the right zone
-        assert!(placed[0].x >= graph_area.right(), "label x={} should be >= graph_area.right()={}", placed[0].x, graph_area.right());
+        assert!(
+            placed[0].x >= graph_area.right(),
+            "label x={} should be >= graph_area.right()={}",
+            placed[0].x,
+            graph_area.right()
+        );
     }
-
-
 }

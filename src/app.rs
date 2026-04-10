@@ -1,7 +1,9 @@
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::Arc;
-use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -14,6 +16,7 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use serde_json::Value;
 
+use crate::app_data::{ProfileChartData, ProfileEntry, ProfileKind};
 use crate::cron::CronStatus;
 use crate::duration::format_duration_short;
 use crate::input::{self, InputAction, InputContext};
@@ -21,14 +24,14 @@ use crate::loader::load_profiles;
 use crate::refresh_log::append_refresh_log;
 use crate::render;
 use crate::render::{
-    ChartSeries, ChartSeriesStyle, ChartState, FiveHourBandState, FiveHourSubframeState, RenderProfile,
-    SelectionState,
+    ChartPoint, ChartSeries, ChartSeriesStyle, ChartState, FiveHourBandState,
+    FiveHourSubframeState, RenderProfile, SelectionState,
 };
 use crate::store::AccountStore;
 use crate::usage::{
-    pick_five_hour_window, pick_weekly_window, UsageReadResult, UsageResponse, UsageService, UsageSource,
+    pick_five_hour_window, pick_weekly_window, UsageReadResult, UsageResponse, UsageService,
+    UsageSource,
 };
-use crate::app_data::{ProfileChartData, ProfileEntry, ProfileKind};
 
 const BACKGROUND_REFRESH_STALE_SECONDS: i64 = 600;
 const CRON_YIELD_FRESH_SECONDS: i64 = 15 * 60;
@@ -72,7 +75,10 @@ enum DialogMode {
     /// Name for `cursor-profiles/<name>.json` under the agent-switch config dir before ingest server starts.
     AddCursorProfile,
     /// Waiting for POST /ingest from Windows `cursor-export` over Tailscale.
-    CursorIngestWaiting { profile_name: String, port: u16 },
+    CursorIngestWaiting {
+        profile_name: String,
+        port: u16,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -303,7 +309,8 @@ impl App {
     }
 
     pub fn selected_profile_label(&self) -> Option<&str> {
-        self.selected_profile().map(|profile| profile.profile_name.as_str())
+        self.selected_profile()
+            .map(|profile| profile.profile_name.as_str())
     }
 
     pub fn select_previous_profile(mut self) -> Self {
@@ -388,28 +395,29 @@ impl App {
         };
         let (tx, rx) = mpsc::channel::<()>();
         let refresh_log_path = store.paths().refresh_log_path();
-        let mut watcher = match notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
-            let Ok(event) = result else {
-                return;
+        let mut watcher =
+            match notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+                let Ok(event) = result else {
+                    return;
+                };
+                if event.paths.iter().any(|path| path == &refresh_log_path) {
+                    return;
+                }
+                if event
+                    .paths
+                    .iter()
+                    .any(|path| path.extension().and_then(|ext| ext.to_str()) == Some("lock"))
+                {
+                    return;
+                }
+                let should_reload = !matches!(event.kind, EventKind::Access(_));
+                if should_reload {
+                    let _ = tx.send(());
+                }
+            }) {
+                Ok(w) => w,
+                Err(_) => return,
             };
-            if event.paths.iter().any(|path| path == &refresh_log_path) {
-                return;
-            }
-            if event
-                .paths
-                .iter()
-                .any(|path| path.extension().and_then(|ext| ext.to_str()) == Some("lock"))
-            {
-                return;
-            }
-            let should_reload = !matches!(event.kind, EventKind::Access(_));
-            if should_reload {
-                let _ = tx.send(());
-            }
-        }) {
-            Ok(w) => w,
-            Err(_) => return,
-        };
 
         let mut watch_paths = vec![store.paths().codex_dir().to_path_buf()];
         if let Some(claude_store) = self.claude_store.as_ref() {
@@ -472,14 +480,24 @@ impl App {
             InputAction::Quit => self.should_quit = true,
             InputAction::Up | InputAction::Down => {
                 if self.pane_focus == PaneFocus::Plot {
-                    let shift = if matches!(action, InputAction::Up) { 5.0_f64 } else { -5.0_f64 };
-                    let new_upper = (self.y_zoom_upper + shift).clamp(self.y_zoom_lower + 5.0, 100.0);
+                    let shift = if matches!(action, InputAction::Up) {
+                        5.0_f64
+                    } else {
+                        -5.0_f64
+                    };
+                    let new_upper =
+                        (self.y_zoom_upper + shift).clamp(self.y_zoom_lower + 5.0, 100.0);
                     let actual = new_upper - self.y_zoom_upper;
                     self.y_zoom_upper = new_upper;
-                    self.y_zoom_lower = (self.y_zoom_lower + actual).clamp(0.0, self.y_zoom_upper - 5.0);
+                    self.y_zoom_lower =
+                        (self.y_zoom_lower + actual).clamp(0.0, self.y_zoom_upper - 5.0);
                     self.y_zoom_user_adjusted = true;
                 } else {
-                    let delta = if matches!(action, InputAction::Up) { -1 } else { 1 };
+                    let delta = if matches!(action, InputAction::Up) {
+                        -1
+                    } else {
+                        1
+                    };
                     self.step_profile(delta);
                 }
             }
@@ -604,22 +622,20 @@ impl App {
                     }
                 }
             }
-            InputAction::RefreshAll => {
-                match self.reload_profiles(true, None) {
-                    Ok(errors) if errors.is_empty() => {
-                        self.status_message = Some("Refresh completed.".to_string());
-                    }
-                    Ok(errors) => {
-                        self.status_message = Some(format!(
-                            "Refresh completed with errors: {}",
-                            errors.join(" | ")
-                        ));
-                    }
-                    Err(error) => {
-                        self.status_message = Some(format!("Refresh failed: {error:#}"));
-                    }
+            InputAction::RefreshAll => match self.reload_profiles(true, None) {
+                Ok(errors) if errors.is_empty() => {
+                    self.status_message = Some("Refresh completed.".to_string());
                 }
-            }
+                Ok(errors) => {
+                    self.status_message = Some(format!(
+                        "Refresh completed with errors: {}",
+                        errors.join(" | ")
+                    ));
+                }
+                Err(error) => {
+                    self.status_message = Some(format!("Refresh failed: {error:#}"));
+                }
+            },
             InputAction::AddCursorProfile => {
                 if self.pane_focus == PaneFocus::Accounts {
                     self.open_add_cursor_profile_dialog();
@@ -896,7 +912,8 @@ impl App {
                         let Some(store) = self.store.as_ref() else {
                             return Ok(());
                         };
-                        store.save_snapshot(&dialog.input, &profile.snapshot)
+                        store
+                            .save_snapshot(&dialog.input, &profile.snapshot)
                             .with_context(|| format!("save snapshot {}", dialog.input))?
                     }
                     ProfileKind::Copilot => return Ok(()),
@@ -919,7 +936,8 @@ impl App {
                         let Some(store) = self.store.as_ref() else {
                             return Ok(());
                         };
-                        store.rename_account(&current_name, &dialog.input)
+                        store
+                            .rename_account(&current_name, &dialog.input)
                             .with_context(|| format!("rename profile {current_name}"))?
                     }
                 };
@@ -944,11 +962,7 @@ impl App {
                 let stop_clone = Arc::clone(&stop);
                 let (tx, rx) = mpsc::channel();
                 let join = match crate::cursor_ingest::spawn_cursor_ingest_server(
-                    &bind,
-                    path,
-                    token,
-                    tx,
-                    stop_clone,
+                    &bind, path, token, tx, stop_clone,
                 ) {
                     Ok(j) => j,
                     Err(e) => {
@@ -966,7 +980,10 @@ impl App {
                     rx,
                 });
                 self.dialog = Some(DialogState {
-                    mode: DialogMode::CursorIngestWaiting { profile_name: name, port },
+                    mode: DialogMode::CursorIngestWaiting {
+                        profile_name: name,
+                        port,
+                    },
                     input: String::new(),
                     cursor: 0,
                 });
@@ -1013,11 +1030,13 @@ impl App {
                 if let Some(saved_name) = profile.saved_name.as_deref() {
                     if let Some(cs) = self.claude_store.as_ref() {
                         let activated = cs.use_account(saved_name)?;
-                        self.status_message = Some(format!("Switched Claude auth to \"{activated}\"."));
+                        self.status_message =
+                            Some(format!("Switched Claude auth to \"{activated}\"."));
                         let _ = self.reload_profiles(false, profile.account_id.clone())?;
                     }
                 } else {
-                    let default_name = build_default_name(profile.usage_view.usage.as_ref(), &profile.snapshot);
+                    let default_name =
+                        build_default_name(profile.usage_view.usage.as_ref(), &profile.snapshot);
                     self.dialog = Some(DialogState {
                         mode: DialogMode::SaveCurrent(ProfileKind::Claude),
                         cursor: default_name.chars().count(),
@@ -1029,11 +1048,13 @@ impl App {
                 if let Some(saved_name) = profile.saved_name.as_deref() {
                     if let Some(store) = self.store.as_ref() {
                         let activated = store.use_account(saved_name)?;
-                        self.status_message = Some(format!("Switched Codex auth to \"{activated}\"."));
+                        self.status_message =
+                            Some(format!("Switched Codex auth to \"{activated}\"."));
                         let _ = self.reload_profiles(false, profile.account_id.clone())?;
                     }
                 } else {
-                    let default_name = build_default_name(profile.usage_view.usage.as_ref(), &profile.snapshot);
+                    let default_name =
+                        build_default_name(profile.usage_view.usage.as_ref(), &profile.snapshot);
                     self.dialog = Some(DialogState {
                         mode: DialogMode::SaveCurrent(ProfileKind::Codex),
                         cursor: default_name.chars().count(),
@@ -1061,7 +1082,11 @@ impl App {
         self.dialog = Some(DialogState {
             mode: DialogMode::RenameSaved(saved_name.clone()),
             input: saved_name,
-            cursor: profile.saved_name.as_ref().map(|name| name.chars().count()).unwrap_or(0),
+            cursor: profile
+                .saved_name
+                .as_ref()
+                .map(|name| name.chars().count())
+                .unwrap_or(0),
         });
     }
 
@@ -1080,7 +1105,9 @@ impl App {
     }
 
     fn refresh_selected_profile(&mut self, force_refresh: bool) -> Result<Vec<String>> {
-        let account_id = self.selected_profile().and_then(|profile| profile.account_id.clone());
+        let account_id = self
+            .selected_profile()
+            .and_then(|profile| profile.account_id.clone());
         self.reload_profiles(force_refresh, account_id)
     }
 
@@ -1089,7 +1116,8 @@ impl App {
         force_refresh: bool,
         refresh_account_id: Option<String>,
     ) -> Result<Vec<String>> {
-        let (Some(store), Some(usage_service)) = (self.store.as_ref(), self.usage_service.as_ref()) else {
+        let (Some(store), Some(usage_service)) = (self.store.as_ref(), self.usage_service.as_ref())
+        else {
             return Ok(Vec::new());
         };
         let report = crate::loader::load_profiles_with_report(
@@ -1124,7 +1152,11 @@ impl App {
                     String::new()
                 }
             );
-            append_refresh_log(store.paths().refresh_log_path().as_path(), "reload_profiles", &detail);
+            append_refresh_log(
+                store.paths().refresh_log_path().as_path(),
+                "reload_profiles",
+                &detail,
+            );
         }
         self.ensure_background_refresh_task();
         Ok(report.refresh_errors)
@@ -1227,18 +1259,28 @@ impl App {
                             format!(" first_error={}", report.refresh_errors[0])
                         }
                     );
-                    append_refresh_log(store.paths().refresh_log_path().as_path(), "background_refresh", &detail);
+                    append_refresh_log(
+                        store.paths().refresh_log_path().as_path(),
+                        "background_refresh",
+                        &detail,
+                    );
                 }
-                self.status_message = Some(match (report.refreshed_profiles, report.refresh_errors.is_empty()) {
-                    (count, true) => format!("Background refresh updated {count} profiles"),
-                    (count, false) if count > 0 => format!(
-                        "Background refresh updated {count} profiles with errors: {}",
-                        report.refresh_errors.join(" | ")
-                    ),
-                    _ => format!("Background refresh failed: {}", report.refresh_errors.join(" | ")),
-                });
+                self.status_message = Some(
+                    match (report.refreshed_profiles, report.refresh_errors.is_empty()) {
+                        (count, true) => format!("Background refresh updated {count} profiles"),
+                        (count, false) if count > 0 => format!(
+                            "Background refresh updated {count} profiles with errors: {}",
+                            report.refresh_errors.join(" | ")
+                        ),
+                        _ => format!(
+                            "Background refresh failed: {}",
+                            report.refresh_errors.join(" | ")
+                        ),
+                    },
+                );
                 if let Err(error) = reload_result {
-                    self.status_message = Some(format!("Background refresh reload failed: {error:#}"));
+                    self.status_message =
+                        Some(format!("Background refresh reload failed: {error:#}"));
                 }
             }
             Err(TryRecvError::Empty) => {}
@@ -1273,7 +1315,11 @@ impl App {
             .profiles
             .iter()
             .map(|profile| {
-                let unsaved_tag = if profile.saved_name.is_none() { " [unsaved]".len() } else { 0 };
+                let unsaved_tag = if profile.saved_name.is_none() {
+                    " [unsaved]".len()
+                } else {
+                    0
+                };
                 let badge = format_usage_badge(&profile.usage_view);
                 2 + profile.profile_name.len() + unsaved_tag + 1 + badge.len() + 2
             })
@@ -1285,12 +1331,11 @@ impl App {
         let max_detail = self
             .profiles
             .iter()
-            .flat_map(|profile| {
-                render_account_detail(Some(profile), None)
-            })
+            .flat_map(|profile| render_account_detail(Some(profile), None))
             .map(|line| line.width())
             .max()
-            .unwrap_or(0) + 2; // +2 for "Details" block borders
+            .unwrap_or(0)
+            + 2; // +2 for "Details" block borders
 
         let max_refresh = render_refresh_tasks(
             &self.cron_status,
@@ -1300,7 +1345,8 @@ impl App {
         .into_iter()
         .map(|line| line.width())
         .max()
-        .unwrap_or(0) + 2; // +2 for "Refresh tasks" block borders
+        .unwrap_or(0)
+            + 2; // +2 for "Refresh tasks" block borders
 
         let max_content = max_list.max(max_detail).max(max_refresh) as u16;
         // Give the chart at least 40 columns; always at least 20 for the left pane.
@@ -1310,7 +1356,11 @@ impl App {
 
     fn render(&self, frame: &mut Frame) {
         let area = frame.area();
-        let footer_height = if self.fullscreen || self.pane_focus == PaneFocus::Plot { 1 } else { 2 };
+        let footer_height = if self.fullscreen || self.pane_focus == PaneFocus::Plot {
+            1
+        } else {
+            2
+        };
         let [body, footer_area] =
             Layout::vertical([Constraint::Min(0), Constraint::Length(footer_height)]).areas(area);
 
@@ -1319,7 +1369,8 @@ impl App {
         } else {
             let left_width = self.left_pane_width(body.width);
             let [left_area, right_area] =
-                Layout::horizontal([Constraint::Length(left_width), Constraint::Min(0)]).areas(body);
+                Layout::horizontal([Constraint::Length(left_width), Constraint::Min(0)])
+                    .areas(body);
             self.render_left_pane(frame, left_area);
             right_area
         };
@@ -1340,9 +1391,7 @@ impl App {
         render::render(frame, chart_area, &render_state);
 
         let footer_lines = if self.fullscreen {
-            vec![
-                Line::from("p=profiles · Space=hide · a=refresh · q=quit"),
-            ]
+            vec![Line::from("p=profiles · Space=hide · a=refresh · q=quit")]
         } else {
             match self.pane_focus {
                 PaneFocus::Accounts => vec![
@@ -1387,11 +1436,9 @@ impl App {
 
         let [list_area, lower_area] =
             Layout::vertical([Constraint::Length(list_lines), Constraint::Min(0)]).areas(area);
-        let [detail_area, refresh_area] = Layout::vertical([
-            Constraint::Min(0),
-            Constraint::Length(refresh_height),
-        ])
-        .areas(lower_area);
+        let [detail_area, refresh_area] =
+            Layout::vertical([Constraint::Min(0), Constraint::Length(refresh_height)])
+                .areas(lower_area);
 
         let profiles_title = match &self.filter_input {
             Some(f) => format!("Profiles [/{}]", f),
@@ -1404,9 +1451,11 @@ impl App {
             .map(|&i| {
                 let profile = &self.profiles[i];
                 let color = render::SERIES_COLORS[i % render::SERIES_COLORS.len()];
-                let is_hidden = self.hidden_profiles.contains(&App::profile_hidden_key(profile));
+                let is_hidden = self
+                    .hidden_profiles
+                    .contains(&App::profile_hidden_key(profile));
                 let current_sym = if profile.is_current { '▶' } else { ' ' };
-                let hidden_sym  = if is_hidden            { '~' } else { ' ' };
+                let hidden_sym = if is_hidden { '~' } else { ' ' };
                 let prefix = format!("{current_sym}{hidden_sym}");
                 let service_tag = match profile.kind {
                     ProfileKind::Codex => "[codex]",
@@ -1455,7 +1504,11 @@ impl App {
         frame.render_widget(details, detail_area);
 
         let refresh = Paragraph::new(Text::from(refresh_lines))
-            .block(Block::default().title("Refresh tasks").borders(Borders::ALL))
+            .block(
+                Block::default()
+                    .title("Refresh tasks")
+                    .borders(Borders::ALL),
+            )
             .wrap(Wrap { trim: true });
         frame.render_widget(refresh, refresh_area);
     }
@@ -1532,7 +1585,13 @@ impl App {
         let dialog_widget = Paragraph::new(Text::from(vec![
             Line::from(prompt),
             Line::from(""),
-            Line::from(self.dialog.as_ref().map(|dialog| dialog.input.clone()).unwrap_or_default().yellow()),
+            Line::from(
+                self.dialog
+                    .as_ref()
+                    .map(|dialog| dialog.input.clone())
+                    .unwrap_or_default()
+                    .yellow(),
+            ),
         ]))
         .block(Block::default().title(title).borders(Borders::ALL))
         .wrap(Wrap { trim: true });
@@ -1547,14 +1606,20 @@ impl render::RenderState for AppRenderState<'_> {
     fn selection_state(&self) -> SelectionState<'_> {
         SelectionState {
             selected: self.selected_profile().map(|profile| RenderProfile {
-                id: profile.account_id.as_deref().unwrap_or(profile.profile_name.as_str()),
+                id: profile
+                    .account_id
+                    .as_deref()
+                    .unwrap_or(profile.profile_name.as_str()),
                 label: profile.profile_name.as_str(),
                 is_current: profile.is_current,
                 agent_type: profile.kind.as_str(),
                 window_label: profile.chart_data.quota_window_label.as_str(),
             }),
             current: self.current_profile().map(|profile| RenderProfile {
-                id: profile.account_id.as_deref().unwrap_or(profile.profile_name.as_str()),
+                id: profile
+                    .account_id
+                    .as_deref()
+                    .unwrap_or(profile.profile_name.as_str()),
                 label: profile.profile_name.as_str(),
                 is_current: profile.is_current,
                 agent_type: profile.kind.as_str(),
@@ -1572,7 +1637,10 @@ impl render::RenderState for AppRenderState<'_> {
             let key = format!(
                 "{}|{}",
                 self.profiles.get(i).map(|p| p.kind.as_str()).unwrap_or(""),
-                self.profiles.get(i).map(|p| p.profile_name.as_str()).unwrap_or(""),
+                self.profiles
+                    .get(i)
+                    .map(|p| p.profile_name.as_str())
+                    .unwrap_or(""),
             );
             series.style.hidden = self.hidden_profiles.contains(&key);
         }
@@ -1580,10 +1648,18 @@ impl render::RenderState for AppRenderState<'_> {
         if let Some(idx) = self.tab_zoom_index {
             if let Some(profile) = self.profiles.get(idx) {
                 // Auto y-bounds: fit this profile's data + 5h band
-                let mut all_ys: Vec<f64> =
-                    profile.chart_data.seven_day_points.iter().map(|p| p.y).collect();
-                if let Some(y) = profile.chart_data.five_hour_band.lower_y { all_ys.push(y); }
-                if let Some(y) = profile.chart_data.five_hour_band.upper_y { all_ys.push(y); }
+                let mut all_ys: Vec<f64> = profile
+                    .chart_data
+                    .seven_day_points
+                    .iter()
+                    .map(|p| p.y)
+                    .collect();
+                if let Some(y) = profile.chart_data.five_hour_band.lower_y {
+                    all_ys.push(y);
+                }
+                if let Some(y) = profile.chart_data.five_hour_band.upper_y {
+                    all_ys.push(y);
+                }
                 if !all_ys.is_empty() {
                     let min_y = all_ys.iter().cloned().fold(f64::INFINITY, f64::min);
                     let max_y = all_ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
@@ -1605,6 +1681,7 @@ impl render::RenderState for AppRenderState<'_> {
         state.x_upper = 7.0 - self.x_offset_days;
         state.focused = self.plot_focused;
         state.fullscreen = self.fullscreen;
+        state.layout_viewport_version = chart_layout_viewport_version(&state);
         state
     }
 }
@@ -1665,11 +1742,15 @@ fn should_schedule_background_refresh(retry_after: Option<i64>, now_seconds: i64
 
 fn resolve_hot_reload_binary_path(current_exe: &std::path::Path) -> PathBuf {
     let current = current_exe.to_path_buf();
-    let current_meta = std::fs::metadata(&current).ok().and_then(|m| m.modified().ok());
+    let current_meta = std::fs::metadata(&current)
+        .ok()
+        .and_then(|m| m.modified().ok());
     let path_bin = which::which("agent-switch").ok();
     match (path_bin, current_meta) {
         (Some(path_bin), Some(current_mtime)) => {
-            let path_mtime = std::fs::metadata(&path_bin).ok().and_then(|m| m.modified().ok());
+            let path_mtime = std::fs::metadata(&path_bin)
+                .ok()
+                .and_then(|m| m.modified().ok());
             if path_mtime.is_some_and(|mtime| mtime > current_mtime) {
                 path_bin
             } else {
@@ -1682,7 +1763,10 @@ fn resolve_hot_reload_binary_path(current_exe: &std::path::Path) -> PathBuf {
 }
 
 fn initial_selected_index(profiles: &[ProfileEntry]) -> usize {
-    profiles.iter().position(|profile| profile.is_current).unwrap_or(0)
+    profiles
+        .iter()
+        .position(|profile| profile.is_current)
+        .unwrap_or(0)
 }
 
 fn render_account_detail(
@@ -1728,14 +1812,16 @@ fn render_account_detail(
         if let Some(w) = pick_weekly_window(usage) {
             lines.push(Line::from(format!(
                 "Quota: {:.0}% used, reset in {}",
-                w.used_percent, format_duration_short(w.reset_after_seconds)
+                w.used_percent,
+                format_duration_short(w.reset_after_seconds)
             )));
         }
         if profile.kind != ProfileKind::Copilot {
             if let Some(w) = pick_five_hour_window(usage) {
                 lines.push(Line::from(format!(
                     "5h: {:.0}% used, reset in {}",
-                    w.used_percent, format_duration_short(w.reset_after_seconds)
+                    w.used_percent,
+                    format_duration_short(w.reset_after_seconds)
                 )));
             }
         }
@@ -1770,7 +1856,9 @@ fn render_refresh_tasks(
         .or(cron_status.last_run)
         .map(|ts| format_age(Some(ts), false))
         .unwrap_or_else(|| "never".to_string());
-    lines.push(Line::from(format!("Cron: installed · last attempt {attempt_age}")));
+    lines.push(Line::from(format!(
+        "Cron: installed · last attempt {attempt_age}"
+    )));
 
     if let Some(last_success) = cron_status.last_run {
         lines.push(Line::from(format!(
@@ -1876,7 +1964,9 @@ fn build_default_name(usage: Option<&UsageResponse>, snapshot: &Value) -> String
     match (email_part, plan_part, account_part) {
         (Some(email), Some(plan), _) => format!("{email}-{plan}"),
         (Some(email), None, _) => email,
-        (None, _, Some(account)) => format!("profile-{}", &account.chars().take(8).collect::<String>()),
+        (None, _, Some(account)) => {
+            format!("profile-{}", &account.chars().take(8).collect::<String>())
+        }
         _ => "profile".to_string(),
     }
 }
@@ -1964,7 +2054,10 @@ fn build_reset_line_display(
     }
 }
 
-fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: usize) -> ChartState<'a> {
+fn build_chart_state<'a>(
+    profiles: &'a [ProfileEntry],
+    selected_profile_index: usize,
+) -> ChartState<'a> {
     let selected_profile = profiles.get(selected_profile_index);
     let selected_label = selected_profile
         .map(|profile| profile.profile_name.as_str())
@@ -2013,13 +2106,19 @@ fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: u
         .iter()
         .enumerate()
         .map(|(index, profile)| {
-            let last_seven_day_percent =
-                profile.chart_data.seven_day_points.last().map(|point| point.y);
+            let last_seven_day_percent = profile
+                .chart_data
+                .seven_day_points
+                .last()
+                .map(|point| point.y);
             let five_hour_used_percent = profile.chart_data.five_hour_band.used_percent;
 
             ChartSeries {
                 profile: RenderProfile {
-                    id: profile.account_id.as_deref().unwrap_or(profile.profile_name.as_str()),
+                    id: profile
+                        .account_id
+                        .as_deref()
+                        .unwrap_or(profile.profile_name.as_str()),
                     label: profile.profile_name.as_str(),
                     is_current: profile.is_current,
                     agent_type: profile.kind.as_str(),
@@ -2069,6 +2168,8 @@ fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: u
         tab_zoom_label: None,
         focused: false,
         fullscreen: false,
+        layout_data_version: 0,
+        layout_viewport_version: 0,
     };
 
     if chart_state.series.is_empty() && chart_state.seven_day_points.is_empty() {
@@ -2076,7 +2177,126 @@ fn build_chart_state<'a>(profiles: &'a [ProfileEntry], selected_profile_index: u
         chart_state.five_hour_subframe.reason = Some(selected_label);
     }
 
+    chart_state.layout_data_version = chart_layout_data_version(&chart_state);
+    chart_state.layout_viewport_version = chart_layout_viewport_version(&chart_state);
     chart_state
+}
+
+fn chart_layout_data_version(state: &ChartState<'_>) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    hash_chart_series_slice(&state.series, &mut hasher);
+    hash_chart_points(&state.seven_day_points, &mut hasher);
+    hash_five_hour_band_state(&state.five_hour_band, &mut hasher);
+    hash_five_hour_subframe_state(&state.five_hour_subframe, &mut hasher);
+    state.total_points.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn chart_layout_viewport_version(state: &ChartState<'_>) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    hash_f64(&mut hasher, state.y_lower);
+    hash_f64(&mut hasher, state.y_upper);
+    hash_f64(&mut hasher, state.x_lower);
+    hash_f64(&mut hasher, state.x_upper);
+    state.solo.hash(&mut hasher);
+    state.tab_zoom_label.hash(&mut hasher);
+    state.focused.hash(&mut hasher);
+    state.fullscreen.hash(&mut hasher);
+    for series in &state.series {
+        series.style.hidden.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+fn hash_f64(hasher: &mut impl Hasher, value: f64) {
+    hasher.write_u64(value.to_bits());
+}
+
+fn hash_option_f64(hasher: &mut impl Hasher, value: Option<f64>) {
+    match value {
+        Some(value) => {
+            hasher.write_u8(1);
+            hash_f64(hasher, value);
+        }
+        None => hasher.write_u8(0),
+    }
+}
+
+fn hash_option_str<'a>(hasher: &mut impl Hasher, value: Option<&'a str>) {
+    match value {
+        Some(value) => {
+            hasher.write_u8(1);
+            value.hash(hasher);
+        }
+        None => hasher.write_u8(0),
+    }
+}
+
+fn hash_chart_points(points: &[ChartPoint], hasher: &mut impl Hasher) {
+    points.len().hash(hasher);
+    for point in points {
+        hash_f64(hasher, point.x);
+        hash_f64(hasher, point.y);
+    }
+}
+
+fn hash_five_hour_band_state(state: &FiveHourBandState<'_>, hasher: &mut impl Hasher) {
+    state.available.hash(hasher);
+    hash_option_f64(hasher, state.used_percent);
+    hash_option_f64(hasher, state.lower_y);
+    hash_option_f64(hasher, state.upper_y);
+    hash_option_f64(hasher, state.delta_seven_day_percent);
+    hash_option_f64(hasher, state.delta_five_hour_percent);
+    hash_option_str(hasher, state.reason);
+}
+
+fn hash_five_hour_subframe_state(state: &FiveHourSubframeState<'_>, hasher: &mut impl Hasher) {
+    state.available.hash(hasher);
+    hash_option_f64(hasher, state.start_x);
+    hash_option_f64(hasher, state.end_x);
+    hash_option_f64(hasher, state.lower_y);
+    hash_option_f64(hasher, state.upper_y);
+    hash_option_str(hasher, state.reason);
+}
+
+fn hash_chart_series_slice(series: &[ChartSeries<'_>], hasher: &mut impl Hasher) {
+    series.len().hash(hasher);
+    for series in series {
+        hash_render_profile(&series.profile, hasher);
+        series.style.color_slot.hash(hasher);
+        series.style.is_selected.hash(hasher);
+        series.style.is_current.hash(hasher);
+        series.style.hidden.hash(hasher);
+        hash_chart_points(&series.points, hasher);
+        hash_option_f64(hasher, series.last_seven_day_percent);
+        hash_option_f64(hasher, series.five_hour_used_percent);
+        hash_option_str(hasher, series.forecast_label);
+        hash_five_hour_subframe_state(&series.five_hour_subframe, hasher);
+        series.is_zero_state.hash(hasher);
+        hash_reset_line_display(series.reset_line_display.as_ref(), hasher);
+    }
+}
+
+fn hash_render_profile(profile: &RenderProfile<'_>, hasher: &mut impl Hasher) {
+    profile.id.hash(hasher);
+    profile.label.hash(hasher);
+    profile.is_current.hash(hasher);
+    profile.agent_type.hash(hasher);
+    profile.window_label.hash(hasher);
+}
+
+fn hash_reset_line_display(
+    display: Option<&crate::render::ResetLineDisplay>,
+    hasher: &mut impl Hasher,
+) {
+    match display {
+        Some(display) => {
+            hasher.write_u8(1);
+            display.source.hash(hasher);
+            display.text.hash(hasher);
+        }
+        None => hasher.write_u8(0),
+    }
 }
 
 fn popup_area(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
@@ -2090,10 +2310,7 @@ fn popup_area(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
 fn dialog_cursor_position(area: Rect, dialog: &DialogState) -> Position {
     let input_x = area.x.saturating_add(1);
     let input_y = area.y.saturating_add(3);
-    Position::new(
-        input_x.saturating_add(dialog.cursor as u16),
-        input_y,
-    )
+    Position::new(input_x.saturating_add(dialog.cursor as u16), input_y)
 }
 
 fn char_to_byte_index(text: &str, char_index: usize) -> usize {
@@ -2105,13 +2322,13 @@ fn char_to_byte_index(text: &str, char_index: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use super::*;
     use crate::app_data::{OwnedFiveHourBandState, OwnedFiveHourSubframeState};
     use crate::render::ChartPoint;
-    use super::*;
     use ratatui::backend::Backend;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+    use std::fs;
 
     fn render_buffer(app: &App, width: u16, height: u16) -> ratatui::buffer::Buffer {
         let backend = TestBackend::new(width, height);
@@ -2120,11 +2337,7 @@ mod tests {
         frame.buffer.clone()
     }
 
-    fn buffer_row_text(
-        buffer: &ratatui::buffer::Buffer,
-        y: u16,
-        width: u16,
-    ) -> String {
+    fn buffer_row_text(buffer: &ratatui::buffer::Buffer, y: u16, width: u16) -> String {
         (0..width)
             .map(|x| buffer[(x, y)].symbol())
             .collect::<String>()
@@ -2174,7 +2387,10 @@ mod tests {
             claude_error: None,
             copilot_error: None,
         };
-        assert!(should_run_app_background_refresh(&attempted_but_failed, now));
+        assert!(should_run_app_background_refresh(
+            &attempted_but_failed,
+            now
+        ));
 
         let installed_with_error = CronStatus {
             installed: true,
@@ -2184,9 +2400,15 @@ mod tests {
             claude_error: None,
             copilot_error: None,
         };
-        assert!(should_run_app_background_refresh(&installed_with_error, now));
+        assert!(should_run_app_background_refresh(
+            &installed_with_error,
+            now
+        ));
 
-        assert!(should_run_app_background_refresh(&CronStatus::uninstalled(), now));
+        assert!(should_run_app_background_refresh(
+            &CronStatus::uninstalled(),
+            now
+        ));
     }
 
     #[test]
@@ -2246,7 +2468,8 @@ mod tests {
 
     #[test]
     fn resolve_hot_reload_binary_prefers_newer_path_binary() {
-        let base = std::env::temp_dir().join(format!("agent-switch-hot-reload-{}", std::process::id()));
+        let base =
+            std::env::temp_dir().join(format!("agent-switch-hot-reload-{}", std::process::id()));
         let _ = fs::create_dir_all(&base);
         let current = base.join("agent-switch-current");
         let path_bin = base.join("agent-switch");
@@ -2256,7 +2479,10 @@ mod tests {
 
         let current_mtime = fs::metadata(&current).unwrap().modified().unwrap();
         let path_mtime = fs::metadata(&path_bin).unwrap().modified().unwrap();
-        assert!(path_mtime > current_mtime, "test requires path binary newer than current");
+        assert!(
+            path_mtime > current_mtime,
+            "test requires path binary newer than current"
+        );
 
         // Directly validate decision logic by simulating which() outcome through metadata comparison:
         let resolved = {
@@ -2280,7 +2506,10 @@ mod tests {
     fn account_detail_empty_state_is_service_agnostic() {
         let lines = render_account_detail(None, None);
         assert_eq!(lines[0].to_string(), "No auth profile loaded.");
-        assert_eq!(lines[1].to_string(), "Save or switch an account to continue.");
+        assert_eq!(
+            lines[1].to_string(),
+            "Save or switch an account to continue."
+        );
     }
 
     #[test]
@@ -2302,7 +2531,9 @@ mod tests {
         };
 
         let lines = render_account_detail(Some(&profile), None);
-        assert!(lines.iter().any(|line| line.to_string() == "Last updated: never"));
+        assert!(lines
+            .iter()
+            .any(|line| line.to_string() == "Last updated: never"));
     }
 
     #[test]
@@ -2338,7 +2569,9 @@ mod tests {
         let lines = render_account_detail(Some(&profile), None);
         let rendered = lines.iter().map(Line::to_string).collect::<Vec<_>>();
 
-        assert!(rendered.iter().any(|line| line.starts_with("Quota: 0% used, reset in ")));
+        assert!(rendered
+            .iter()
+            .any(|line| line.starts_with("Quota: 0% used, reset in ")));
         assert!(!rendered.iter().any(|line| line.starts_with("Weekly:")));
     }
 
@@ -2395,14 +2628,38 @@ mod tests {
             );
         }
 
-        let profile_idx = rendered.iter().position(|line| line.starts_with("Profile: ")).unwrap();
-        let service_idx = rendered.iter().position(|line| line.starts_with("Service: ")).unwrap();
-        let state_idx = rendered.iter().position(|line| line.starts_with("State: ")).unwrap();
-        let updated_idx = rendered.iter().position(|line| line.starts_with("Last updated: ")).unwrap();
-        let email_idx = rendered.iter().position(|line| line.starts_with("Email: ")).unwrap();
-        let plan_idx = rendered.iter().position(|line| line.starts_with("Plan: ")).unwrap();
-        let quota_idx = rendered.iter().position(|line| line.starts_with("Quota: ")).unwrap();
-        let fiveh_idx = rendered.iter().position(|line| line.starts_with("5h: ")).unwrap();
+        let profile_idx = rendered
+            .iter()
+            .position(|line| line.starts_with("Profile: "))
+            .unwrap();
+        let service_idx = rendered
+            .iter()
+            .position(|line| line.starts_with("Service: "))
+            .unwrap();
+        let state_idx = rendered
+            .iter()
+            .position(|line| line.starts_with("State: "))
+            .unwrap();
+        let updated_idx = rendered
+            .iter()
+            .position(|line| line.starts_with("Last updated: "))
+            .unwrap();
+        let email_idx = rendered
+            .iter()
+            .position(|line| line.starts_with("Email: "))
+            .unwrap();
+        let plan_idx = rendered
+            .iter()
+            .position(|line| line.starts_with("Plan: "))
+            .unwrap();
+        let quota_idx = rendered
+            .iter()
+            .position(|line| line.starts_with("Quota: "))
+            .unwrap();
+        let fiveh_idx = rendered
+            .iter()
+            .position(|line| line.starts_with("5h: "))
+            .unwrap();
 
         assert!(profile_idx < service_idx);
         assert!(service_idx < state_idx);
@@ -2451,7 +2708,9 @@ mod tests {
         let lines = render_account_detail(Some(&profile), None);
         let rendered = lines.iter().map(Line::to_string).collect::<Vec<_>>();
 
-        assert!(rendered.iter().any(|line| line.starts_with("Quota: 42% used, reset in ")));
+        assert!(rendered
+            .iter()
+            .any(|line| line.starts_with("Quota: 42% used, reset in ")));
         assert!(!rendered.iter().any(|line| line.starts_with("5h: ")));
     }
 
@@ -2473,11 +2732,21 @@ mod tests {
         );
 
         let rendered = lines.iter().map(Line::to_string).collect::<Vec<_>>();
-        assert!(rendered.iter().any(|line| line == "Background: refreshing 3 stale profiles"));
-        assert!(rendered.iter().any(|line| line == "Last result: Background refresh updated 3 profiles"));
-        assert!(rendered.iter().any(|line| line.starts_with("Cron: installed")));
-        assert!(rendered.iter().any(|line| line.starts_with("Last success:")));
-        assert!(rendered.iter().any(|line| line == "Claude issue: HTTP 429 Too Many Requests"));
+        assert!(rendered
+            .iter()
+            .any(|line| line == "Background: refreshing 3 stale profiles"));
+        assert!(rendered
+            .iter()
+            .any(|line| line == "Last result: Background refresh updated 3 profiles"));
+        assert!(rendered
+            .iter()
+            .any(|line| line.starts_with("Cron: installed")));
+        assert!(rendered
+            .iter()
+            .any(|line| line.starts_with("Last success:")));
+        assert!(rendered
+            .iter()
+            .any(|line| line == "Claude issue: HTTP 429 Too Many Requests"));
     }
 
     #[test]
@@ -2521,7 +2790,9 @@ mod tests {
         };
         let lines = render_account_detail(Some(&profile), None);
 
-        assert!(!lines.iter().any(|line| line.to_string().starts_with("Cron:")));
+        assert!(!lines
+            .iter()
+            .any(|line| line.to_string().starts_with("Cron:")));
         assert!(!lines
             .iter()
             .any(|line| line.to_string().starts_with("Cron issue:")));
@@ -2605,7 +2876,10 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         // Alpha is both current (▶) and hidden (~) — both symbols must appear together
-        assert!(joined.contains("▶~"), "expected '▶~' for current+hidden profile, got:\n{joined}");
+        assert!(
+            joined.contains("▶~"),
+            "expected '▶~' for current+hidden profile, got:\n{joined}"
+        );
     }
 
     #[test]
@@ -2682,7 +2956,9 @@ mod tests {
         terminal.draw(|frame| app.render(frame)).unwrap();
         let expected = dialog_cursor_position(
             popup_area(Rect::new(0, 0, 100, 24), 70, 20),
-            app.dialog.as_ref().expect("rename dialog should still be open"),
+            app.dialog
+                .as_ref()
+                .expect("rename dialog should still be open"),
         );
 
         assert_eq!(
@@ -2697,6 +2973,8 @@ mod chart_reset_line_tests {
     use super::*;
     use crate::app_data::{OwnedFiveHourBandState, OwnedFiveHourSubframeState};
     use crate::render::ChartPoint;
+    use crate::render::RenderState;
+    use std::collections::HashSet;
 
     fn make_profile_with_chart(
         last_seven_day_percent: Option<f64>,
@@ -2748,8 +3026,91 @@ mod chart_reset_line_tests {
     }
 
     #[test]
+    fn layout_data_version_changes_when_profile_chart_data_changes() {
+        let baseline = vec![make_profile_with_chart(
+            Some(76.0),
+            Some(40.0),
+            Some(3_600),
+            Some(7_200),
+        )];
+        let changed = vec![make_profile_with_chart(
+            Some(77.0),
+            Some(40.0),
+            Some(3_600),
+            Some(7_200),
+        )];
+
+        let baseline_state = build_chart_state(&baseline, 0);
+        let changed_state = build_chart_state(&changed, 0);
+
+        assert_ne!(
+            baseline_state.layout_data_version,
+            changed_state.layout_data_version
+        );
+        assert_eq!(
+            baseline_state.layout_viewport_version,
+            changed_state.layout_viewport_version
+        );
+    }
+
+    #[test]
+    fn layout_viewport_version_changes_when_viewport_inputs_change() {
+        let profiles = vec![make_profile_with_chart(
+            Some(76.0),
+            Some(40.0),
+            Some(3_600),
+            Some(7_200),
+        )];
+        let hidden_profiles = HashSet::new();
+
+        let baseline_render_state = AppRenderState {
+            profiles: &profiles,
+            selected_profile_index: 0,
+            y_zoom_lower: 0.0,
+            y_zoom_upper: 100.0,
+            solo: false,
+            x_window_days: 7.0,
+            x_offset_days: 0.0,
+            plot_focused: true,
+            fullscreen: true,
+            tab_zoom_index: None,
+            hidden_profiles: &hidden_profiles,
+        };
+        let baseline_state = baseline_render_state.chart_state();
+
+        let changed_render_state = AppRenderState {
+            profiles: &profiles,
+            selected_profile_index: 0,
+            y_zoom_lower: 20.0,
+            y_zoom_upper: 80.0,
+            solo: false,
+            x_window_days: 4.0,
+            x_offset_days: 1.0,
+            plot_focused: true,
+            fullscreen: true,
+            tab_zoom_index: None,
+            hidden_profiles: &hidden_profiles,
+        };
+        let changed_state = changed_render_state.chart_state();
+
+        assert_eq!(
+            baseline_state.layout_data_version,
+            changed_state.layout_data_version
+        );
+        assert_ne!(
+            baseline_state.layout_viewport_version,
+            changed_state.layout_viewport_version
+        );
+    }
+
+    #[test]
     fn reset_line_weekly_when_weekly_qualifies() {
-        let profiles = vec![make_profile_with_chart(Some(100.0), Some(40.0), Some(3_600), Some(900))];
+        let profiles = vec![make_profile_with_chart(
+            Some(100.0),
+            Some(40.0),
+            Some(3_600),
+            Some(900),
+        )];
         let state = build_chart_state(&profiles, 0);
         let reset_line = state.series[0]
             .reset_line_display
@@ -2762,7 +3123,12 @@ mod chart_reset_line_tests {
 
     #[test]
     fn reset_line_five_hour_when_five_hour_qualifies() {
-        let profiles = vec![make_profile_with_chart(Some(80.0), Some(100.0), Some(3_600), Some(7_200))];
+        let profiles = vec![make_profile_with_chart(
+            Some(80.0),
+            Some(100.0),
+            Some(3_600),
+            Some(7_200),
+        )];
         let state = build_chart_state(&profiles, 0);
         let reset_line = state.series[0]
             .reset_line_display
@@ -2775,7 +3141,12 @@ mod chart_reset_line_tests {
 
     #[test]
     fn reset_line_chooses_longer_when_both_qualify() {
-        let profiles = vec![make_profile_with_chart(Some(140.0), Some(120.0), Some(3_600), Some(7_200))];
+        let profiles = vec![make_profile_with_chart(
+            Some(140.0),
+            Some(120.0),
+            Some(3_600),
+            Some(7_200),
+        )];
         let state = build_chart_state(&profiles, 0);
         let reset_line = state.series[0]
             .reset_line_display
@@ -2788,15 +3159,28 @@ mod chart_reset_line_tests {
 
     #[test]
     fn reset_line_uses_renderable_one_when_only_one_countdown_exists() {
-        let five_hour_only = vec![make_profile_with_chart(Some(140.0), Some(120.0), None, Some(7_200))];
+        let five_hour_only = vec![make_profile_with_chart(
+            Some(140.0),
+            Some(120.0),
+            None,
+            Some(7_200),
+        )];
         let five_hour_state = build_chart_state(&five_hour_only, 0);
         let five_hour_reset = five_hour_state.series[0]
             .reset_line_display
             .as_ref()
             .expect("renderable 5h countdown should win");
-        assert_eq!(five_hour_reset.source, crate::render::ResetLineSource::FiveHour);
+        assert_eq!(
+            five_hour_reset.source,
+            crate::render::ResetLineSource::FiveHour
+        );
 
-        let weekly_only = vec![make_profile_with_chart(Some(140.0), Some(120.0), Some(3_600), None)];
+        let weekly_only = vec![make_profile_with_chart(
+            Some(140.0),
+            Some(120.0),
+            Some(3_600),
+            None,
+        )];
         let weekly_state = build_chart_state(&weekly_only, 0);
         let weekly_reset = weekly_state.series[0]
             .reset_line_display
@@ -2807,7 +3191,12 @@ mod chart_reset_line_tests {
 
     #[test]
     fn reset_line_none_when_neither_usage_value_qualifies() {
-        let profiles = vec![make_profile_with_chart(Some(90.0), Some(80.0), Some(3_600), Some(7_200))];
+        let profiles = vec![make_profile_with_chart(
+            Some(90.0),
+            Some(80.0),
+            Some(3_600),
+            Some(7_200),
+        )];
         let state = build_chart_state(&profiles, 0);
 
         assert!(state.series[0].reset_line_display.is_none());
@@ -2815,7 +3204,12 @@ mod chart_reset_line_tests {
 
     #[test]
     fn reset_line_none_when_no_renderable_countdowns_exist() {
-        let profiles = vec![make_profile_with_chart(Some(140.0), Some(120.0), None, None)];
+        let profiles = vec![make_profile_with_chart(
+            Some(140.0),
+            Some(120.0),
+            None,
+            None,
+        )];
         let state = build_chart_state(&profiles, 0);
 
         assert!(state.series[0].reset_line_display.is_none());
