@@ -457,6 +457,7 @@ fn build_label_anchors(
                 .rev()
                 .find(|point| point.x >= x_bounds[0] && point.x <= x_bounds[1])?;
             Some(LabelAnchor {
+                key: series.profile.id.to_string(),
                 text: chart_labels::full_label_lines(series),
                 fallback_texts: chart_labels::compact_label_variants(series),
                 color: SERIES_COLORS[series.style.color_slot % SERIES_COLORS.len()],
@@ -470,12 +471,140 @@ fn build_label_anchors(
 fn hash_anchors(anchors: &[LabelAnchor]) -> u64 {
     let mut hasher = DefaultHasher::new();
     for anchor in anchors {
+        anchor.key.hash(&mut hasher);
         anchor.x.hash(&mut hasher);
         anchor.y.hash(&mut hasher);
         anchor.text.hash(&mut hasher);
         anchor.fallback_texts.hash(&mut hasher);
     }
     hasher.finish()
+}
+
+fn collect_cells_for_label(label: &PlacedLabel) -> HashSet<(u16, u16)> {
+    let mut cells = HashSet::new();
+    let width = label
+        .text
+        .iter()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0) as u16;
+    let height = label.text.len() as u16;
+    for line_i in 0..height {
+        for dx in 0..width {
+            cells.insert((label.x + dx, label.y + line_i));
+        }
+    }
+    for &cell in &label.connector_path {
+        cells.insert(cell);
+    }
+    cells
+}
+
+fn collect_reserved_cells(labels: &[PlacedLabel]) -> HashSet<(u16, u16)> {
+    let mut reserved = HashSet::new();
+    for label in labels {
+        reserved.extend(collect_cells_for_label(label));
+    }
+    reserved
+}
+
+fn labels_conflict(labels: &[PlacedLabel]) -> bool {
+    let mut occupied = HashSet::new();
+    for label in labels {
+        for cell in collect_cells_for_label(label) {
+            if !occupied.insert(cell) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn label_intersects_blocked(label: &PlacedLabel, blocked_cells: &HashSet<(u16, u16)>) -> bool {
+    collect_cells_for_label(label)
+        .into_iter()
+        .any(|cell| blocked_cells.contains(&cell))
+}
+
+fn collect_dirty_label_keys(
+    anchors: &[LabelAnchor],
+    cached_labels: &[PlacedLabel],
+    blocked_cells: &HashSet<(u16, u16)>,
+) -> HashSet<String> {
+    let anchor_map = anchors
+        .iter()
+        .map(|anchor| (anchor.key.clone(), anchor))
+        .collect::<HashMap<_, _>>();
+    let mut dirty = HashSet::new();
+    for label in cached_labels {
+        let Some(anchor) = anchor_map.get(&label.key) else {
+            dirty.insert(label.key.clone());
+            continue;
+        };
+        let drift = anchor.x.abs_diff(label.anchor_x) + anchor.y.abs_diff(label.anchor_y);
+        if drift > ENDPOINT_DRIFT_THRESHOLD {
+            dirty.insert(label.key.clone());
+            continue;
+        }
+        if label_intersects_blocked(label, blocked_cells) {
+            dirty.insert(label.key.clone());
+            continue;
+        }
+        let current_score = connector_cost((anchor.x, anchor.y), &label.connector_path);
+        if current_score > label.score.saturating_add(SCORE_DRIFT_THRESHOLD) {
+            dirty.insert(label.key.clone());
+            continue;
+        }
+    }
+    for anchor in anchors {
+        if !cached_labels.iter().any(|label| label.key == anchor.key) {
+            dirty.insert(anchor.key.clone());
+        }
+    }
+    dirty
+}
+
+fn try_partial_relayout(
+    anchors: &[LabelAnchor],
+    cached_labels: &[PlacedLabel],
+    dirty_keys: &HashSet<String>,
+    graph_area: Rect,
+    label_area_right: u16,
+    occupied_cells: &HashSet<(u16, u16)>,
+    blocked_cells: &HashSet<(u16, u16)>,
+) -> Option<Vec<PlacedLabel>> {
+    if dirty_keys.is_empty() || dirty_keys.len() >= anchors.len() {
+        return None;
+    }
+    let anchor_keys = anchors
+        .iter()
+        .map(|anchor| anchor.key.as_str())
+        .collect::<HashSet<_>>();
+    let unchanged = cached_labels
+        .iter()
+        .filter(|label| !dirty_keys.contains(&label.key) && anchor_keys.contains(label.key.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    let reserved = collect_reserved_cells(&unchanged);
+    let dirty_anchors = anchors
+        .iter()
+        .filter(|anchor| dirty_keys.contains(&anchor.key))
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut relayout = layout_end_labels_with_reserved(
+        &dirty_anchors,
+        graph_area,
+        label_area_right,
+        occupied_cells,
+        blocked_cells,
+        &reserved,
+    );
+    let mut merged = unchanged;
+    merged.append(&mut relayout);
+    if labels_conflict(&merged) {
+        return None;
+    }
+    Some(merged)
 }
 
 fn get_or_compute_label_layout(
@@ -488,24 +617,57 @@ fn get_or_compute_label_layout(
     layout_viewport_version: u64,
     anchor_signature: u64,
 ) -> Vec<PlacedLabel> {
-    let cached = LABEL_LAYOUT_CACHE.with(|cache| {
-        let cache_ref = cache.borrow();
-        cache_ref.as_ref().and_then(|entry| {
+    let cached_entry = LABEL_LAYOUT_CACHE.with(|cache| cache.borrow().clone());
+    if let Some(entry) = cached_entry {
+        if entry.graph_area == graph_area && entry.label_area_right == label_area_right {
             if entry.layout_data_version == layout_data_version
                 && entry.layout_viewport_version == layout_viewport_version
-                && entry.graph_area == graph_area
-                && entry.label_area_right == label_area_right
                 && entry.anchor_signature == anchor_signature
             {
-                Some(entry.labels.clone())
-            } else {
-                None
+                return entry.labels;
             }
-        })
-    });
 
-    if let Some(labels) = cached {
-        return labels;
+            let dirty = collect_dirty_label_keys(anchors, &entry.labels, blocked_cells);
+            if dirty.is_empty() {
+                LABEL_LAYOUT_CACHE.with(|cache| {
+                    *cache.borrow_mut() = Some(CachedLabelLayout {
+                        layout_data_version,
+                        layout_viewport_version,
+                        graph_area,
+                        label_area_right,
+                        anchor_signature,
+                        labels: entry.labels.clone(),
+                    });
+                });
+                return entry.labels;
+            }
+
+            if let Some(partial) = try_partial_relayout(
+                anchors,
+                &entry.labels,
+                &dirty,
+                graph_area,
+                label_area_right,
+                occupied_cells,
+                blocked_cells,
+            ) {
+                #[cfg(test)]
+                LAYOUT_RECOMPUTE_COUNT.with(|count| {
+                    *count.borrow_mut() += 1;
+                });
+                LABEL_LAYOUT_CACHE.with(|cache| {
+                    *cache.borrow_mut() = Some(CachedLabelLayout {
+                        layout_data_version,
+                        layout_viewport_version,
+                        graph_area,
+                        label_area_right,
+                        anchor_signature,
+                        labels: partial.clone(),
+                    });
+                });
+                return partial;
+            }
+        }
     }
 
     #[cfg(test)]
@@ -786,6 +948,7 @@ fn split_hit_reset_lines(text: &str) -> Vec<String> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LabelAnchor {
+    key: String,
     text: Vec<String>,
     fallback_texts: Vec<Vec<String>>,
     color: Color,
@@ -795,6 +958,7 @@ struct LabelAnchor {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PlacedLabel {
+    key: String,
     text: Vec<String>,
     color: Color,
     x: u16,
@@ -802,6 +966,7 @@ struct PlacedLabel {
     anchor_x: u16,
     anchor_y: u16,
     attach_x: u16,
+    score: u32,
     connector_path: Vec<(u16, u16)>,
 }
 
@@ -811,6 +976,8 @@ const LABEL_SEARCH_X_LIMIT: u16 = 64;
 const ROUTE_X_PADDING: u16 = 8;
 const ROUTE_Y_PADDING: u16 = 6;
 const MAX_CANDIDATES_PER_VARIANT: usize = 128;
+const ENDPOINT_DRIFT_THRESHOLD: u16 = 2;
+const SCORE_DRIFT_THRESHOLD: u32 = 10;
 
 fn candidate_positions_for_label(
     anchor: &LabelAnchor,
@@ -922,9 +1089,27 @@ fn layout_end_labels(
     occupied_cells: &HashSet<(u16, u16)>,
     blocked_cells: &HashSet<(u16, u16)>,
 ) -> Vec<PlacedLabel> {
+    layout_end_labels_with_reserved(
+        anchors,
+        graph_area,
+        label_area_right,
+        occupied_cells,
+        blocked_cells,
+        &HashSet::new(),
+    )
+}
+
+fn layout_end_labels_with_reserved(
+    anchors: &[LabelAnchor],
+    graph_area: Rect,
+    label_area_right: u16,
+    occupied_cells: &HashSet<(u16, u16)>,
+    blocked_cells: &HashSet<(u16, u16)>,
+    initial_reserved: &HashSet<(u16, u16)>,
+) -> Vec<PlacedLabel> {
     let mut placed = Vec::new();
     let mut placed_anchor_indices = HashSet::new();
-    let mut reserved = HashSet::new();
+    let mut reserved = initial_reserved.clone();
     let label_exclusion_cells = expand_label_exclusion_cells(blocked_cells, graph_area);
 
     for (anchor_idx, anchor) in anchors.iter().enumerate() {
@@ -1016,7 +1201,7 @@ fn layout_end_labels(
             }
         }
 
-        if let Some((_, _, _, _, _, _, x, y, attach_x, text, connector)) = best {
+        if let Some((score, _, _, _, _, _, x, y, attach_x, text, connector)) = best {
             let width = text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
             let height = text.len() as u16;
             for &cell in &connector {
@@ -1028,6 +1213,7 @@ fn layout_end_labels(
                 }
             }
             placed.push(PlacedLabel {
+                key: anchor.key.clone(),
                 text: text.clone(),
                 color: anchor.color,
                 x,
@@ -1035,6 +1221,7 @@ fn layout_end_labels(
                 anchor_x: anchor.x,
                 anchor_y: anchor.y,
                 attach_x,
+                score,
                 connector_path: connector,
             });
             placed_anchor_indices.insert(anchor_idx);
@@ -1138,7 +1325,7 @@ fn layout_end_labels(
             }
         }
 
-        if let Some((_, _, _, _, _, _, x, y, attach_x, text, connector)) = best {
+        if let Some((score, _, _, _, _, _, x, y, attach_x, text, connector)) = best {
             let width = text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
             let height = text.len() as u16;
             for &cell in &connector {
@@ -1150,6 +1337,7 @@ fn layout_end_labels(
                 }
             }
             placed.push(PlacedLabel {
+                key: anchor.key.clone(),
                 text: text.clone(),
                 color: anchor.color,
                 x,
@@ -1157,6 +1345,7 @@ fn layout_end_labels(
                 anchor_x: anchor.x,
                 anchor_y: anchor.y,
                 attach_x,
+                score,
                 connector_path: connector,
             });
             placed_anchor_indices.insert(anchor_idx);
@@ -1579,8 +1768,28 @@ mod tests {
             .unwrap();
         assert_eq!(
             layout_recompute_count(),
+            1,
+            "trigger without dirty labels should keep cached layout"
+        );
+
+        let mut dirty_state = state.clone();
+        dirty_state.chart.layout_data_version = dirty_state.chart.layout_data_version.wrapping_add(1);
+        if let Some(point) = dirty_state
+            .chart
+            .series
+            .iter_mut()
+            .find(|series| series.profile.id == "comet")
+            .and_then(|series| series.points.last_mut())
+        {
+            point.y = 85.0;
+        }
+        terminal
+            .draw(|frame| render_chart(frame, &RenderContext::new(&dirty_state, frame.area())))
+            .unwrap();
+        assert_eq!(
+            layout_recompute_count(),
             2,
-            "viewport-version trigger should force one additional recompute"
+            "dirty data trigger should recompute layout once"
         );
     }
 
@@ -1588,6 +1797,7 @@ mod tests {
     fn layout_end_labels_staggers_names_away_from_conflicts() {
         let anchors = vec![
             LabelAnchor {
+            key: "test".to_string(),
                 text: vec!["Alpha".to_string()],
                 fallback_texts: vec![],
                 color: Color::Cyan,
@@ -1595,6 +1805,7 @@ mod tests {
                 y: 4,
             },
             LabelAnchor {
+            key: "test".to_string(),
                 text: vec!["Beta".to_string()],
                 fallback_texts: vec![],
                 color: Color::Yellow,
@@ -1633,6 +1844,7 @@ mod tests {
     #[test]
     fn layout_end_labels_prefers_full_variant_over_closer_compact_slot() {
         let anchors = vec![LabelAnchor {
+            key: "test".to_string(),
             text: vec!["FULLFULL".to_string()],
             fallback_texts: vec![vec!["MID".to_string()], vec!["M".to_string()]],
             color: Color::Cyan,
@@ -1658,6 +1870,7 @@ mod tests {
     #[test]
     fn layout_end_labels_preserves_full_compact_minimal_chain() {
         let anchor = LabelAnchor {
+            key: "test".to_string(),
             text: vec!["FULLFULL".to_string()],
             fallback_texts: vec![vec!["MID".to_string()], vec!["M".to_string()]],
             color: Color::Yellow,
@@ -1687,6 +1900,7 @@ mod tests {
     #[test]
     fn layout_end_labels_prefers_right_side_compact_over_left_side_full() {
         let anchor = LabelAnchor {
+            key: "test".to_string(),
             text: vec!["[claude 7d] acct 16%/100%".to_string()],
             fallback_texts: vec![vec!["acct 16%".to_string()], vec!["acct".to_string()]],
             color: Color::Cyan,
@@ -1719,6 +1933,7 @@ mod tests {
     #[test]
     fn layout_end_labels_clamps_left_edge_instead_of_dropping_label() {
         let anchors = vec![LabelAnchor {
+            key: "test".to_string(),
             text: vec!["[codex 7d] comet.jc 7%/0%".to_string()],
             fallback_texts: vec![
                 vec!["comet.jc 7%".to_string()],
@@ -1947,6 +2162,7 @@ mod tests {
     #[test]
     fn layout_end_labels_keeps_reset_line_when_space_exists() {
         let anchors = vec![LabelAnchor {
+            key: "test".to_string(),
             text: vec![
                 "[codex 7d] Alpha 100%/40%".to_string(),
                 "Hit limit".to_string(),
@@ -3513,6 +3729,7 @@ mod tests {
     #[test]
     fn layout_end_labels_allows_label_to_overlay_plot_cells() {
         let anchors = vec![LabelAnchor {
+            key: "test".to_string(),
             text: vec!["[codex 7d] comet 26%/14%".to_string()],
             fallback_texts: vec![vec!["comet 26%".to_string()], vec!["comet".to_string()]],
             color: Color::Yellow,
@@ -3541,6 +3758,7 @@ mod tests {
     #[test]
     fn layout_end_labels_prefers_fewer_overlap_cells_over_shorter_connector() {
         let anchors = vec![LabelAnchor {
+            key: "test".to_string(),
             text: vec!["ABCD".to_string()],
             fallback_texts: vec![],
             color: Color::Yellow,
@@ -3574,6 +3792,7 @@ mod tests {
     #[test]
     fn layout_end_labels_prefers_shorter_connector_when_overlap_is_tied() {
         let anchors = vec![LabelAnchor {
+            key: "test".to_string(),
             text: vec!["ABCD".to_string()],
             fallback_texts: vec![],
             color: Color::Yellow,
@@ -3610,6 +3829,7 @@ mod tests {
     #[test]
     fn layout_end_labels_keeps_one_row_gap_from_blocked_band_cells() {
         let anchors = vec![LabelAnchor {
+            key: "test".to_string(),
             text: vec!["tag".to_string()],
             fallback_texts: vec![],
             color: Color::Yellow,
@@ -3637,6 +3857,7 @@ mod tests {
     #[test]
     fn layout_end_labels_omits_label_when_band_claims_every_candidate() {
         let anchors = vec![LabelAnchor {
+            key: "test".to_string(),
             text: vec!["[codex 7d] comet 33%/14%".to_string()],
             fallback_texts: vec![vec!["comet 33%".to_string()], vec!["comet".to_string()]],
             color: Color::Yellow,
@@ -3668,6 +3889,7 @@ mod tests {
     #[test]
     fn layout_end_labels_force_fallback_prefers_full_label_when_space_exists() {
         let anchors = vec![LabelAnchor {
+            key: "test".to_string(),
             text: vec!["[codex 7d] comet 33%/14%".to_string()],
             fallback_texts: vec![vec!["comet 33%".to_string()], vec!["comet".to_string()]],
             color: Color::Yellow,
@@ -3702,6 +3924,7 @@ mod tests {
     #[test]
     fn layout_end_labels_drops_second_line_when_vertical_room_is_too_tight() {
         let anchors = vec![LabelAnchor {
+            key: "test".to_string(),
             text: vec![
                 "[codex 7d] comet 100%/100%".to_string(),
                 "Hit limit".to_string(),
@@ -3736,6 +3959,7 @@ mod tests {
     fn layout_end_labels_keeps_three_line_reset_label_with_neighboring_anchor() {
         let anchors = vec![
             LabelAnchor {
+            key: "test".to_string(),
                 text: vec![
                     "[codex 7d] comet 100%/100%".to_string(),
                     "Hit limit".to_string(),
@@ -3751,6 +3975,7 @@ mod tests {
                 y: 6,
             },
             LabelAnchor {
+            key: "test".to_string(),
                 text: vec!["[claude 7d] CC 78%/23%".to_string()],
                 fallback_texts: vec![vec!["CC 78%".to_string()], vec!["CC".to_string()]],
                 color: Color::Cyan,
@@ -3811,6 +4036,7 @@ mod tests {
     #[test]
     fn layout_end_labels_force_fallback_preserves_full_compact_minimal_chain() {
         let anchor = LabelAnchor {
+            key: "test".to_string(),
             text: vec!["FULLFULL".to_string()],
             fallback_texts: vec![vec!["MID".to_string()], vec!["M".to_string()]],
             color: Color::Cyan,
@@ -3851,6 +4077,7 @@ mod tests {
     #[test]
     fn layout_end_labels_omits_labels_that_cannot_fit_within_graph_bounds() {
         let anchors = vec![LabelAnchor {
+            key: "test".to_string(),
             text: vec!["very long full label".to_string()],
             fallback_texts: vec![
                 vec!["still too wide".to_string()],
@@ -3966,6 +4193,7 @@ mod tests {
         ));
 
         let anchor = LabelAnchor {
+            key: "test".to_string(),
             text: full_lines,
             fallback_texts: compact_end_label_variants(&series)
                 .into_iter()
@@ -4076,6 +4304,7 @@ mod tests {
         let graph_area = Rect::new(0, 0, 40, 20);
         let label_area_right = graph_area.right() + 30; // 30-col right zone
         let anchor = LabelAnchor {
+            key: "test".to_string(),
             text: vec!["[claude 7d] acct 16%/100%".to_string()], // 25 chars
             fallback_texts: vec![vec!["acct 16%".to_string()], vec!["acct".to_string()]],
             color: Color::Cyan,
