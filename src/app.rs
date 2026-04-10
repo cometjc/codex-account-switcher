@@ -2074,6 +2074,7 @@ struct ChartLayoutInputs<'a, 'b> {
     hidden_series: &'b [bool],
 }
 
+#[cfg(test)]
 fn default_chart_layout_inputs() -> ChartLayoutInputs<'static, 'static> {
     ChartLayoutInputs {
         y_lower: 0.0,
