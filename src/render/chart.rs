@@ -181,19 +181,10 @@ fn render_usage_chart(frame: &mut Frame, area: ratatui::layout::Rect, chart_stat
                 .bounds(y_bounds)
                 .labels([y_label_lo.as_str(), y_label_q1.as_str(), y_label_mid.as_str(), y_label_q3.as_str(), y_label_hi.as_str()]),
         );
-    // Reserve a right-side label zone so end labels always fit without fallback.
-    // Only apply the zone when the area is wide enough to leave a usable plot.
-    let raw_zone = right_label_zone_width(&visible_series);
-    let zone_width = if raw_zone < area.width / 2 { raw_zone } else { 0 };
-    let [plot_area, _label_zone] = Layout::horizontal([
-        Constraint::Min(0),
-        Constraint::Length(zone_width),
-    ])
-    .areas(area);
     let label_area_right = area.right();
 
-    frame.render_widget(chart, plot_area);
-    let graph_area = chart_graph_area(plot_area, x_label_lo.as_str(), [y_label_lo.as_str(), y_label_q1.as_str(), y_label_mid.as_str(), y_label_q3.as_str(), y_label_hi.as_str()]);
+    frame.render_widget(chart, area);
+    let graph_area = chart_graph_area(area, x_label_lo.as_str(), [y_label_lo.as_str(), y_label_q1.as_str(), y_label_mid.as_str(), y_label_q3.as_str(), y_label_hi.as_str()]);
     let blocked_cells = apply_band_backgrounds(frame, graph_area, &band_rects, x_bounds, y_bounds);
     let occupied_cells = collect_occupied_plot_cells(frame, graph_area);
     let zero_state_series = visible_series
@@ -309,6 +300,7 @@ fn collect_occupied_plot_cells(frame: &mut Frame, graph_area: Rect) -> HashSet<(
 
 /// Returns the width (in terminal columns) to reserve on the right of the chart area
 /// for end labels, so labels never need to fall back to a compact form.
+#[cfg(test)]
 fn right_label_zone_width(visible_series: &[&super::ChartSeries<'_>]) -> u16 {
     let max_label = visible_series
         .iter()
@@ -1011,6 +1003,18 @@ mod tests {
             .flat_map(|line| line.chars())
             .filter(|symbol| matches!(symbol, '⠁'..='⣿'))
             .count()
+    }
+
+    fn rightmost_chart_glyph_column(lines: &[String]) -> Option<usize> {
+        lines.iter()
+            .flat_map(|line| {
+                line.chars()
+                    .enumerate()
+                    .filter(|(_, symbol)| matches!(symbol, '⠁'..='⣿'))
+                    .map(|(x, _)| x)
+                    .collect::<Vec<_>>()
+            })
+            .max()
     }
 
     fn neighboring_priority_state() -> MockState {
@@ -1734,6 +1738,94 @@ mod tests {
             visible_chart_glyph_count(&lines) > 0,
             "expected chart area to contain braille glyphs, got:\n{}",
             joined
+        );
+    }
+
+    #[test]
+    fn render_chart_keeps_series_curve_near_right_edge_in_wide_view() {
+        let state = MockState {
+            selection: SelectionState {
+                selected: Some(RenderProfile {
+                    id: "alpha",
+                    label: "Alpha",
+                    is_current: true,
+                    agent_type: "codex",
+                    window_label: "7d",
+                }),
+                current: Some(RenderProfile {
+                    id: "alpha",
+                    label: "Alpha",
+                    is_current: true,
+                    agent_type: "codex",
+                    window_label: "7d",
+                }),
+            },
+            chart: ChartState {
+                series: vec![ChartSeries {
+                    profile: RenderProfile {
+                        id: "alpha",
+                        label: "Alpha",
+                        is_current: true,
+                        agent_type: "codex",
+                        window_label: "7d",
+                    },
+                    style: ChartSeriesStyle {
+                        color_slot: 0,
+                        is_selected: true,
+                        is_current: true,
+                        hidden: false,
+                    },
+                    points: vec![ChartPoint { x: 0.0, y: 20.0 }, ChartPoint { x: 7.0, y: 80.0 }],
+                    last_seven_day_percent: Some(80.0),
+                    five_hour_used_percent: Some(50.0),
+                    forecast_label: None,
+                    five_hour_subframe: FiveHourSubframeState {
+                        available: false,
+                        start_x: None,
+                        end_x: None,
+                        lower_y: None,
+                        upper_y: None,
+                        reason: None,
+                    },
+                    is_zero_state: false,
+                    reset_line_display: None,
+                }],
+                seven_day_points: vec![ChartPoint { x: 0.0, y: 20.0 }, ChartPoint { x: 7.0, y: 80.0 }],
+                five_hour_band: FiveHourBandState {
+                    available: false,
+                    used_percent: None,
+                    lower_y: None,
+                    upper_y: None,
+                    delta_seven_day_percent: None,
+                    delta_five_hour_percent: None,
+                    reason: Some("no 5h window"),
+                },
+                five_hour_subframe: FiveHourSubframeState {
+                    available: false,
+                    start_x: None,
+                    end_x: None,
+                    lower_y: None,
+                    upper_y: None,
+                    reason: Some("no 5h window"),
+                },
+                total_points: 2,
+                y_lower: 0.0,
+                y_upper: 100.0,
+                x_lower: 0.0,
+                x_upper: 7.0,
+                solo: false,
+                tab_zoom_label: None,
+                focused: false,
+                fullscreen: true,
+            },
+        };
+
+        let lines = render_lines(&state, 120, 20);
+        let rightmost = rightmost_chart_glyph_column(&lines)
+            .expect("expected chart braille glyphs to be present");
+        assert!(
+            rightmost >= 100,
+            "expected series curve to reach near the right edge, got rightmost glyph x={rightmost}"
         );
     }
 
