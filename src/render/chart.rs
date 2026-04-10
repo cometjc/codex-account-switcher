@@ -669,7 +669,7 @@ fn layout_end_labels(
 
     for (anchor_idx, anchor) in anchors.iter().enumerate() {
         let text_variants = std::iter::once(&anchor.text).chain(anchor.fallback_texts.iter());
-        let mut best: Option<(u16, u16, u16, &Vec<String>, usize, u16, u16, u16, u16)> = None;
+        let mut best: Option<(u32, u8, u16, u16, u16, u16, u16, u16, u16, &Vec<String>)> = None;
 
         for (variant_idx, text) in text_variants.enumerate() {
             let width = text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
@@ -697,7 +697,7 @@ fn layout_end_labels(
                             .x
                             .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
                             .max(graph_area.left());
-                        if left_x >= graph_area.left() && left_x + width <= label_area_right {
+                        if left_x + width <= anchor.x {
                             candidates.push((left_x, y));
                         }
                     }
@@ -719,35 +719,29 @@ fn layout_end_labels(
                 if !label_cells_ok {
                     continue;
                 }
-                if !connector_cells(attach_x, y, anchor.x, anchor.y, graph_area)
-                    .into_iter()
-                    .all(|cell| !blocked_cells.contains(&cell) && !reserved.contains(&cell))
-                {
+                let connector = connector_cells(attach_x, y, anchor.x, anchor.y, graph_area);
+                if !connector.iter().all(|cell| !blocked_cells.contains(cell) && !reserved.contains(cell)) {
                     continue;
                 }
-
+                let conn_total = connector.len() as u16;
+                let conn_cost: u32 = connector.iter().map(|&(_, cy)| if cy == anchor.y { 1u32 } else { 4u32 }).sum();
+                let score = variant_idx as u32 * 20 + conn_cost;
+                let dir_rank = if attach_x > anchor.x { 0u8 }
+                               else if attach_x < anchor.x { 1u8 }
+                               else if y > anchor.y { 2u8 }
+                               else { 3u8 };
                 let dy = y.abs_diff(anchor.y);
                 let dx = attach_x.abs_diff(anchor.x);
-                let candidate = (x, y, attach_x, text, variant_idx, 0u16, connector_length(attach_x, y, anchor.x, anchor.y, graph_area), dy, dx);
-                if best
-                    .as_ref()
-                    .is_none_or(|(_, _, _, _, best_variant, best_overlap, best_connector, best_dy, best_dx)| {
-                        (
-                            variant_idx,
-                            0u16,
-                            connector_length(attach_x, y, anchor.x, anchor.y, graph_area),
-                            dy,
-                            dx,
-                        )
-                            < (*best_variant, *best_overlap, *best_connector, *best_dy, *best_dx)
-                    })
-                {
+                let candidate = (score, dir_rank, 0u16, conn_total, dy, dx, x, y, attach_x, text);
+                if best.as_ref().is_none_or(|(bs, bd, bo, bct, bdy, bdx, ..)| {
+                    (score, dir_rank, 0u16, conn_total, dy, dx) < (*bs, *bd, *bo, *bct, *bdy, *bdx)
+                }) {
                     best = Some(candidate);
                 }
             }
         }
 
-        if let Some((x, y, attach_x, text, _, _, _, _, _)) = best {
+        if let Some((_, _, _, _, _, _, x, y, attach_x, text)) = best {
             let width = text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
             let height = text.len() as u16;
             let connector = connector_cells(attach_x, y, anchor.x, anchor.y, graph_area);
@@ -779,7 +773,7 @@ fn layout_end_labels(
 
         // Force placement: two-phase. Phase 1 avoids blocked cells when possible.
         // Phase 2 ignores blocked cells if phase 1 found no placement (last-resort).
-        let mut best: Option<(u16, u16, u16, &Vec<String>, usize, u16, u16, u16, u16)> = None;
+        let mut best: Option<(u32, u8, u16, u16, u16, u16, u16, u16, u16, &Vec<String>)> = None;
 
         for avoid_blocked in [true, false] {
             if avoid_blocked || best.is_none() {
@@ -813,7 +807,7 @@ fn layout_end_labels(
                                     .x
                                     .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
                                     .max(graph_area.left());
-                                if left_x + width <= label_area_right {
+                                if left_x + width <= anchor.x {
                                     candidates.push((left_x, y));
                                 }
                             }
@@ -826,23 +820,27 @@ fn layout_end_labels(
                                 let cell = (x + dx, y + line_i);
                                 !reserved.contains(&cell)
                                     && (!avoid_blocked || !blocked_cells.contains(&cell))
+                                    && (!avoid_blocked || !label_exclusion_cells.contains(&cell))
                             })
                         }) {
                             continue;
                         }
                         let attach_x = connector_attach_x(x, width, anchor.x);
+                        let connector = connector_cells(attach_x, y, anchor.x, anchor.y, graph_area);
+                        let conn_total = connector.len() as u16;
+                        let conn_cost: u32 = connector.iter().map(|&(_, cy)| if cy == anchor.y { 1u32 } else { 4u32 }).sum();
+                        let overlap = count_label_overlap(x, y, width, height, occupied_cells);
+                        let score = variant_idx as u32 * 20 + overlap as u32 + conn_cost;
+                        let dir_rank = if attach_x > anchor.x { 0u8 }
+                                       else if attach_x < anchor.x { 1u8 }
+                                       else if y > anchor.y { 2u8 }
+                                       else { 3u8 };
                         let dy = y.abs_diff(anchor.y);
                         let dx = attach_x.abs_diff(anchor.x);
-                        let overlap = count_label_overlap(x, y, width, height, occupied_cells);
-                        let connector_len = connector_length(attach_x, y, anchor.x, anchor.y, graph_area);
-                        let candidate = (x, y, attach_x, text, variant_idx, overlap, connector_len, dy, dx);
-                        if best
-                            .as_ref()
-                            .is_none_or(|(_, _, _, _, best_variant, best_overlap, best_connector, best_dy, best_dx)| {
-                                (variant_idx, overlap, connector_len, dy, dx)
-                                    < (*best_variant, *best_overlap, *best_connector, *best_dy, *best_dx)
-                            })
-                        {
+                        let candidate = (score, dir_rank, overlap, conn_total, dy, dx, x, y, attach_x, text);
+                        if best.as_ref().is_none_or(|(bs, bd, bo, bct, bdy, bdx, ..)| {
+                            (score, dir_rank, overlap, conn_total, dy, dx) < (*bs, *bd, *bo, *bct, *bdy, *bdx)
+                        }) {
                             best = Some(candidate);
                         }
                     }
@@ -850,7 +848,7 @@ fn layout_end_labels(
             }
         }
 
-        if let Some((x, y, attach_x, text, _, _, _, _, _)) = best {
+        if let Some((_, _, _, _, _, _, x, y, attach_x, text)) = best {
             let width = text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
             let height = text.len() as u16;
             for line_i in 0..height {
@@ -893,15 +891,6 @@ fn count_label_overlap(
     overlap
 }
 
-fn connector_length(
-    attach_x: u16,
-    label_y: u16,
-    anchor_x: u16,
-    anchor_y: u16,
-    graph_area: Rect,
-) -> u16 {
-    connector_cells(attach_x, label_y, anchor_x, anchor_y, graph_area).len() as u16
-}
 
 fn connector_cells(
     attach_x: u16,
@@ -1187,6 +1176,38 @@ mod tests {
             assert_eq!(labels.len(), 1);
             assert_eq!(labels[0].text, vec![expected.to_string()]);
         }
+    }
+
+    #[test]
+    fn layout_end_labels_prefers_right_side_compact_over_left_side_full() {
+        let anchor = LabelAnchor {
+            text: vec!["[claude 7d] acct 16%/100%".to_string()],
+            fallback_texts: vec![vec!["acct 16%".to_string()], vec!["acct".to_string()]],
+            color: Color::Cyan,
+            x: 18,
+            y: 3,
+        };
+
+        let graph_area = Rect::new(0, 3, 28, 1);
+        let labels = layout_end_labels(
+            &[anchor],
+            graph_area,
+            graph_area.right(),
+            &HashSet::new(),
+            &HashSet::new(),
+        );
+
+        assert_eq!(labels.len(), 1);
+        assert_eq!(
+            labels[0].text,
+            vec!["acct 16%".to_string()],
+            "expected compact label on the right instead of full label on the left"
+        );
+        assert!(
+            labels[0].x >= 19,
+            "expected right-side placement near endpoint, got x={}",
+            labels[0].x
+        );
     }
 
     #[test]
@@ -3180,19 +3201,19 @@ mod tests {
     }
 
     #[test]
-    fn render_chart_keeps_full_end_label_when_left_side_is_the_only_safe_space() {
+    fn render_chart_prefers_right_side_compact_label_when_full_needs_left_side() {
         let state = neighboring_priority_state();
         let lines = render_lines(&state, 72, 18);
         let joined = lines.join("\n");
 
         assert!(
-            joined.contains("[codex 7d] comet.jc 60%/0%"),
-            "expected full codex label to appear, got:\n{joined}"
+            joined.contains("comet.jc 60%"),
+            "expected compact codex label on the right side, got:\n{joined}"
         );
     }
 
     #[test]
-    fn render_chart_applies_full_label_priority_per_anchor() {
+    fn render_chart_prefers_right_side_labeling_per_anchor() {
         let state = neighboring_priority_state();
         let graph_area = chart_graph_area(
             Rect::new(0, 0, 72, 18),
@@ -3207,8 +3228,8 @@ mod tests {
         let joined = lines.join("\n");
 
         assert!(
-            joined.contains("[codex 7d] comet.jc 60%/0%"),
-            "expected full codex label, got:\n{joined}"
+            joined.contains("comet.jc 60%"),
+            "expected right-side compact codex label, got:\n{joined}"
         );
         assert!(
             joined.contains("[copilot 30d] Beta 60%"),
@@ -3258,13 +3279,12 @@ mod tests {
             y: 3,
         };
         let graph_area = Rect::new(0, 3, 64, 4);
-        let occupied = (graph_area.left()..graph_area.right())
-            .flat_map(|x| (graph_area.top()..graph_area.bottom()).map(move |y| (x, y)))
-            .collect::<HashSet<_>>();
-        // Only block the far-left side; (21,3) was in the original plan spec but its exclusion
-        // expansion to {(20,3),(21,3),(22,3)} makes every 51-char placement impossible in a
-        // 64-wide graph — corrected to single left-side blocker so the full label can fit at x=13.
-        let blocked = HashSet::from([(0u16, 3u16)]);
+        let occupied: HashSet<(u16, u16)> = HashSet::new();
+        // Block connector cells for both right-side (21,3) and left-side compact path (19,3)
+        // so that all primary candidates fail and force-fallback is triggered. With overlap=0
+        // for all candidates, the truncation penalty (+20 per level) ensures the full label
+        // (variant_idx=0, score=conn_cost) beats compact variants (variant_idx≥1, score=20+conn_cost).
+        let blocked = HashSet::from([(19u16, 3u16), (21u16, 3u16)]);
 
         let labels = layout_end_labels(&[anchor], graph_area, graph_area.right(), &occupied, &blocked);
 
