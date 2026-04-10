@@ -1630,22 +1630,7 @@ impl render::RenderState for AppRenderState<'_> {
 
     fn chart_state(&self) -> ChartState<'_> {
         let effective_selected = self.tab_zoom_index.unwrap_or(self.selected_profile_index);
-        let mut state = build_chart_state(self.profiles, effective_selected);
-
-        // Mark hidden profiles
-        for (i, series) in state.series.iter_mut().enumerate() {
-            let key = format!(
-                "{}|{}",
-                self.profiles.get(i).map(|p| p.kind.as_str()).unwrap_or(""),
-                self.profiles
-                    .get(i)
-                    .map(|p| p.profile_name.as_str())
-                    .unwrap_or(""),
-            );
-            series.style.hidden = self.hidden_profiles.contains(&key);
-        }
-
-        if let Some(idx) = self.tab_zoom_index {
+        let (y_lower, y_upper, solo, tab_zoom_label) = if let Some(idx) = self.tab_zoom_index {
             if let Some(profile) = self.profiles.get(idx) {
                 // Auto y-bounds: fit this profile's data + 5h band
                 let mut all_ys: Vec<f64> = profile
@@ -1660,29 +1645,51 @@ impl render::RenderState for AppRenderState<'_> {
                 if let Some(y) = profile.chart_data.five_hour_band.upper_y {
                     all_ys.push(y);
                 }
+                let mut y_lower = self.y_zoom_lower;
+                let mut y_upper = self.y_zoom_upper;
                 if !all_ys.is_empty() {
                     let min_y = all_ys.iter().cloned().fold(f64::INFINITY, f64::min);
                     let max_y = all_ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
                     let margin = ((max_y - min_y) * 0.15).max(5.0);
-                    state.y_lower = (min_y - margin).max(0.0);
-                    state.y_upper = (max_y + margin).min(100.0);
+                    y_lower = (min_y - margin).max(0.0);
+                    y_upper = (max_y + margin).min(100.0);
                 }
-                state.solo = true;
-                state.tab_zoom_label = Some(profile.profile_name.as_str());
+                (y_lower, y_upper, true, Some(profile.profile_name.as_str()))
+            } else {
+                (self.y_zoom_lower, self.y_zoom_upper, self.solo, None)
             }
         } else {
-            state.y_lower = self.y_zoom_lower;
-            state.y_upper = self.y_zoom_upper;
-            state.solo = self.solo;
-            state.tab_zoom_label = None;
-        }
+            (self.y_zoom_lower, self.y_zoom_upper, self.solo, None)
+        };
 
-        state.x_lower = 7.0 - self.x_window_days - self.x_offset_days;
-        state.x_upper = 7.0 - self.x_offset_days;
-        state.focused = self.plot_focused;
-        state.fullscreen = self.fullscreen;
-        state.layout_viewport_version = chart_layout_viewport_version(&state);
-        state
+        let x_lower = 7.0 - self.x_window_days - self.x_offset_days;
+        let x_upper = 7.0 - self.x_offset_days;
+        let hidden_series = self
+            .profiles
+            .iter()
+            .map(|profile| {
+                let key = format!(
+                    "{}|{}",
+                    profile.kind.as_str(),
+                    profile.profile_name.as_str(),
+                );
+                self.hidden_profiles.contains(&key)
+            })
+            .collect::<Vec<_>>();
+
+        let layout = ChartLayoutInputs {
+            y_lower,
+            y_upper,
+            x_lower,
+            x_upper,
+            solo,
+            tab_zoom_label,
+            focused: self.plot_focused,
+            fullscreen: self.fullscreen,
+            hidden_series: &hidden_series,
+        };
+
+        build_chart_state(self.profiles, effective_selected, layout)
     }
 }
 
@@ -2054,9 +2061,37 @@ fn build_reset_line_display(
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ChartLayoutInputs<'a, 'b> {
+    y_lower: f64,
+    y_upper: f64,
+    x_lower: f64,
+    x_upper: f64,
+    solo: bool,
+    tab_zoom_label: Option<&'a str>,
+    focused: bool,
+    fullscreen: bool,
+    hidden_series: &'b [bool],
+}
+
+fn default_chart_layout_inputs() -> ChartLayoutInputs<'static, 'static> {
+    ChartLayoutInputs {
+        y_lower: 0.0,
+        y_upper: 100.0,
+        x_lower: 0.0,
+        x_upper: 7.0,
+        solo: false,
+        tab_zoom_label: None,
+        focused: false,
+        fullscreen: false,
+        hidden_series: &[],
+    }
+}
+
 fn build_chart_state<'a>(
     profiles: &'a [ProfileEntry],
     selected_profile_index: usize,
+    layout: ChartLayoutInputs<'a, '_>,
 ) -> ChartState<'a> {
     let selected_profile = profiles.get(selected_profile_index);
     let selected_label = selected_profile
@@ -2128,7 +2163,7 @@ fn build_chart_state<'a>(
                     color_slot: index,
                     is_selected: index == selected_profile_index,
                     is_current: profile.is_current,
-                    hidden: false,
+                    hidden: layout.hidden_series.get(index).copied().unwrap_or(false),
                 },
                 points: profile.chart_data.seven_day_points.clone(),
                 last_seven_day_percent,
@@ -2160,14 +2195,14 @@ fn build_chart_state<'a>(
         five_hour_band: selected_band,
         five_hour_subframe: selected_subframe,
         total_points,
-        y_lower: 0.0,
-        y_upper: 100.0,
-        x_lower: 0.0,
-        x_upper: 7.0,
-        solo: false,
-        tab_zoom_label: None,
-        focused: false,
-        fullscreen: false,
+        y_lower: layout.y_lower,
+        y_upper: layout.y_upper,
+        x_lower: layout.x_lower,
+        x_upper: layout.x_upper,
+        solo: layout.solo,
+        tab_zoom_label: layout.tab_zoom_label,
+        focused: layout.focused,
+        fullscreen: layout.fullscreen,
         layout_data_version: 0,
         layout_viewport_version: 0,
     };
@@ -2178,7 +2213,7 @@ fn build_chart_state<'a>(
     }
 
     chart_state.layout_data_version = chart_layout_data_version(&chart_state);
-    chart_state.layout_viewport_version = chart_layout_viewport_version(&chart_state);
+    chart_state.layout_viewport_version = chart_layout_viewport_version(layout);
     chart_state
 }
 
@@ -2192,18 +2227,19 @@ fn chart_layout_data_version(state: &ChartState<'_>) -> u64 {
     hasher.finish()
 }
 
-fn chart_layout_viewport_version(state: &ChartState<'_>) -> u64 {
+fn chart_layout_viewport_version(layout: ChartLayoutInputs<'_, '_>) -> u64 {
     let mut hasher = DefaultHasher::new();
-    hash_f64(&mut hasher, state.y_lower);
-    hash_f64(&mut hasher, state.y_upper);
-    hash_f64(&mut hasher, state.x_lower);
-    hash_f64(&mut hasher, state.x_upper);
-    state.solo.hash(&mut hasher);
-    state.tab_zoom_label.hash(&mut hasher);
-    state.focused.hash(&mut hasher);
-    state.fullscreen.hash(&mut hasher);
-    for series in &state.series {
-        series.style.hidden.hash(&mut hasher);
+    hash_f64(&mut hasher, layout.y_lower);
+    hash_f64(&mut hasher, layout.y_upper);
+    hash_f64(&mut hasher, layout.x_lower);
+    hash_f64(&mut hasher, layout.x_upper);
+    layout.solo.hash(&mut hasher);
+    layout.tab_zoom_label.hash(&mut hasher);
+    layout.focused.hash(&mut hasher);
+    layout.fullscreen.hash(&mut hasher);
+    layout.hidden_series.len().hash(&mut hasher);
+    for hidden in layout.hidden_series {
+        hidden.hash(&mut hasher);
     }
     hasher.finish()
 }
@@ -2461,7 +2497,7 @@ mod tests {
             },
         }];
 
-        let chart_state = build_chart_state(&profiles, 0);
+        let chart_state = build_chart_state(&profiles, 0, default_chart_layout_inputs());
         assert!(chart_state.series[0].is_zero_state);
         assert!(chart_state.series[0].five_hour_subframe.available == false);
     }
@@ -2973,8 +3009,6 @@ mod chart_reset_line_tests {
     use super::*;
     use crate::app_data::{OwnedFiveHourBandState, OwnedFiveHourSubframeState};
     use crate::render::ChartPoint;
-    use crate::render::RenderState;
-    use std::collections::HashSet;
 
     fn make_profile_with_chart(
         last_seven_day_percent: Option<f64>,
@@ -3040,8 +3074,8 @@ mod chart_reset_line_tests {
             Some(7_200),
         )];
 
-        let baseline_state = build_chart_state(&baseline, 0);
-        let changed_state = build_chart_state(&changed, 0);
+        let baseline_state = build_chart_state(&baseline, 0, default_chart_layout_inputs());
+        let changed_state = build_chart_state(&changed, 0, default_chart_layout_inputs());
 
         assert_ne!(
             baseline_state.layout_data_version,
@@ -3061,37 +3095,30 @@ mod chart_reset_line_tests {
             Some(3_600),
             Some(7_200),
         )];
-        let hidden_profiles = HashSet::new();
-
-        let baseline_render_state = AppRenderState {
-            profiles: &profiles,
-            selected_profile_index: 0,
-            y_zoom_lower: 0.0,
-            y_zoom_upper: 100.0,
+        let baseline_layout = ChartLayoutInputs {
+            y_lower: 0.0,
+            y_upper: 100.0,
+            x_lower: 0.0,
+            x_upper: 7.0,
             solo: false,
-            x_window_days: 7.0,
-            x_offset_days: 0.0,
-            plot_focused: true,
+            tab_zoom_label: None,
+            focused: true,
             fullscreen: true,
-            tab_zoom_index: None,
-            hidden_profiles: &hidden_profiles,
+            hidden_series: &[],
         };
-        let baseline_state = baseline_render_state.chart_state();
-
-        let changed_render_state = AppRenderState {
-            profiles: &profiles,
-            selected_profile_index: 0,
-            y_zoom_lower: 20.0,
-            y_zoom_upper: 80.0,
-            solo: false,
-            x_window_days: 4.0,
-            x_offset_days: 1.0,
-            plot_focused: true,
+        let changed_layout = ChartLayoutInputs {
+            y_lower: 20.0,
+            y_upper: 80.0,
+            x_lower: 2.0,
+            x_upper: 6.0,
+            solo: true,
+            tab_zoom_label: Some("Alpha"),
+            focused: true,
             fullscreen: true,
-            tab_zoom_index: None,
-            hidden_profiles: &hidden_profiles,
+            hidden_series: &[],
         };
-        let changed_state = changed_render_state.chart_state();
+        let baseline_state = build_chart_state(&profiles, 0, baseline_layout);
+        let changed_state = build_chart_state(&profiles, 0, changed_layout);
 
         assert_eq!(
             baseline_state.layout_data_version,
@@ -3111,7 +3138,7 @@ mod chart_reset_line_tests {
             Some(3_600),
             Some(900),
         )];
-        let state = build_chart_state(&profiles, 0);
+        let state = build_chart_state(&profiles, 0, default_chart_layout_inputs());
         let reset_line = state.series[0]
             .reset_line_display
             .as_ref()
@@ -3129,7 +3156,7 @@ mod chart_reset_line_tests {
             Some(3_600),
             Some(7_200),
         )];
-        let state = build_chart_state(&profiles, 0);
+        let state = build_chart_state(&profiles, 0, default_chart_layout_inputs());
         let reset_line = state.series[0]
             .reset_line_display
             .as_ref()
@@ -3147,7 +3174,7 @@ mod chart_reset_line_tests {
             Some(3_600),
             Some(7_200),
         )];
-        let state = build_chart_state(&profiles, 0);
+        let state = build_chart_state(&profiles, 0, default_chart_layout_inputs());
         let reset_line = state.series[0]
             .reset_line_display
             .as_ref()
@@ -3165,7 +3192,7 @@ mod chart_reset_line_tests {
             None,
             Some(7_200),
         )];
-        let five_hour_state = build_chart_state(&five_hour_only, 0);
+        let five_hour_state = build_chart_state(&five_hour_only, 0, default_chart_layout_inputs());
         let five_hour_reset = five_hour_state.series[0]
             .reset_line_display
             .as_ref()
@@ -3181,7 +3208,7 @@ mod chart_reset_line_tests {
             Some(3_600),
             None,
         )];
-        let weekly_state = build_chart_state(&weekly_only, 0);
+        let weekly_state = build_chart_state(&weekly_only, 0, default_chart_layout_inputs());
         let weekly_reset = weekly_state.series[0]
             .reset_line_display
             .as_ref()
@@ -3197,7 +3224,7 @@ mod chart_reset_line_tests {
             Some(3_600),
             Some(7_200),
         )];
-        let state = build_chart_state(&profiles, 0);
+        let state = build_chart_state(&profiles, 0, default_chart_layout_inputs());
 
         assert!(state.series[0].reset_line_display.is_none());
     }
@@ -3210,7 +3237,7 @@ mod chart_reset_line_tests {
             None,
             None,
         )];
-        let state = build_chart_state(&profiles, 0);
+        let state = build_chart_state(&profiles, 0, default_chart_layout_inputs());
 
         assert!(state.series[0].reset_line_display.is_none());
     }
@@ -3218,7 +3245,7 @@ mod chart_reset_line_tests {
     #[test]
     fn zero_state_remains_without_reset_contract() {
         let app = App::from_profile_names(vec!["Alpha".to_string()], 0);
-        let state = build_chart_state(&app.profiles, 0);
+        let state = build_chart_state(&app.profiles, 0, default_chart_layout_inputs());
 
         assert!(state.series[0].reset_line_display.is_none());
     }
