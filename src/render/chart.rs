@@ -1,5 +1,8 @@
+use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::prelude::{Color, Frame, Style};
@@ -22,6 +25,41 @@ const SERIES_BAND_COLORS: [Color; 8] = [
 ];
 
 const LABEL_BG_COLOR: Color = Color::Rgb(20, 20, 20);
+
+#[derive(Debug, Clone)]
+struct CachedLabelLayout {
+    layout_data_version: u64,
+    layout_viewport_version: u64,
+    graph_area: Rect,
+    label_area_right: u16,
+    anchor_signature: u64,
+    labels: Vec<PlacedLabel>,
+}
+
+thread_local! {
+    static LABEL_LAYOUT_CACHE: RefCell<Option<CachedLabelLayout>> = const { RefCell::new(None) };
+    #[cfg(test)]
+    static LAYOUT_RECOMPUTE_COUNT: RefCell<usize> = const { RefCell::new(0) };
+}
+
+#[cfg(test)]
+fn reset_layout_recompute_count() {
+    LAYOUT_RECOMPUTE_COUNT.with(|count| {
+        *count.borrow_mut() = 0;
+    });
+}
+
+#[cfg(test)]
+fn layout_recompute_count() -> usize {
+    LAYOUT_RECOMPUTE_COUNT.with(|count| *count.borrow())
+}
+
+#[cfg(test)]
+fn clear_label_layout_cache_for_tests() {
+    LABEL_LAYOUT_CACHE.with(|cache| {
+        cache.borrow_mut().take();
+    });
+}
 
 pub fn render_chart<State: RenderState>(frame: &mut Frame, context: &RenderContext<'_, State>) {
     let chart_state = context.state.chart_state();
@@ -239,6 +277,8 @@ fn render_usage_chart(
         y_bounds,
         &occupied_cells,
         &blocked_cells,
+        chart_state.layout_data_version,
+        chart_state.layout_viewport_version,
     );
     render_zero_state_origin_marker(frame, graph_area, x_bounds, y_bounds, &zero_state_series);
 }
@@ -359,33 +399,24 @@ fn render_end_labels(
     y_bounds: [f64; 2],
     occupied_cells: &HashSet<(u16, u16)>,
     blocked_cells: &HashSet<(u16, u16)>,
+    layout_data_version: u64,
+    layout_viewport_version: u64,
 ) {
-    let mut anchors = visible_series
-        .iter()
-        .filter_map(|series| {
-            let point = series
-                .points
-                .iter()
-                .rev()
-                .find(|point| point.x >= x_bounds[0] && point.x <= x_bounds[1])?;
-            Some(LabelAnchor {
-                text: chart_labels::full_label_lines(series),
-                fallback_texts: chart_labels::compact_label_variants(series),
-                color: SERIES_COLORS[series.style.color_slot % SERIES_COLORS.len()],
-                x: project_x(point.x, graph_area, x_bounds),
-                y: project_y(point.y, graph_area, y_bounds),
-            })
-        })
-        .collect::<Vec<_>>();
+    let mut anchors = build_label_anchors(visible_series, graph_area, x_bounds, y_bounds);
     anchors.sort_by_key(|anchor| anchor.y);
-
-    for label in layout_end_labels(
+    let anchor_signature = hash_anchors(&anchors);
+    let labels = get_or_compute_label_layout(
         &anchors,
         graph_area,
         label_area_right,
         occupied_cells,
         blocked_cells,
-    ) {
+        layout_data_version,
+        layout_viewport_version,
+        anchor_signature,
+    );
+
+    for label in labels {
         draw_label_connector(frame, &label, graph_area, label_area_right);
         let label_width = label
             .text
@@ -409,6 +440,97 @@ fn render_end_labels(
             );
         }
     }
+}
+
+fn build_label_anchors(
+    visible_series: &[&super::ChartSeries<'_>],
+    graph_area: Rect,
+    x_bounds: [f64; 2],
+    y_bounds: [f64; 2],
+) -> Vec<LabelAnchor> {
+    visible_series
+        .iter()
+        .filter_map(|series| {
+            let point = series
+                .points
+                .iter()
+                .rev()
+                .find(|point| point.x >= x_bounds[0] && point.x <= x_bounds[1])?;
+            Some(LabelAnchor {
+                text: chart_labels::full_label_lines(series),
+                fallback_texts: chart_labels::compact_label_variants(series),
+                color: SERIES_COLORS[series.style.color_slot % SERIES_COLORS.len()],
+                x: project_x(point.x, graph_area, x_bounds),
+                y: project_y(point.y, graph_area, y_bounds),
+            })
+        })
+        .collect::<Vec<_>>()
+}
+
+fn hash_anchors(anchors: &[LabelAnchor]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    for anchor in anchors {
+        anchor.x.hash(&mut hasher);
+        anchor.y.hash(&mut hasher);
+        anchor.text.hash(&mut hasher);
+        anchor.fallback_texts.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+fn get_or_compute_label_layout(
+    anchors: &[LabelAnchor],
+    graph_area: Rect,
+    label_area_right: u16,
+    occupied_cells: &HashSet<(u16, u16)>,
+    blocked_cells: &HashSet<(u16, u16)>,
+    layout_data_version: u64,
+    layout_viewport_version: u64,
+    anchor_signature: u64,
+) -> Vec<PlacedLabel> {
+    let cached = LABEL_LAYOUT_CACHE.with(|cache| {
+        let cache_ref = cache.borrow();
+        cache_ref.as_ref().and_then(|entry| {
+            if entry.layout_data_version == layout_data_version
+                && entry.layout_viewport_version == layout_viewport_version
+                && entry.graph_area == graph_area
+                && entry.label_area_right == label_area_right
+                && entry.anchor_signature == anchor_signature
+            {
+                Some(entry.labels.clone())
+            } else {
+                None
+            }
+        })
+    });
+
+    if let Some(labels) = cached {
+        return labels;
+    }
+
+    #[cfg(test)]
+    LAYOUT_RECOMPUTE_COUNT.with(|count| {
+        *count.borrow_mut() += 1;
+    });
+
+    let labels = layout_end_labels(
+        anchors,
+        graph_area,
+        label_area_right,
+        occupied_cells,
+        blocked_cells,
+    );
+    LABEL_LAYOUT_CACHE.with(|cache| {
+        *cache.borrow_mut() = Some(CachedLabelLayout {
+            layout_data_version,
+            layout_viewport_version,
+            graph_area,
+            label_area_right,
+            anchor_signature,
+            labels: labels.clone(),
+        });
+    });
+    labels
 }
 
 fn render_zero_state_labels(
@@ -1276,6 +1398,7 @@ mod tests {
     }
 
     fn render_lines(state: &MockState, width: u16, height: u16) -> Vec<String> {
+        clear_label_layout_cache_for_tests();
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
         let frame = terminal
@@ -1419,6 +1542,46 @@ mod tests {
                 layout_viewport_version: 0,
             },
         }
+    }
+
+    #[test]
+    fn render_chart_reuses_cached_layout_without_relayout_trigger() {
+        clear_label_layout_cache_for_tests();
+        reset_layout_recompute_count();
+
+        let state = neighboring_priority_state();
+        let backend = TestBackend::new(96, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| render_chart(frame, &RenderContext::new(&state, frame.area())))
+            .unwrap();
+        assert_eq!(
+            layout_recompute_count(),
+            1,
+            "first draw should compute label layout once"
+        );
+
+        terminal
+            .draw(|frame| render_chart(frame, &RenderContext::new(&state, frame.area())))
+            .unwrap();
+        assert_eq!(
+            layout_recompute_count(),
+            1,
+            "second draw with unchanged versions should reuse cached layout"
+        );
+
+        let mut changed_state = state.clone();
+        changed_state.chart.layout_viewport_version =
+            changed_state.chart.layout_viewport_version.wrapping_add(1);
+        terminal
+            .draw(|frame| render_chart(frame, &RenderContext::new(&changed_state, frame.area())))
+            .unwrap();
+        assert_eq!(
+            layout_recompute_count(),
+            2,
+            "viewport-version trigger should force one additional recompute"
+        );
     }
 
     #[test]
@@ -1862,6 +2025,8 @@ mod tests {
                     [0.0, 110.0],
                     &HashSet::new(),
                     &HashSet::new(),
+                    0,
+                    0,
                 );
             })
             .unwrap();
@@ -1927,6 +2092,8 @@ mod tests {
                     [0.0, 110.0],
                     &HashSet::new(),
                     &HashSet::new(),
+                    0,
+                    0,
                 );
             })
             .unwrap();
