@@ -296,6 +296,23 @@ fn collect_occupied_plot_cells(frame: &mut Frame, graph_area: Rect) -> HashSet<(
     occupied
 }
 
+/// Returns the width (in terminal columns) to reserve on the right of the chart area
+/// for end labels, so labels never need to fall back to a compact form.
+fn right_label_zone_width(visible_series: &[&super::ChartSeries<'_>]) -> u16 {
+    let max_label = visible_series
+        .iter()
+        .map(|series| {
+            chart_labels::full_label_lines(series)
+                .into_iter()
+                .map(|line| line.chars().count())
+                .max()
+                .unwrap_or(0)
+        })
+        .max()
+        .unwrap_or(0);
+    (max_label as u16).saturating_add(2) // +2 padding
+}
+
 fn render_end_labels(
     frame: &mut Frame,
     graph_area: Rect,
@@ -3150,6 +3167,38 @@ mod tests {
             labels[0].text.iter().any(|s| s.contains("Hit limit")) && labels[0].text.iter().any(|s| s.contains("resets in 3h")),
             "expected forecast suffix in placed label, got: {:?}", labels[0].text
         );
+    }
+
+    #[test]
+    fn right_label_zone_width_returns_max_first_line_width() {
+        let s1 = ChartSeries {
+            profile: RenderProfile { id: "id", label: "CC", is_current: true, agent_type: "claude", window_label: "7d" },
+            points: vec![ChartPoint { x: 6.0, y: 0.14 }],
+            last_seven_day_percent: Some(14.0),
+            five_hour_used_percent: Some(100.0),
+            reset_line_display: None,
+            forecast_label: None,
+            is_zero_state: false,
+            style: ChartSeriesStyle { color_slot: 0, is_current: true, is_selected: false, hidden: false },
+            five_hour_subframe: FiveHourSubframeState { available: false, start_x: None, end_x: None, lower_y: None, upper_y: None, reason: None },
+        };
+        let s2 = ChartSeries {
+            profile: RenderProfile { id: "id2", label: "teamt5-it", is_current: true, agent_type: "copilot", window_label: "7d" },
+            points: vec![ChartPoint { x: 6.0, y: 0.14 }],
+            last_seven_day_percent: Some(14.0),
+            five_hour_used_percent: None,
+            reset_line_display: None,
+            forecast_label: None,
+            is_zero_state: false,
+            style: ChartSeriesStyle { color_slot: 1, is_current: false, is_selected: false, hidden: false },
+            five_hour_subframe: FiveHourSubframeState { available: false, start_x: None, end_x: None, lower_y: None, upper_y: None, reason: None },
+        };
+        let refs: Vec<&ChartSeries<'_>> = vec![&s1, &s2];
+        // "[claude 7d] CC 14%/100%" = 24 chars
+        // "[copilot 7d] teamt5-it 14%" = 26 chars
+        // max = 26, +2 padding = 28
+        let width = right_label_zone_width(&refs);
+        assert_eq!(width, 28);
     }
 
 
