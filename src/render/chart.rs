@@ -698,14 +698,14 @@ fn layout_end_labels(
                     let y = y as u16;
                     for offset in [PREFERRED_LABEL_OFFSET, FALLBACK_LABEL_OFFSET] {
                         let right_x = anchor.x.saturating_add(offset);
-                        if right_x + width <= graph_area.right() {
+                        if right_x + width <= label_area_right {
                             candidates.push((right_x, y));
                         }
                         let left_x = anchor
                             .x
                             .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
                             .max(graph_area.left());
-                        if left_x >= graph_area.left() && left_x + width <= graph_area.right() {
+                        if left_x >= graph_area.left() && left_x + width <= label_area_right {
                             candidates.push((left_x, y));
                         }
                     }
@@ -814,14 +814,14 @@ fn layout_end_labels(
                                     .x
                                     .saturating_add(offset)
                                     .min(graph_area.right().saturating_sub(width));
-                                if right_x + width <= graph_area.right() {
+                                if right_x + width <= label_area_right {
                                     candidates.push((right_x, y));
                                 }
                                 let left_x = anchor
                                     .x
                                     .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
                                     .max(graph_area.left());
-                                if left_x + width <= graph_area.right() {
+                                if left_x + width <= label_area_right {
                                     candidates.push((left_x, y));
                                 }
                             }
@@ -3214,6 +3214,31 @@ mod tests {
         // max = 26, +2 padding = 28
         let width = right_label_zone_width(&refs);
         assert_eq!(width, 28);
+    }
+
+    #[test]
+    fn layout_end_labels_places_full_label_in_right_zone_when_chart_area_is_tight() {
+        // Anchor is at the right edge of graph_area — no room for full label within graph_area.
+        // With label_area_right > graph_area.right(), the full label fits in the zone.
+        let graph_area = Rect::new(0, 0, 40, 20);
+        let label_area_right = graph_area.right() + 30; // 30-col right zone
+        let anchor = LabelAnchor {
+            text: vec!["[claude 7d] acct 16%/100%".to_string()], // 25 chars
+            fallback_texts: vec![vec!["acct 16%".to_string()], vec!["acct".to_string()]],
+            color: Color::Cyan,
+            x: graph_area.right() - 1, // endpoint at right edge
+            y: 10,
+        };
+        let occupied: HashSet<(u16, u16)> = HashSet::new();
+        let blocked: HashSet<(u16, u16)> = HashSet::new();
+
+        let placed = layout_end_labels(&[anchor], graph_area, label_area_right, &occupied, &blocked);
+
+        assert_eq!(placed.len(), 1);
+        // Full label must be used (not compact fallback)
+        assert_eq!(placed[0].text, vec!["[claude 7d] acct 16%/100%"]);
+        // Label must be placed in the right zone
+        assert!(placed[0].x >= graph_area.right(), "label x={} should be >= graph_area.right()={}", placed[0].x, graph_area.right());
     }
 
 
