@@ -1,4 +1,5 @@
-use std::collections::HashSet;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::prelude::{Color, Frame, Style};
@@ -626,10 +627,90 @@ struct PlacedLabel {
     anchor_x: u16,
     anchor_y: u16,
     attach_x: u16,
+    connector_path: Vec<(u16, u16)>,
 }
 
 const PREFERRED_LABEL_OFFSET: u16 = 3;
 const FALLBACK_LABEL_OFFSET: u16 = 1;
+const LABEL_SEARCH_X_LIMIT: u16 = 64;
+const ROUTE_X_PADDING: u16 = 8;
+const ROUTE_Y_PADDING: u16 = 6;
+const MAX_CANDIDATES_PER_VARIANT: usize = 128;
+
+fn candidate_positions_for_label(
+    anchor: &LabelAnchor,
+    width: u16,
+    height: u16,
+    graph_area: Rect,
+    label_area_right: u16,
+    offset_priority: &[u16],
+    max_candidates: usize,
+) -> Vec<(u16, u16)> {
+    if width == 0 || height == 0 || graph_area.width == 0 || graph_area.height == 0 {
+        return Vec::new();
+    }
+
+    let mut out = Vec::new();
+
+    for step in 0..graph_area.height {
+        let step = step as i16;
+        let offsets = if step == 0 { vec![0] } else { vec![-step, step] };
+        for dy in offsets {
+            let y = anchor.y as i16 + dy;
+            if y < graph_area.top() as i16
+                || (y as u16).saturating_add(height).saturating_sub(1) >= graph_area.bottom()
+            {
+                continue;
+            }
+            let y = y as u16;
+            let mut row_candidates = Vec::new();
+            let mut seen = HashSet::new();
+
+            for &offset in offset_priority {
+                let right_x = anchor.x.saturating_add(offset);
+                if right_x + width <= label_area_right && seen.insert(right_x) {
+                    row_candidates.push((right_x, y));
+                }
+                let left_x = anchor
+                    .x
+                    .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
+                    .max(graph_area.left());
+                if left_x + width <= anchor.x && seen.insert(left_x) {
+                    row_candidates.push((left_x, y));
+                }
+            }
+
+            let mut offset = 1u16;
+            while offset <= LABEL_SEARCH_X_LIMIT {
+                let right_x = anchor.x.saturating_add(offset);
+                if right_x + width <= label_area_right && seen.insert(right_x) {
+                    row_candidates.push((right_x, y));
+                }
+
+                if width <= anchor.x {
+                    let left_x = anchor
+                        .x
+                        .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
+                        .max(graph_area.left());
+                    if left_x + width <= anchor.x && seen.insert(left_x) {
+                        row_candidates.push((left_x, y));
+                    }
+                }
+
+                offset = offset.saturating_add(2);
+            }
+
+            for candidate in row_candidates {
+                out.push(candidate);
+                if out.len() >= max_candidates {
+                    return out;
+                }
+            }
+        }
+    }
+
+    out
+}
 
 fn expand_label_exclusion_cells(
     blocked_cells: &HashSet<(u16, u16)>,
@@ -669,7 +750,19 @@ fn layout_end_labels(
 
     for (anchor_idx, anchor) in anchors.iter().enumerate() {
         let text_variants = std::iter::once(&anchor.text).chain(anchor.fallback_texts.iter());
-        let mut best: Option<(u32, u8, u16, u16, u16, u16, u16, u16, u16, &Vec<String>)> = None;
+        let mut best: Option<(
+            u32,
+            u8,
+            u16,
+            u16,
+            u16,
+            u16,
+            u16,
+            u16,
+            u16,
+            &Vec<String>,
+            Vec<(u16, u16)>,
+        )> = None;
 
         for (variant_idx, text) in text_variants.enumerate() {
             let width = text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
@@ -678,34 +771,19 @@ fn layout_end_labels(
                 continue;
             }
 
-            let mut candidates = Vec::new();
-            for step in 0..graph_area.height {
-                let step = step as i16;
-                let offsets = if step == 0 { vec![0] } else { vec![-step, step] };
-                for dy in offsets {
-                    let y = anchor.y as i16 + dy;
-                    if y < graph_area.top() as i16 || (y as u16).saturating_add(height).saturating_sub(1) >= graph_area.bottom() {
-                        continue;
-                    }
-                    let y = y as u16;
-                    for offset in [PREFERRED_LABEL_OFFSET, FALLBACK_LABEL_OFFSET] {
-                        let right_x = anchor.x.saturating_add(offset);
-                        if right_x + width <= label_area_right {
-                            candidates.push((right_x, y));
-                        }
-                        let left_x = anchor
-                            .x
-                            .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
-                            .max(graph_area.left());
-                        if left_x + width <= anchor.x {
-                            candidates.push((left_x, y));
-                        }
-                    }
-                }
-            }
+            let candidates = candidate_positions_for_label(
+                anchor,
+                width,
+                height,
+                graph_area,
+                label_area_right,
+                &[PREFERRED_LABEL_OFFSET, FALLBACK_LABEL_OFFSET],
+                MAX_CANDIDATES_PER_VARIANT,
+            );
 
             for (x, y) in candidates {
                 let attach_x = connector_attach_x(x, width, anchor.x);
+                let path_goal_y = connector_goal_y(anchor.y, y, height);
                 // Primary placement keeps labels off occupied plot cells.
                 // Re-placement fallback below can overlap occupied cells with scoring.
                 let label_cells_ok = (0..height).all(|line_i| {
@@ -719,12 +797,23 @@ fn layout_end_labels(
                 if !label_cells_ok {
                     continue;
                 }
-                let connector = connector_cells(attach_x, y, anchor.x, anchor.y, graph_area);
+                let label_rect = (x, y, width, height);
+                let connector = match route_connector_path(
+                    (anchor.x, anchor.y),
+                    (attach_x, path_goal_y),
+                    graph_area,
+                    label_area_right,
+                    &reserved,
+                    label_rect,
+                ) {
+                    Some(path) => path,
+                    None => continue,
+                };
                 if !connector.iter().all(|cell| !reserved.contains(cell)) {
                     continue;
                 }
                 let conn_total = connector.len() as u16;
-                let conn_cost: u32 = connector.iter().map(|&(_, cy)| if cy == anchor.y { 1u32 } else { 4u32 }).sum();
+                let conn_cost = connector_cost((anchor.x, anchor.y), &connector);
                 let score = variant_idx as u32 * 20 + conn_cost;
                 let dir_rank = if attach_x > anchor.x { 0u8 }
                                else if attach_x < anchor.x { 1u8 }
@@ -732,7 +821,7 @@ fn layout_end_labels(
                                else { 3u8 };
                 let dy = y.abs_diff(anchor.y);
                 let dx = attach_x.abs_diff(anchor.x);
-                let candidate = (score, dir_rank, 0u16, conn_total, dy, dx, x, y, attach_x, text);
+                let candidate = (score, dir_rank, 0u16, conn_total, dy, dx, x, y, attach_x, text, connector);
                 if best.as_ref().is_none_or(|(bs, bd, bo, bct, bdy, bdx, ..)| {
                     (score, dir_rank, 0u16, conn_total, dy, dx) < (*bs, *bd, *bo, *bct, *bdy, *bdx)
                 }) {
@@ -741,11 +830,10 @@ fn layout_end_labels(
             }
         }
 
-        if let Some((_, _, _, _, _, _, x, y, attach_x, text)) = best {
+        if let Some((_, _, _, _, _, _, x, y, attach_x, text, connector)) = best {
             let width = text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
             let height = text.len() as u16;
-            let connector = connector_cells(attach_x, y, anchor.x, anchor.y, graph_area);
-            for cell in connector {
+            for &cell in &connector {
                 reserved.insert(cell);
             }
             for line_i in 0..height {
@@ -761,6 +849,7 @@ fn layout_end_labels(
                 anchor_x: anchor.x,
                 anchor_y: anchor.y,
                 attach_x,
+                connector_path: connector,
             });
             placed_anchor_indices.insert(anchor_idx);
         }
@@ -773,7 +862,19 @@ fn layout_end_labels(
 
         // Force placement: two-phase. Phase 1 avoids blocked cells when possible.
         // Phase 2 ignores blocked cells if phase 1 found no placement (last-resort).
-        let mut best: Option<(u32, u8, u16, u16, u16, u16, u16, u16, u16, &Vec<String>)> = None;
+        let mut best: Option<(
+            u32,
+            u8,
+            u16,
+            u16,
+            u16,
+            u16,
+            u16,
+            u16,
+            u16,
+            &Vec<String>,
+            Vec<(u16, u16)>,
+        )> = None;
 
         for avoid_blocked in [true, false] {
             if avoid_blocked || best.is_none() {
@@ -785,34 +886,15 @@ fn layout_end_labels(
                         continue;
                     }
 
-                    let mut candidates = Vec::new();
-                    for step in 0..graph_area.height {
-                        let step = step as i16;
-                        let offsets = if step == 0 { vec![0] } else { vec![-step, step] };
-                        for dy in offsets {
-                            let y = anchor.y as i16 + dy;
-                            if y < graph_area.top() as i16 || (y as u16).saturating_add(height).saturating_sub(1) >= graph_area.bottom() {
-                                continue;
-                            }
-                            let y = y as u16;
-                            for offset in [FALLBACK_LABEL_OFFSET, PREFERRED_LABEL_OFFSET] {
-                                let right_x = anchor
-                                    .x
-                                    .saturating_add(offset)
-                                    .min(graph_area.right().saturating_sub(width));
-                                if right_x + width <= label_area_right {
-                                    candidates.push((right_x, y));
-                                }
-                                let left_x = anchor
-                                    .x
-                                    .saturating_sub(width.saturating_add(offset.saturating_sub(1)))
-                                    .max(graph_area.left());
-                                if left_x + width <= anchor.x {
-                                    candidates.push((left_x, y));
-                                }
-                            }
-                        }
-                    }
+                    let candidates = candidate_positions_for_label(
+                        anchor,
+                        width,
+                        height,
+                        graph_area,
+                        label_area_right,
+                        &[FALLBACK_LABEL_OFFSET, PREFERRED_LABEL_OFFSET],
+                        MAX_CANDIDATES_PER_VARIANT,
+                    );
 
                     for (x, y) in candidates {
                         if !(0..height).all(|line_i| {
@@ -826,9 +908,21 @@ fn layout_end_labels(
                             continue;
                         }
                         let attach_x = connector_attach_x(x, width, anchor.x);
-                        let connector = connector_cells(attach_x, y, anchor.x, anchor.y, graph_area);
+                        let path_goal_y = connector_goal_y(anchor.y, y, height);
+                        let label_rect = (x, y, width, height);
+                        let connector = match route_connector_path(
+                            (anchor.x, anchor.y),
+                            (attach_x, path_goal_y),
+                            graph_area,
+                            label_area_right,
+                            &reserved,
+                            label_rect,
+                        ) {
+                            Some(path) => path,
+                            None => continue,
+                        };
                         let conn_total = connector.len() as u16;
-                        let conn_cost: u32 = connector.iter().map(|&(_, cy)| if cy == anchor.y { 1u32 } else { 4u32 }).sum();
+                        let conn_cost = connector_cost((anchor.x, anchor.y), &connector);
                         let overlap = count_label_overlap(x, y, width, height, occupied_cells);
                         let score = variant_idx as u32 * 20 + overlap as u32 + conn_cost;
                         let dir_rank = if attach_x > anchor.x { 0u8 }
@@ -837,7 +931,7 @@ fn layout_end_labels(
                                        else { 3u8 };
                         let dy = y.abs_diff(anchor.y);
                         let dx = attach_x.abs_diff(anchor.x);
-                        let candidate = (score, dir_rank, overlap, conn_total, dy, dx, x, y, attach_x, text);
+                        let candidate = (score, dir_rank, overlap, conn_total, dy, dx, x, y, attach_x, text, connector);
                         if best.as_ref().is_none_or(|(bs, bd, bo, bct, bdy, bdx, ..)| {
                             (score, dir_rank, overlap, conn_total, dy, dx) < (*bs, *bd, *bo, *bct, *bdy, *bdx)
                         }) {
@@ -848,9 +942,12 @@ fn layout_end_labels(
             }
         }
 
-        if let Some((_, _, _, _, _, _, x, y, attach_x, text)) = best {
+        if let Some((_, _, _, _, _, _, x, y, attach_x, text, connector)) = best {
             let width = text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
             let height = text.len() as u16;
+            for &cell in &connector {
+                reserved.insert(cell);
+            }
             for line_i in 0..height {
                 for dx in 0..width {
                     reserved.insert((x + dx, y + line_i));
@@ -865,6 +962,7 @@ fn layout_end_labels(
                 anchor_x: anchor.x,
                 anchor_y: anchor.y,
                 attach_x,
+                connector_path: connector,
             });
             placed_anchor_indices.insert(anchor_idx);
         }
@@ -892,6 +990,114 @@ fn count_label_overlap(
 }
 
 
+fn connector_goal_y(anchor_y: u16, label_y: u16, label_height: u16) -> u16 {
+    if label_y > anchor_y {
+        label_y.saturating_sub(1)
+    } else if label_y < anchor_y {
+        label_y.saturating_add(label_height)
+    } else {
+        anchor_y
+    }
+}
+
+fn route_connector_path(
+    start: (u16, u16),
+    goal: (u16, u16),
+    graph_area: Rect,
+    label_area_right: u16,
+    reserved: &HashSet<(u16, u16)>,
+    label_rect: (u16, u16, u16, u16),
+) -> Option<Vec<(u16, u16)>> {
+    let min_x = graph_area
+        .left()
+        .max(start.0.min(goal.0).saturating_sub(ROUTE_X_PADDING));
+    let max_x = label_area_right
+        .saturating_sub(1)
+        .min(start.0.max(goal.0).saturating_add(ROUTE_X_PADDING));
+    let min_y = graph_area
+        .top()
+        .max(start.1.min(goal.1).saturating_sub(ROUTE_Y_PADDING));
+    let max_y = graph_area
+        .bottom()
+        .saturating_sub(1)
+        .min(start.1.max(goal.1).saturating_add(ROUTE_Y_PADDING));
+    if start.0 < min_x || start.0 > max_x || goal.0 < min_x || goal.0 > max_x {
+        return None;
+    }
+    if start.1 < min_y || start.1 > max_y || goal.1 < min_y || goal.1 > max_y {
+        return None;
+    }
+
+    let (lx, ly, lw, lh) = label_rect;
+    let in_label_rect = |x: u16, y: u16| -> bool {
+        x >= lx && x < lx.saturating_add(lw) && y >= ly && y < ly.saturating_add(lh)
+    };
+    let is_blocked = |x: u16, y: u16| -> bool {
+        if (x, y) == start || (x, y) == goal {
+            return false;
+        }
+        reserved.contains(&(x, y)) || in_label_rect(x, y)
+    };
+
+    let heuristic = |x: u16, y: u16| -> u32 { x.abs_diff(goal.0) as u32 + y.abs_diff(goal.1) as u32 };
+    let mut heap: BinaryHeap<(Reverse<u32>, u32, u16, u16)> = BinaryHeap::new();
+    let mut best_cost: HashMap<(u16, u16), u32> = HashMap::new();
+    let mut prev: HashMap<(u16, u16), (u16, u16)> = HashMap::new();
+    best_cost.insert(start, 0);
+    heap.push((Reverse(heuristic(start.0, start.1)), 0, start.0, start.1));
+
+    while let Some((_, cost, x, y)) = heap.pop() {
+        if (x, y) == goal {
+            let mut path = Vec::new();
+            let mut cursor = goal;
+            while cursor != start {
+                path.push(cursor);
+                cursor = *prev.get(&cursor)?;
+            }
+            path.reverse();
+            return Some(path);
+        }
+
+        if cost > *best_cost.get(&(x, y)).unwrap_or(&u32::MAX) {
+            continue;
+        }
+
+        for (nx, ny) in [
+            (x.saturating_sub(1), y),
+            (x.saturating_add(1), y),
+            (x, y.saturating_sub(1)),
+            (x, y.saturating_add(1)),
+        ] {
+            if nx < min_x || nx > max_x || ny < min_y || ny > max_y || is_blocked(nx, ny) {
+                continue;
+            }
+            let step_cost = if ny == y { 1 } else { 4 };
+            let next_cost = cost.saturating_add(step_cost);
+            if next_cost < *best_cost.get(&(nx, ny)).unwrap_or(&u32::MAX) {
+                best_cost.insert((nx, ny), next_cost);
+                prev.insert((nx, ny), (x, y));
+                heap.push((Reverse(next_cost.saturating_add(heuristic(nx, ny))), next_cost, nx, ny));
+            }
+        }
+    }
+    None
+}
+
+fn connector_cost(start: (u16, u16), path: &[(u16, u16)]) -> u32 {
+    let mut cost = 0u32;
+    let mut prev = start;
+    for &(x, y) in path {
+        if x != prev.0 {
+            cost = cost.saturating_add(1);
+        } else if y != prev.1 {
+            cost = cost.saturating_add(4);
+        }
+        prev = (x, y);
+    }
+    cost
+}
+
+#[cfg(test)]
 fn connector_cells(
     attach_x: u16,
     label_y: u16,
@@ -899,64 +1105,53 @@ fn connector_cells(
     anchor_y: u16,
     graph_area: Rect,
 ) -> Vec<(u16, u16)> {
-    let mut cells = Vec::new();
-    for x in anchor_x.min(attach_x)..=anchor_x.max(attach_x) {
-        if x == anchor_x || x < graph_area.left() || x >= graph_area.right() {
-            continue;
-        }
-        cells.push((x, anchor_y));
-    }
-    for y in anchor_y.min(label_y)..=anchor_y.max(label_y) {
-        if y == anchor_y || y == label_y || y < graph_area.top() || y >= graph_area.bottom() {
-            continue;
-        }
-        cells.push((attach_x, y));
-    }
-    cells
+    let target_y = connector_goal_y(anchor_y, label_y, 1);
+    route_connector_path(
+        (anchor_x, anchor_y),
+        (attach_x, target_y),
+        graph_area,
+        graph_area.right(),
+        &HashSet::new(),
+        (u16::MAX, u16::MAX, 0, 0),
+    )
+    .unwrap_or_default()
 }
 
 fn draw_label_connector(frame: &mut Frame, label: &PlacedLabel, graph_area: Rect, label_area_right: u16) {
     let style = Style::default().fg(label.color).add_modifier(Modifier::DIM);
-    let has_horizontal = label.attach_x != label.anchor_x;
-    let has_vertical = label.y != label.anchor_y;
-
-    for x in label.anchor_x.min(label.attach_x)..=label.anchor_x.max(label.attach_x) {
-        if x == label.anchor_x || x < graph_area.left() || x >= label_area_right {
+    for (idx, &(x, y)) in label.connector_path.iter().enumerate() {
+        if x < graph_area.left() || x >= label_area_right || y < graph_area.top() || y >= graph_area.bottom() {
             continue;
         }
-        if has_vertical && x == label.attach_x {
-            continue; // corner drawn separately
-        }
-        let cell = &mut frame.buffer_mut()[(x, label.anchor_y)];
-        if cell.symbol() == " " {
-            cell.set_symbol("─").set_style(style);
-        }
-    }
-    for y in label.anchor_y.min(label.y)..=label.anchor_y.max(label.y) {
-        if y == label.anchor_y || y < graph_area.top() || y >= graph_area.bottom() {
-            continue;
-        }
-        let cell = &mut frame.buffer_mut()[(label.attach_x, y)];
-        if cell.symbol() == " " {
-            cell.set_symbol("│").set_style(style);
-        }
-    }
-    if has_horizontal && has_vertical {
-        let corner = match (label.attach_x > label.anchor_x, label.y > label.anchor_y) {
-            (true,  true)  => "╮",
-            (true,  false) => "╯",
-            (false, true)  => "╭",
-            (false, false) => "╰",
+        let prev = if idx == 0 {
+            (label.anchor_x, label.anchor_y)
+        } else {
+            label.connector_path[idx - 1]
         };
-        if label.attach_x < label_area_right
-            && label.attach_x >= graph_area.left()
-            && label.anchor_y >= graph_area.top()
-            && label.anchor_y < graph_area.bottom()
-        {
-            let cell = &mut frame.buffer_mut()[(label.attach_x, label.anchor_y)];
-            if cell.symbol() == " " {
-                cell.set_symbol(corner).set_style(style);
-            }
+        let next = label.connector_path.get(idx + 1).copied();
+        let has_left = prev.0 < x || next.is_some_and(|(nx, ny)| ny == y && nx < x);
+        let has_right = prev.0 > x || next.is_some_and(|(nx, ny)| ny == y && nx > x);
+        let has_up = prev.1 > y || next.is_some_and(|(nx, ny)| nx == x && ny < y);
+        let has_down = prev.1 < y || next.is_some_and(|(nx, ny)| nx == x && ny > y);
+        let symbol = match (has_left, has_right, has_up, has_down) {
+            (true, true, false, false) => "─",
+            (false, false, true, true) => "│",
+            (false, true, true, false) => "╰",
+            (true, false, true, false) => "╯",
+            (false, true, false, true) => "╭",
+            (true, false, false, true) => "╮",
+            (true, true, true, true) => "┼",
+            (true, true, true, false) => "┴",
+            (true, true, false, true) => "┬",
+            (true, false, true, true) => "┤",
+            (false, true, true, true) => "├",
+            (true, false, false, false) | (false, true, false, false) => "─",
+            (false, false, true, false) | (false, false, false, true) => "│",
+            _ => "·",
+        };
+        let cell = &mut frame.buffer_mut()[(x, y)];
+        if cell.symbol() == " " {
+            cell.set_symbol(symbol).set_style(style);
         }
     }
 }
@@ -1191,7 +1386,7 @@ mod tests {
         let cases = [
             (HashSet::from([(0, 3)]), "FULLFULL"),
             (HashSet::from([(0, 3), (9, 3), (11, 3)]), "MID"),
-            (HashSet::from([(0, 3), (5, 3), (9, 3), (11, 3)]), "M"),
+            (HashSet::from([(0, 3), (5, 3), (9, 3), (11, 3)]), "MID"),
         ];
 
         for (occupied, expected) in cases {
@@ -3180,7 +3375,7 @@ mod tests {
         let cases = [
             (HashSet::from([(0u16, 3u16), (9u16, 3u16)]), "FULLFULL"),
             (HashSet::from([(0u16, 3u16), (9u16, 3u16), (11u16, 3u16)]), "MID"),
-            (HashSet::from([(0u16, 3u16), (5u16, 3u16), (9u16, 3u16), (11u16, 3u16)]), "M"),
+            (HashSet::from([(0u16, 3u16), (5u16, 3u16), (9u16, 3u16), (11u16, 3u16)]), "MID"),
         ];
 
         for (blocked, expected) in cases {
