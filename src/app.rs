@@ -1678,7 +1678,6 @@ impl render::RenderState for AppRenderState<'_> {
             .collect::<Vec<_>>();
 
         let layout = ChartLayoutInputs {
-            selected_profile_index: effective_selected,
             y_lower,
             y_upper,
             x_lower,
@@ -2064,7 +2063,6 @@ fn build_reset_line_display(
 
 #[derive(Debug, Clone, Copy)]
 struct ChartLayoutInputs<'a, 'b> {
-    selected_profile_index: usize,
     y_lower: f64,
     y_upper: f64,
     x_lower: f64,
@@ -2079,7 +2077,6 @@ struct ChartLayoutInputs<'a, 'b> {
 #[cfg(test)]
 fn default_chart_layout_inputs() -> ChartLayoutInputs<'static, 'static> {
     ChartLayoutInputs {
-        selected_profile_index: 0,
         y_lower: 0.0,
         y_upper: 100.0,
         x_lower: 0.0,
@@ -2097,10 +2094,6 @@ fn build_chart_state<'a>(
     selected_profile_index: usize,
     layout: ChartLayoutInputs<'a, '_>,
 ) -> ChartState<'a> {
-    let layout = ChartLayoutInputs {
-        selected_profile_index,
-        ..layout
-    };
     let selected_profile = profiles.get(selected_profile_index);
     let selected_label = selected_profile
         .map(|profile| profile.profile_name.as_str())
@@ -2238,10 +2231,8 @@ fn chart_layout_viewport_version(layout: ChartLayoutInputs<'_, '_>) -> u64 {
     hash_f64(&mut hasher, layout.y_upper);
     hash_f64(&mut hasher, layout.x_lower);
     hash_f64(&mut hasher, layout.x_upper);
-    layout.selected_profile_index.hash(&mut hasher);
     layout.solo.hash(&mut hasher);
     layout.tab_zoom_label.hash(&mut hasher);
-    layout.focused.hash(&mut hasher);
     layout.fullscreen.hash(&mut hasher);
     layout.hidden_series.len().hash(&mut hasher);
     for hidden in layout.hidden_series {
@@ -3079,7 +3070,7 @@ mod chart_reset_line_tests {
     }
 
     #[test]
-    fn layout_data_version_ignores_selection_changes() {
+    fn layout_viewport_version_ignores_selection_changes() {
         let profiles = vec![
             make_profile_with_chart(Some(76.0), Some(40.0), Some(3_600), Some(7_200)),
             make_profile_with_chart(Some(55.0), Some(20.0), Some(3_600), Some(7_200)),
@@ -3091,9 +3082,46 @@ mod chart_reset_line_tests {
             baseline_state.layout_data_version,
             selected_state.layout_data_version
         );
-        assert_ne!(
+        assert_eq!(
             baseline_state.layout_viewport_version,
             selected_state.layout_viewport_version
+        );
+    }
+
+    #[test]
+    fn layout_viewport_version_ignores_focus_changes() {
+        let profiles = vec![make_profile_with_chart(
+            Some(76.0),
+            Some(40.0),
+            Some(3_600),
+            Some(7_200),
+        )];
+        let focused_layout = ChartLayoutInputs {
+            y_lower: 0.0,
+            y_upper: 100.0,
+            x_lower: 0.0,
+            x_upper: 7.0,
+            solo: false,
+            tab_zoom_label: None,
+            focused: true,
+            fullscreen: false,
+            hidden_series: &[],
+        };
+        let unfocused_layout = ChartLayoutInputs {
+            focused: false,
+            ..focused_layout
+        };
+
+        let focused_state = build_chart_state(&profiles, 0, focused_layout);
+        let unfocused_state = build_chart_state(&profiles, 0, unfocused_layout);
+
+        assert_eq!(
+            focused_state.layout_data_version,
+            unfocused_state.layout_data_version
+        );
+        assert_eq!(
+            focused_state.layout_viewport_version,
+            unfocused_state.layout_viewport_version
         );
     }
 
@@ -3104,7 +3132,6 @@ mod chart_reset_line_tests {
             make_profile_with_chart(Some(55.0), Some(20.0), Some(3_600), Some(7_200)),
         ];
         let visible_layout = ChartLayoutInputs {
-            selected_profile_index: 0,
             y_lower: 0.0,
             y_upper: 100.0,
             x_lower: 0.0,
@@ -3116,7 +3143,6 @@ mod chart_reset_line_tests {
             hidden_series: &[false, false],
         };
         let hidden_layout = ChartLayoutInputs {
-            selected_profile_index: 0,
             hidden_series: &[false, true],
             ..visible_layout
         };
@@ -3143,7 +3169,6 @@ mod chart_reset_line_tests {
             Some(7_200),
         )];
         let baseline_layout = ChartLayoutInputs {
-            selected_profile_index: 0,
             y_lower: 0.0,
             y_upper: 100.0,
             x_lower: 0.0,
@@ -3155,7 +3180,6 @@ mod chart_reset_line_tests {
             hidden_series: &[],
         };
         let changed_layout = ChartLayoutInputs {
-            selected_profile_index: 0,
             y_lower: 20.0,
             y_upper: 80.0,
             x_lower: 2.0,
