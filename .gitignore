@@ -2,10 +2,8 @@ dist
 node_modules
 .worktrees
 .pld/
-plugins/parallel-lane-dev/state/
 .nlsdd/
 target/
 .claude/
 .github/hooks/
-docs/superpowers/plans/
 tasks/todo.md
