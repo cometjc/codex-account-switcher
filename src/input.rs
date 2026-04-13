@@ -95,11 +95,14 @@ pub fn map_event(event: &Event, context: InputContext) -> Option<InputAction> {
         KeyCode::Tab => Some(InputAction::NextFocus),
         KeyCode::BackTab => Some(InputAction::PreviousFocus),
         KeyCode::Char('z') => Some(InputAction::ResetZoom),
-        KeyCode::Char('s') => Some(InputAction::ToggleSolo),
+        KeyCode::Char('s') => Some(InputAction::ZoomOut),
+        KeyCode::Char('f') => Some(InputAction::ZoomIn),
+        KeyCode::Char('S') => Some(InputAction::ToggleSolo),
         KeyCode::Char('=') => Some(InputAction::ZoomIn),
         KeyCode::Char('-') => Some(InputAction::ZoomOut),
         KeyCode::Char('[') => Some(InputAction::YZoomOut),
         KeyCode::Char(']') => Some(InputAction::YZoomIn),
+        KeyCode::Char('e') => Some(InputAction::YZoomIn),
         KeyCode::Char('1') => Some(InputAction::XWindow(1)),
         KeyCode::Char('3') => Some(InputAction::XWindow(3)),
         KeyCode::Char('7') => Some(InputAction::XWindow(7)),
@@ -136,6 +139,26 @@ mod tests {
         assert_eq!(
             map_event(&key(KeyCode::Char('q')), InputContext::Normal),
             Some(InputAction::Quit)
+        );
+        assert_eq!(
+            map_event(&key(KeyCode::Char('s')), InputContext::Normal),
+            Some(InputAction::ZoomOut)
+        );
+        assert_eq!(
+            map_event(&key(KeyCode::Char('f')), InputContext::Normal),
+            Some(InputAction::ZoomIn)
+        );
+        assert_eq!(
+            map_event(&key(KeyCode::Char('e')), InputContext::Normal),
+            Some(InputAction::YZoomIn)
+        );
+        assert_eq!(
+            map_event(&key(KeyCode::Char('S')), InputContext::Normal),
+            Some(InputAction::ToggleSolo)
+        );
+        assert_eq!(
+            map_event(&key(KeyCode::Char('d')), InputContext::Normal),
+            Some(InputAction::Delete)
         );
     }
 

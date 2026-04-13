@@ -7,3 +7,4 @@ target/
 .claude/
 .github/hooks/
 tasks/todo.md
+/.env-store*

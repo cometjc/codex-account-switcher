@@ -600,7 +600,11 @@ impl App {
                 }
             }
             InputAction::Delete => {
-                if self.pane_focus == PaneFocus::Accounts {
+                if self.pane_focus == PaneFocus::Plot {
+                    self.y_zoom_lower = (self.y_zoom_lower - 5.0).max(0.0);
+                    self.y_zoom_upper = (self.y_zoom_upper + 5.0).min(100.0);
+                    self.y_zoom_user_adjusted = true;
+                } else if self.pane_focus == PaneFocus::Accounts {
                     self.open_delete_dialog();
                 }
             }
@@ -2215,7 +2219,90 @@ fn build_chart_state<'a>(
 
     chart_state.layout_data_version = chart_layout_data_version(&chart_state);
     chart_state.layout_viewport_version = chart_layout_viewport_version(layout);
+    maybe_log_chart_layout_state(&chart_state, layout);
     chart_state
+}
+
+fn maybe_log_chart_layout_state(chart_state: &ChartState<'_>, layout: ChartLayoutInputs<'_, '_>) {
+    if !layout_debug_enabled() {
+        return;
+    }
+
+    let series = chart_state
+        .series
+        .iter()
+        .map(|series| {
+            let last_point = series.points.last();
+            serde_json::json!({
+                "id": series.profile.id,
+                "label": series.profile.label,
+                "agent": series.profile.agent_type,
+                "window": series.profile.window_label,
+                "is_selected": series.style.is_selected,
+                "is_current": series.style.is_current,
+                "hidden": series.style.hidden,
+                "is_zero_state": series.is_zero_state,
+                "points": series.points.len(),
+                "last_point": last_point.map(|point| serde_json::json!({"x": point.x, "y": point.y})),
+                "weekly_percent": series.last_seven_day_percent,
+                "five_hour_percent": series.five_hour_used_percent,
+                "forecast_label": series.forecast_label,
+                "reset_line": series.reset_line_display.as_ref().map(|line| line.text.as_str()),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    write_layout_debug_event(
+        "chart_state",
+        serde_json::json!({
+            "layout_data_version": chart_state.layout_data_version,
+            "layout_viewport_version": chart_state.layout_viewport_version,
+            "x_bounds": [chart_state.x_lower, chart_state.x_upper],
+            "y_bounds": [chart_state.y_lower, chart_state.y_upper],
+            "fullscreen": chart_state.fullscreen,
+            "focused": chart_state.focused,
+            "solo": chart_state.solo,
+            "tab_zoom_label": chart_state.tab_zoom_label,
+            "hidden_series_len": layout.hidden_series.len(),
+            "total_points": chart_state.total_points,
+            "series": series,
+        }),
+    );
+}
+
+fn layout_debug_enabled() -> bool {
+    std::env::var("DEBUG")
+        .ok()
+        .map(|value| {
+            let normalized = value.trim().to_ascii_lowercase();
+            !normalized.is_empty()
+                && normalized != "0"
+                && normalized != "false"
+                && normalized != "off"
+                && normalized != "no"
+        })
+        .unwrap_or(false)
+}
+
+fn write_layout_debug_event(component: &str, payload: serde_json::Value) {
+    let path = std::env::var("AGENT_SWITCH_LAYOUT_DEBUG_PATH")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("agent-switch-layout-debug.jsonl"));
+    let line = serde_json::json!({
+        "ts": SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0),
+        "component": component,
+        "payload": payload,
+    });
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = std::io::Write::write_all(&mut file, line.to_string().as_bytes());
+        let _ = std::io::Write::write_all(&mut file, b"\n");
+    }
 }
 
 fn chart_layout_data_version(state: &ChartState<'_>) -> u64 {
@@ -2372,6 +2459,32 @@ mod tests {
         app.pane_focus = app.pane_focus.toggle();
         assert_eq!(app.pane_focus, PaneFocus::Accounts);
         assert_eq!(app.selected_profile_label(), Some("Beta"));
+    }
+
+    #[test]
+    fn delete_key_zooms_out_y_axis_in_plot_pane() {
+        let mut app = App::from_profile_names(vec!["Alpha".to_string(), "Beta".to_string()], 0);
+        app.pane_focus = PaneFocus::Plot;
+        app.y_zoom_lower = 20.0;
+        app.y_zoom_upper = 80.0;
+        app.y_zoom_user_adjusted = false;
+
+        app.handle_action(InputAction::Delete).unwrap();
+
+        assert_eq!(app.y_zoom_lower, 15.0);
+        assert_eq!(app.y_zoom_upper, 85.0);
+        assert!(app.y_zoom_user_adjusted);
+    }
+
+    #[test]
+    fn delete_key_opens_confirm_dialog_in_accounts_pane() {
+        let mut app = App::from_profile_names(vec!["Alpha".to_string(), "Beta".to_string()], 0);
+        app.pane_focus = PaneFocus::Accounts;
+
+        app.handle_action(InputAction::Delete).unwrap();
+
+        let dialog = app.dialog.as_ref().expect("delete should open dialog");
+        assert!(matches!(dialog.mode, DialogMode::ConfirmDelete(_)));
     }
 
     #[test]

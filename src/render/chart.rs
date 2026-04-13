@@ -2,7 +2,10 @@ use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::collections::hash_map::DefaultHasher;
+use std::fmt;
 use std::hash::{Hash, Hasher};
+use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::prelude::{Color, Frame, Style};
@@ -103,7 +106,7 @@ pub fn render_chart<State: RenderState>(frame: &mut Frame, context: &RenderConte
         None => String::new(),
     };
     let hint_line = format!(
-        "{}Window view:{} · ←→=pan · =/- zoom-x · ↑↓=pan-y · [/]=zoom-y · z=reset · 1/3/7=snap",
+        "{}Window view:{} · ←→=pan · sf=zoom-x · ↑↓=pan-y · ed=zoom-y · z=reset · 1/3/7=snap",
         view_prefix, window_label
     );
     let band_summary =
@@ -404,6 +407,28 @@ fn render_end_labels(
 ) {
     let mut anchors = build_label_anchors(visible_series, graph_area, x_bounds, y_bounds);
     anchors.sort_by_key(|anchor| anchor.y);
+    layout_debug_log(format_args!(
+        "render_end_labels start graph_area={:?} label_area_right={} visible_series={} anchors={} x_bounds={:?} y_bounds={:?} layout_data_version={} layout_viewport_version={}",
+        graph_area,
+        label_area_right,
+        visible_series.len(),
+        anchors.len(),
+        x_bounds,
+        y_bounds,
+        layout_data_version,
+        layout_viewport_version
+    ));
+    for anchor in &anchors {
+        layout_debug_log(format_args!(
+            "anchor key={} at=({}, {}) lines={} fallback_variants={} first_line={:?}",
+            anchor.key,
+            anchor.x,
+            anchor.y,
+            anchor.text.len(),
+            anchor.fallback_texts.len(),
+            anchor.text.first()
+        ));
+    }
     let anchor_signature = hash_anchors(&anchors);
     let labels = get_or_compute_label_layout(
         &anchors,
@@ -624,11 +649,27 @@ fn get_or_compute_label_layout(
                 && entry.layout_viewport_version == layout_viewport_version
                 && entry.anchor_signature == anchor_signature
             {
+                layout_debug_log(format_args!(
+                    "layout_cache hit_full labels={} graph_area={:?} data_ver={} viewport_ver={} anchor_sig={}",
+                    entry.labels.len(),
+                    graph_area,
+                    layout_data_version,
+                    layout_viewport_version,
+                    anchor_signature
+                ));
                 return entry.labels;
             }
 
             let dirty = collect_dirty_label_keys(anchors, &entry.labels, blocked_cells);
             if dirty.is_empty() {
+                layout_debug_log(format_args!(
+                    "layout_cache reuse_without_relayout labels={} graph_area={:?} data_ver={} viewport_ver={} anchor_sig={}",
+                    entry.labels.len(),
+                    graph_area,
+                    layout_data_version,
+                    layout_viewport_version,
+                    anchor_signature
+                ));
                 LABEL_LAYOUT_CACHE.with(|cache| {
                     *cache.borrow_mut() = Some(CachedLabelLayout {
                         layout_data_version,
@@ -642,6 +683,13 @@ fn get_or_compute_label_layout(
                 return entry.labels;
             }
 
+            layout_debug_log(format_args!(
+                "layout_cache partial_relayout_attempt dirty_keys={:?} cached_labels={} anchors={} graph_area={:?}",
+                dirty,
+                entry.labels.len(),
+                anchors.len(),
+                graph_area
+            ));
             if let Some(partial) = try_partial_relayout(
                 anchors,
                 &entry.labels,
@@ -655,6 +703,10 @@ fn get_or_compute_label_layout(
                 LAYOUT_RECOMPUTE_COUNT.with(|count| {
                     *count.borrow_mut() += 1;
                 });
+                layout_debug_log(format_args!(
+                    "layout_cache partial_relayout_success labels={}",
+                    partial.len()
+                ));
                 LABEL_LAYOUT_CACHE.with(|cache| {
                     *cache.borrow_mut() = Some(CachedLabelLayout {
                         layout_data_version,
@@ -667,9 +719,18 @@ fn get_or_compute_label_layout(
                 });
                 return partial;
             }
+            layout_debug_log(format_args!("layout_cache partial_relayout_failed_full_recompute"));
         }
     }
 
+    layout_debug_log(format_args!(
+        "layout_cache miss_full_recompute anchors={} graph_area={:?} data_ver={} viewport_ver={} anchor_sig={}",
+        anchors.len(),
+        graph_area,
+        layout_data_version,
+        layout_viewport_version,
+        anchor_signature
+    ));
     #[cfg(test)]
     LAYOUT_RECOMPUTE_COUNT.with(|count| {
         *count.borrow_mut() += 1;
@@ -985,6 +1046,66 @@ const TURN_PENALTY: u32 = 2; // penalise direction changes (horizontal ↔ verti
 const BLOCKED_PROXIMITY_PENALTY: u32 = 1; // penalise steps adjacent to reserved/label cells
 const DETOUR_PENALTY: u32 = 1; // penalise steps that move away from the goal
 
+#[derive(Debug, Default, Clone, Copy)]
+struct CandidateRejectStats {
+    total: u32,
+    rejected_overlap: u32,
+    rejected_blocked: u32,
+    rejected_reserved: u32,
+    rejected_route_none: u32,
+    rejected_route_reserved: u32,
+    accepted: u32,
+}
+
+fn layout_debug_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("DEBUG")
+            .ok()
+            .map(|value| {
+                let normalized = value.trim().to_ascii_lowercase();
+                !normalized.is_empty()
+                    && normalized != "0"
+                    && normalized != "false"
+                    && normalized != "off"
+                    && normalized != "no"
+            })
+            .unwrap_or(false)
+    })
+}
+
+fn layout_debug_log(args: fmt::Arguments<'_>) {
+    if !layout_debug_enabled() {
+        return;
+    }
+    let line = serde_json::json!({
+        "ts": SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0),
+        "component": "chart_layout",
+        "message": args.to_string(),
+    });
+    let path = std::env::var("AGENT_SWITCH_LAYOUT_DEBUG_PATH")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("agent-switch-layout-debug.jsonl"));
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = std::io::Write::write_all(&mut file, line.to_string().as_bytes());
+        let _ = std::io::Write::write_all(&mut file, b"\n");
+    }
+}
+
+fn variant_name(variant_idx: u16) -> String {
+    if variant_idx == 0 {
+        "full".to_string()
+    } else {
+        format!("fallback#{variant_idx}")
+    }
+}
+
 fn candidate_positions_for_label(
     anchor: &LabelAnchor,
     width: u16,
@@ -1134,9 +1255,11 @@ fn layout_end_labels_with_reserved(
     let label_exclusion_cells = expand_label_exclusion_cells(blocked_cells, graph_area);
 
     for (anchor_idx, anchor) in anchors.iter().enumerate() {
+        let mut stats = CandidateRejectStats::default();
         let text_variants = std::iter::once(&anchor.text).chain(anchor.fallback_texts.iter());
         let mut best: Option<(
             u32,
+            u16,
             u8,
             u16,
             u16,
@@ -1167,19 +1290,41 @@ fn layout_end_labels_with_reserved(
             );
 
             for (x, y) in candidates {
+                stats.total = stats.total.saturating_add(1);
                 let attach_x = connector_attach_x(x, width, anchor.x);
                 let path_goal_y = connector_goal_y(anchor.y, y, height);
                 // Primary placement keeps labels off occupied plot cells.
                 // Re-placement fallback below can overlap occupied cells with scoring.
-                let label_cells_ok = (0..height).all(|line_i| {
-                    (0..width).all(|dx| {
+                let mut overlaps_plot = false;
+                let mut intersects_blocked = false;
+                let mut intersects_reserved = false;
+                'cells: for line_i in 0..height {
+                    for dx in 0..width {
                         let cell = (x + dx, y + line_i);
-                        !occupied_cells.contains(&cell)
-                            && !label_exclusion_cells.contains(&cell)
-                            && !reserved.contains(&cell)
-                    })
-                });
-                if !label_cells_ok {
+                        if occupied_cells.contains(&cell) {
+                            overlaps_plot = true;
+                            break 'cells;
+                        }
+                        if label_exclusion_cells.contains(&cell) {
+                            intersects_blocked = true;
+                            break 'cells;
+                        }
+                        if reserved.contains(&cell) {
+                            intersects_reserved = true;
+                            break 'cells;
+                        }
+                    }
+                }
+                if overlaps_plot {
+                    stats.rejected_overlap = stats.rejected_overlap.saturating_add(1);
+                    continue;
+                }
+                if intersects_blocked {
+                    stats.rejected_blocked = stats.rejected_blocked.saturating_add(1);
+                    continue;
+                }
+                if intersects_reserved {
+                    stats.rejected_reserved = stats.rejected_reserved.saturating_add(1);
                     continue;
                 }
                 let label_rect = (x, y, width, height);
@@ -1192,11 +1337,17 @@ fn layout_end_labels_with_reserved(
                     label_rect,
                 ) {
                     Some(path) => path,
-                    None => continue,
+                    None => {
+                        stats.rejected_route_none = stats.rejected_route_none.saturating_add(1);
+                        continue;
+                    }
                 };
                 if !connector.iter().all(|cell| !reserved.contains(cell)) {
+                    stats.rejected_route_reserved =
+                        stats.rejected_route_reserved.saturating_add(1);
                     continue;
                 }
+                stats.accepted = stats.accepted.saturating_add(1);
                 let conn_total = connector.len() as u16;
                 let conn_cost = connector_cost((anchor.x, anchor.y), &connector);
                 let score = variant_idx as u32 * 20 + conn_cost;
@@ -1212,17 +1363,32 @@ fn layout_end_labels_with_reserved(
                 let dy = y.abs_diff(anchor.y);
                 let dx = attach_x.abs_diff(anchor.x);
                 let candidate = (
-                    score, dir_rank, 0u16, conn_total, dy, dx, x, y, attach_x, text, connector,
+                    score,
+                    variant_idx as u16,
+                    dir_rank,
+                    0u16,
+                    conn_total,
+                    dy,
+                    dx,
+                    x,
+                    y,
+                    attach_x,
+                    text,
+                    connector,
                 );
-                if best.as_ref().is_none_or(|(bs, bd, bo, bct, bdy, bdx, ..)| {
-                    (score, dir_rank, 0u16, conn_total, dy, dx) < (*bs, *bd, *bo, *bct, *bdy, *bdx)
-                }) {
+                if best
+                    .as_ref()
+                    .is_none_or(|(bs, bv, bd, bo, bct, bdy, bdx, ..)| {
+                        (score, variant_idx as u16, dir_rank, 0u16, conn_total, dy, dx)
+                            < (*bs, *bv, *bd, *bo, *bct, *bdy, *bdx)
+                    })
+                {
                     best = Some(candidate);
                 }
             }
         }
 
-        if let Some((score, _, _, _, _, _, x, y, attach_x, text, connector)) = best {
+        if let Some((score, variant_idx, _, _, _, _, _, x, y, attach_x, text, connector)) = best {
             let width = text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
             let height = text.len() as u16;
             for &cell in &connector {
@@ -1233,6 +1399,20 @@ fn layout_end_labels_with_reserved(
                     reserved.insert((x + dx, y + line_i));
                 }
             }
+            layout_debug_log(format_args!(
+                "place anchor={} stage=primary variant={} score={} anchor=({}, {}) pos=({}, {}) attach_x={} lines={} width={} stats={:?}",
+                anchor.key,
+                variant_name(variant_idx),
+                score,
+                anchor.x,
+                anchor.y,
+                x,
+                y,
+                attach_x,
+                text.len(),
+                width,
+                stats
+            ));
             placed.push(PlacedLabel {
                 key: anchor.key.clone(),
                 text: text.clone(),
@@ -1246,6 +1426,14 @@ fn layout_end_labels_with_reserved(
                 connector_path: connector,
             });
             placed_anchor_indices.insert(anchor_idx);
+        } else {
+            layout_debug_log(format_args!(
+                "place anchor={} stage=primary failed anchor=({}, {}) stats={:?}",
+                anchor.key,
+                anchor.x,
+                anchor.y,
+                stats
+            ));
         }
     }
 
@@ -1256,8 +1444,10 @@ fn layout_end_labels_with_reserved(
 
         // Force placement: two-phase. Phase 1 avoids blocked cells when possible.
         // Phase 2 ignores blocked cells if phase 1 found no placement (last-resort).
+        let mut force_stats = CandidateRejectStats::default();
         let mut best: Option<(
             u32,
+            u16,
             u8,
             u16,
             u16,
@@ -1292,14 +1482,33 @@ fn layout_end_labels_with_reserved(
                     );
 
                     for (x, y) in candidates {
+                        force_stats.total = force_stats.total.saturating_add(1);
+                        let mut intersects_reserved = false;
+                        let mut intersects_blocked = false;
                         if !(0..height).all(|line_i| {
                             (0..width).all(|dx| {
                                 let cell = (x + dx, y + line_i);
-                                !reserved.contains(&cell)
-                                    && (!avoid_blocked || !blocked_cells.contains(&cell))
-                                    && (!avoid_blocked || !label_exclusion_cells.contains(&cell))
+                                if reserved.contains(&cell) {
+                                    intersects_reserved = true;
+                                    return false;
+                                }
+                                if avoid_blocked
+                                    && (blocked_cells.contains(&cell)
+                                        || label_exclusion_cells.contains(&cell))
+                                {
+                                    intersects_blocked = true;
+                                    return false;
+                                }
+                                true
                             })
                         }) {
+                            if intersects_reserved {
+                                force_stats.rejected_reserved =
+                                    force_stats.rejected_reserved.saturating_add(1);
+                            } else if intersects_blocked {
+                                force_stats.rejected_blocked =
+                                    force_stats.rejected_blocked.saturating_add(1);
+                            }
                             continue;
                         }
                         let attach_x = connector_attach_x(x, width, anchor.x);
@@ -1314,8 +1523,13 @@ fn layout_end_labels_with_reserved(
                             label_rect,
                         ) {
                             Some(path) => path,
-                            None => continue,
+                            None => {
+                                force_stats.rejected_route_none =
+                                    force_stats.rejected_route_none.saturating_add(1);
+                                continue;
+                            }
                         };
+                        force_stats.accepted = force_stats.accepted.saturating_add(1);
                         let conn_total = connector.len() as u16;
                         let conn_cost = connector_cost((anchor.x, anchor.y), &connector);
                         let overlap = count_label_overlap(x, y, width, height, occupied_cells);
@@ -1332,13 +1546,26 @@ fn layout_end_labels_with_reserved(
                         let dy = y.abs_diff(anchor.y);
                         let dx = attach_x.abs_diff(anchor.x);
                         let candidate = (
-                            score, dir_rank, overlap, conn_total, dy, dx, x, y, attach_x, text,
+                            score,
+                            variant_idx as u16,
+                            dir_rank,
+                            overlap,
+                            conn_total,
+                            dy,
+                            dx,
+                            x,
+                            y,
+                            attach_x,
+                            text,
                             connector,
                         );
-                        if best.as_ref().is_none_or(|(bs, bd, bo, bct, bdy, bdx, ..)| {
-                            (score, dir_rank, overlap, conn_total, dy, dx)
-                                < (*bs, *bd, *bo, *bct, *bdy, *bdx)
-                        }) {
+                        if best
+                            .as_ref()
+                            .is_none_or(|(bs, bv, bd, bo, bct, bdy, bdx, ..)| {
+                                (score, variant_idx as u16, dir_rank, overlap, conn_total, dy, dx)
+                                    < (*bs, *bv, *bd, *bo, *bct, *bdy, *bdx)
+                            })
+                        {
                             best = Some(candidate);
                         }
                     }
@@ -1346,7 +1573,7 @@ fn layout_end_labels_with_reserved(
             }
         }
 
-        if let Some((score, _, _, _, _, _, x, y, attach_x, text, connector)) = best {
+        if let Some((score, variant_idx, _, _, _, _, _, x, y, attach_x, text, connector)) = best {
             let width = text.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
             let height = text.len() as u16;
             for &cell in &connector {
@@ -1357,6 +1584,20 @@ fn layout_end_labels_with_reserved(
                     reserved.insert((x + dx, y + line_i));
                 }
             }
+            layout_debug_log(format_args!(
+                "place anchor={} stage=force variant={} score={} anchor=({}, {}) pos=({}, {}) attach_x={} lines={} width={} stats={:?}",
+                anchor.key,
+                variant_name(variant_idx),
+                score,
+                anchor.x,
+                anchor.y,
+                x,
+                y,
+                attach_x,
+                text.len(),
+                width,
+                force_stats
+            ));
             placed.push(PlacedLabel {
                 key: anchor.key.clone(),
                 text: text.clone(),
@@ -1370,6 +1611,14 @@ fn layout_end_labels_with_reserved(
                 connector_path: connector,
             });
             placed_anchor_indices.insert(anchor_idx);
+        } else {
+            layout_debug_log(format_args!(
+                "place anchor={} stage=force failed anchor=({}, {}) stats={:?}",
+                anchor.key,
+                anchor.x,
+                anchor.y,
+                force_stats
+            ));
         }
     }
 

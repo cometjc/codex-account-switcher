@@ -5,9 +5,13 @@ WINDOWS_TARGET := x86_64-pc-windows-gnu
 WARNINGS_AS_ERRORS := -D warnings
 
 install:
-	@build_number=$$(cat build-number 2>/dev/null || \
+	@set -e; \
+	build_number=$$(cat build-number 2>/dev/null || \
 		git rev-list --count HEAD 2>/dev/null || echo 0); \
-	BUILD_NUMBER=$${build_number} cargo install --locked --path .
+	next_build_number=$$((build_number + 1)); \
+	printf '%s\n' "$$next_build_number" > build-number; \
+	echo "Installing with BUILD_NUMBER=$$next_build_number"; \
+	BUILD_NUMBER=$$next_build_number cargo install --locked --force --path .
 
 build:
 	RUSTFLAGS="$(WARNINGS_AS_ERRORS) $${RUSTFLAGS:-}" cargo build
