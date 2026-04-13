@@ -978,6 +978,12 @@ const ROUTE_Y_PADDING: u16 = 6;
 const MAX_CANDIDATES_PER_VARIANT: usize = 128;
 const ENDPOINT_DRIFT_THRESHOLD: u16 = 2;
 const SCORE_DRIFT_THRESHOLD: u32 = 10;
+// Weighted A* connector routing cost penalties.
+// These only affect which legal path is chosen; they do not change blocking rules.
+const LEFT_PENALTY: u32 = 3; // penalise leftward (x-decreasing) steps
+const TURN_PENALTY: u32 = 2; // penalise direction changes (horizontal ↔ vertical)
+const BLOCKED_PROXIMITY_PENALTY: u32 = 1; // penalise steps adjacent to reserved/label cells
+const DETOUR_PENALTY: u32 = 1; // penalise steps that move away from the goal
 
 fn candidate_positions_for_label(
     anchor: &LabelAnchor,
@@ -1461,6 +1467,16 @@ fn route_connector_path(
             continue;
         }
 
+        // Determine the incoming direction at the current node for turn detection.
+        let incoming_dx = prev
+            .get(&(x, y))
+            .map(|&(px, _)| x as i16 - px as i16)
+            .unwrap_or(0);
+        let incoming_dy = prev
+            .get(&(x, y))
+            .map(|&(_, py)| y as i16 - py as i16)
+            .unwrap_or(0);
+
         for (nx, ny) in [
             (x.saturating_sub(1), y),
             (x.saturating_add(1), y),
@@ -1470,7 +1486,36 @@ fn route_connector_path(
             if nx < min_x || nx > max_x || ny < min_y || ny > max_y || is_blocked(nx, ny) {
                 continue;
             }
-            let step_cost = if ny == y { 1 } else { 4 };
+            let out_dx = nx as i16 - x as i16;
+            let out_dy = ny as i16 - y as i16;
+
+            // Base step cost: horizontal cheap, vertical expensive.
+            let mut step_cost: u32 = if ny == y { 1 } else { 4 };
+
+            // LEFT_PENALTY: penalise leftward horizontal steps.
+            if nx < x {
+                step_cost = step_cost.saturating_add(LEFT_PENALTY);
+            }
+
+            // TURN_PENALTY: penalise changing direction (only meaningful after 1+ steps).
+            if (incoming_dx != 0 || incoming_dy != 0) && (out_dx != incoming_dx || out_dy != incoming_dy) {
+                step_cost = step_cost.saturating_add(TURN_PENALTY);
+            }
+
+            // DETOUR_PENALTY: penalise moving away from the goal (heuristic increasing).
+            if heuristic(nx, ny) > heuristic(x, y) {
+                step_cost = step_cost.saturating_add(DETOUR_PENALTY);
+            }
+
+            // BLOCKED_PROXIMITY_PENALTY: penalise steps into cells neighbouring reserved/label cells.
+            let near_blocked = [(nx.saturating_sub(1), ny), (nx.saturating_add(1), ny),
+                                (nx, ny.saturating_sub(1)), (nx, ny.saturating_add(1))]
+                .iter()
+                .any(|&(bx, by)| (bx, by) != (x, y) && (reserved.contains(&(bx, by)) || in_label_rect(bx, by)));
+            if near_blocked {
+                step_cost = step_cost.saturating_add(BLOCKED_PROXIMITY_PENALTY);
+            }
+
             let next_cost = cost.saturating_add(step_cost);
             if next_cost < *best_cost.get(&(nx, ny)).unwrap_or(&u32::MAX) {
                 best_cost.insert((nx, ny), next_cost);
@@ -1490,12 +1535,27 @@ fn route_connector_path(
 fn connector_cost(start: (u16, u16), path: &[(u16, u16)]) -> u32 {
     let mut cost = 0u32;
     let mut prev = start;
+    let mut prev_dx: i16 = 0;
+    let mut prev_dy: i16 = 0;
     for &(x, y) in path {
-        if x != prev.0 {
+        let dx = x as i16 - prev.0 as i16;
+        let dy = y as i16 - prev.1 as i16;
+        if dy == 0 {
+            // Horizontal step
             cost = cost.saturating_add(1);
-        } else if y != prev.1 {
+            if dx < 0 {
+                cost = cost.saturating_add(LEFT_PENALTY);
+            }
+        } else {
+            // Vertical step
             cost = cost.saturating_add(4);
         }
+        // Turn penalty
+        if (prev_dx != 0 || prev_dy != 0) && (dx != prev_dx || dy != prev_dy) {
+            cost = cost.saturating_add(TURN_PENALTY);
+        }
+        prev_dx = dx;
+        prev_dy = dy;
         prev = (x, y);
     }
     cost
@@ -4119,6 +4179,133 @@ mod tests {
                 "expected variant {expected:?}"
             );
         }
+    }
+
+    // Task 2: Weighted A* connector cost tests
+    //
+    // Scenario A: straight horizontal path should always beat a detour.
+    // anchor=(5,5), goal=(15,5). With empty reserved, the straight path is optimal.
+    #[test]
+    fn connector_routing_prefers_straight_rightward_path_over_detour() {
+        let graph_area = Rect::new(0, 0, 40, 12);
+        let path = route_connector_path(
+            (5, 5),
+            (15, 5),
+            graph_area,
+            graph_area.right(),
+            &HashSet::new(),
+            (u16::MAX, u16::MAX, 0, 0),
+        );
+        let path = path.expect("expected a valid path");
+        assert!(
+            path.iter().all(|(_, y)| *y == 5),
+            "expected straight path on y=5 but got detour: {path:?}"
+        );
+    }
+
+    // Scenario B: when there is a 1-cell obstacle on the direct row, the router
+    // should detour vertically (2 turns, no left step) rather than going right-then-left
+    // (which would require a leftward step, penalised by LEFT_PENALTY).
+    // anchor=(5,5), goal=(15,5), obstacle at (10,5).
+    // Without LEFT_PENALTY both alternatives cost the same (obstacle detour ≈ same steps).
+    // With LEFT_PENALTY the rightward detour (up/down) is cheaper.
+    #[test]
+    fn connector_routing_penalizes_leftward_steps() {
+        let graph_area = Rect::new(0, 0, 40, 12);
+        let reserved = HashSet::from([(10u16, 5u16)]);
+        let path = route_connector_path(
+            (5, 5),
+            (15, 5),
+            graph_area,
+            graph_area.right(),
+            &reserved,
+            (u16::MAX, u16::MAX, 0, 0),
+        );
+        let path = path.expect("expected a valid path around the blocked cell");
+        // With LEFT_PENALTY the path must not include a leftward step (x decreasing).
+        let has_left_step = path.windows(2).any(|w| w[1].0 < w[0].0);
+        assert!(
+            !has_left_step,
+            "expected no leftward steps due to LEFT_PENALTY, got path: {path:?}"
+        );
+    }
+
+    // Scenario C: two corridors with the same horizontal distance but different turn counts.
+    // anchor=(5,5), goal=(20,5).
+    // Block y=5 between x=9..=14 to force a detour. With TURN_PENALTY the router
+    // should prefer the fewest-turn path (2 turns: up once, down once) rather than
+    // zigzagging multiple times.
+    #[test]
+    fn connector_routing_finds_path_around_long_obstacle() {
+        let graph_area = Rect::new(0, 0, 40, 12);
+        let reserved: HashSet<(u16, u16)> = (9u16..=14).map(|x| (x, 5u16)).collect();
+        let path = route_connector_path(
+            (5, 5),
+            (20, 5),
+            graph_area,
+            graph_area.right(),
+            &reserved,
+            (u16::MAX, u16::MAX, 0, 0),
+        );
+        let path = path.expect("expected a routed path around obstacle");
+        assert_eq!(
+            path.last().copied(),
+            Some((20, 5)),
+            "path should end at goal (20,5): {path:?}"
+        );
+        for &cell in &path {
+            assert!(
+                !reserved.contains(&cell),
+                "path must not cross reserved cell {cell:?}: {path:?}"
+            );
+        }
+        // Count direction changes (turns). Routing around a single obstacle row requires
+        // at minimum 3 turns: right→vertical, vertical→right (around obstacle), right→vertical
+        // (back to goal row). With TURN_PENALTY the router should not zigzag excessively.
+        let all_nodes: Vec<(u16, u16)> = std::iter::once((5u16, 5u16))
+            .chain(path.iter().copied())
+            .collect();
+        let turns = all_nodes
+            .windows(3)
+            .filter(|w| {
+                let d1 = (w[1].0 as i16 - w[0].0 as i16, w[1].1 as i16 - w[0].1 as i16);
+                let d2 = (w[2].0 as i16 - w[1].0 as i16, w[2].1 as i16 - w[1].1 as i16);
+                d1 != d2
+            })
+            .count();
+        assert!(
+            turns <= 4,
+            "expected at most 4 turns (single clean detour), got {turns} turns: {path:?}"
+        );
+    }
+
+    // Scenario D: LEFT_PENALTY makes the router prefer a short vertical step over
+    // a leftward horizontal step when the goal is to the right.
+    // anchor=(8,5), goal=(15,5). Block (12,5) to force routing around x=12.
+    // Without LEFT_PENALTY: go to (13,5), step left to (11,5), continue right.
+    // With LEFT_PENALTY: prefer going to (11,5) via a vertical detour (y=4 then back).
+    // Expected: no leftward step in the path (the detour is cheaper than left-backtrack).
+    #[test]
+    fn connector_routing_prefers_vertical_detour_over_left_step() {
+        let graph_area = Rect::new(0, 0, 40, 12);
+        // Block a 2-wide gap to make a pure-right path impossible;
+        // the alternative is either a left step or a vertical detour.
+        let reserved = HashSet::from([(12u16, 5u16), (13u16, 5u16)]);
+        let path = route_connector_path(
+            (8, 5),
+            (18, 5),
+            graph_area,
+            graph_area.right(),
+            &reserved,
+            (u16::MAX, u16::MAX, 0, 0),
+        );
+        let path = path.expect("expected a routed path");
+        // Should not step left (x decreasing).
+        let has_left = path.windows(2).any(|w| w[1].0 < w[0].0);
+        assert!(
+            !has_left,
+            "expected no leftward step with LEFT_PENALTY, got path: {path:?}"
+        );
     }
 
     #[test]
