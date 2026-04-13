@@ -180,6 +180,18 @@ fn load_claude_profiles(
     cache_only: bool,
 ) -> Result<(Vec<ProfileEntry>, Vec<String>)> {
     let saved = store.list_saved_profiles()?;
+    let saved_subtype_counts = saved
+        .iter()
+        .filter_map(|profile| {
+            serde_json::from_value::<crate::claude::ClaudeCredentials>(profile.snapshot.clone())
+                .ok()
+                .map(|creds| creds.subscription_type().to_string())
+        })
+        .fold(std::collections::HashMap::<String, usize>::new(), |mut map, subtype| {
+            *map.entry(subtype).or_insert(0) += 1;
+            map
+        });
+    let history_account_ids = usage_service.history_account_ids()?;
     let current_creds = store.get_current_credentials().ok();
     let current_account_id = current_creds.as_ref().map(|c| c.account_id());
     let mut refresh_errors = Vec::new();
@@ -222,12 +234,43 @@ fn load_claude_profiles(
             } else {
                 comp_id.clone()
             };
-            if use_current_credentials {
-                usage_service.merge_profile_history_aliases(
-                    effective_comp_id.as_deref(),
-                    comp_id.as_deref().into_iter(),
-                )?;
-            }
+            let effective_subscription_type = if use_current_credentials {
+                current_creds
+                    .as_ref()
+                    .map(|creds| creds.subscription_type().to_string())
+            } else {
+                creds.as_ref()
+                    .map(|value| value.subscription_type().to_string())
+            };
+            let stable_history_key = effective_subscription_type.as_deref().map(|subscription| {
+                crate::claude::usage_history_key_for_saved_profile(&saved_profile.name, subscription)
+            });
+            let migration_aliases = effective_subscription_type
+                .as_deref()
+                .filter(|subscription| {
+                    saved_subtype_counts
+                        .get(*subscription)
+                        .copied()
+                        .unwrap_or(0)
+                        == 1
+                })
+                .map(|subscription| {
+                    let suffix = format!("|{subscription}");
+                    history_account_ids
+                        .iter()
+                        .filter(|candidate| candidate.starts_with("claude-") && candidate.ends_with(&suffix))
+                        .map(|value| value.as_str())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            usage_service.merge_profile_history_aliases(
+                stable_history_key.as_deref(),
+                effective_comp_id
+                    .as_deref()
+                    .into_iter()
+                    .chain(comp_id.as_deref().into_iter())
+                    .chain(migration_aliases.into_iter()),
+            )?;
             let force_this = force_refresh
                 || refresh_account_id.is_some_and(|t| effective_acct_id.as_deref() == Some(t));
             let (usage_view, error) = read_usage_for_profile(
@@ -235,7 +278,9 @@ fn load_claude_profiles(
                 &saved_profile.name,
                 usage_service,
                 None,
-                effective_comp_id.as_deref(),
+                stable_history_key
+                    .as_deref()
+                    .or(effective_comp_id.as_deref()),
                 effective_access_tok.as_deref(),
                 force_this,
                 cache_only,
@@ -245,9 +290,16 @@ fn load_claude_profiles(
                 let _ = store.update_account(&saved_profile.name);
             }
             usage_service
-                .record_usage_snapshot(effective_comp_id.as_deref(), &usage_view)?;
+                .record_usage_snapshot(
+                    stable_history_key
+                        .as_deref()
+                        .or(effective_comp_id.as_deref()),
+                    &usage_view,
+                )?;
             let chart_data = build_profile_chart_data(
-                effective_comp_id.as_deref(),
+                stable_history_key
+                    .as_deref()
+                    .or(effective_comp_id.as_deref()),
                 usage_view.usage.as_ref(),
                 usage_service,
             )?;
@@ -304,18 +356,51 @@ fn load_claude_profiles(
             // Auto-merge: update saved file with current credentials and record current name
             let _ = store.update_account(matched_name);
             let _ = store.set_current_name(matched_name);
-            for p in profiles.iter_mut() {
-                if p.saved_name.as_deref() == Some(matched_name.as_str()) {
-                    let old_comp_id = serde_json::from_value::<crate::claude::ClaudeCredentials>(p.snapshot.clone())
-                        .ok()
-                        .map(|c| composite_id(&c));
-                    let _ = usage_service.merge_profile_history_aliases(
-                        Some(&comp_id),
-                        old_comp_id.as_deref().into_iter(),
-                    );
-                    p.is_current = true;
-                    p.account_id = Some(acct_id.clone());
-                }
+
+            if let Some(profile) = profiles
+                .iter_mut()
+                .find(|p| p.saved_name.as_deref() == Some(matched_name.as_str()))
+            {
+                let old_comp_id = serde_json::from_value::<crate::claude::ClaudeCredentials>(
+                    profile.snapshot.clone(),
+                )
+                .ok()
+                .map(|c| composite_id(&c));
+                let history_key =
+                    crate::claude::usage_history_key_for_saved_profile(matched_name, &sub_type);
+
+                usage_service.merge_profile_history_aliases(
+                    Some(&history_key),
+                    old_comp_id
+                        .as_deref()
+                        .into_iter()
+                        .chain(std::iter::once(comp_id.as_str())),
+                )?;
+
+                let force_this = force_refresh
+                    || refresh_account_id.is_some_and(|target| target == acct_id.as_str());
+                let (usage_view, error) = read_usage_for_profile(
+                    "Claude",
+                    matched_name,
+                    usage_service,
+                    None,
+                    Some(&history_key),
+                    Some(access_tok.as_str()),
+                    force_this,
+                    cache_only,
+                )?;
+                push_refresh_error(&mut refresh_errors, error);
+                usage_service.record_usage_snapshot(Some(&history_key), &usage_view)?;
+                let chart_data =
+                    build_profile_chart_data(Some(&history_key), usage_view.usage.as_ref(), usage_service)?;
+
+                profile.is_current = true;
+                profile.account_id = Some(acct_id.clone());
+                profile.snapshot = store
+                    .get_current_snapshot()
+                    .unwrap_or_else(|_| profile.snapshot.clone());
+                profile.usage_view = usage_view;
+                profile.chart_data = chart_data;
             }
         }
 
@@ -2419,11 +2504,109 @@ mod tests {
             &fs::read_to_string(claude_paths.usage_history_path()).unwrap(),
         )
         .unwrap();
+        let stable_key =
+            crate::claude::usage_history_key_for_saved_profile("claude-team", "team");
+        let stable = merged_history
+            .by_account_id
+            .get(&stable_key)
+            .expect("stable saved-profile key should exist after merge");
         assert!(
-            merged_history.by_account_id.contains_key(&stale_comp_id),
-            "legacy history for stale account id should be preserved"
+            !stable.observations.is_empty(),
+            "merged saved-profile history should keep legacy observations"
         );
-        // 在新策略下，不強制要求 current_comp_id 一定已有歷史；只要舊帳號的歷史沒有被清掉即可。
+        assert!(
+            !merged_history.by_account_id.contains_key(&stale_comp_id),
+            "legacy key should be folded into stable saved-profile key"
+        );
+    }
+
+    #[test]
+    fn claude_sub_type_fallback_rebuilds_profile_chart_with_current_history_key() {
+        let base = unique_temp_dir("loader-claude-fallback-current-history");
+        let codex_paths = AppPaths::from_codex_dir(base.join("codex"));
+        let store = AccountStore::new(codex_paths, StorePlatform::Copy);
+        let claude_paths = ClaudePaths::from_claude_dir(base.join("claude"));
+        fs::create_dir_all(claude_paths.claude_dir()).unwrap();
+
+        let stale_saved = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "token-stale",
+                "refreshToken": "sk-ant-ort01-stale-token",
+                "expiresAt": 1700000000,
+                "subscriptionType": "team"
+            }
+        });
+        let current = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "token-current",
+                "refreshToken": "sk-ant-ort01-current-token",
+                "expiresAt": 1700000000,
+                "subscriptionType": "team"
+            }
+        });
+
+        let current_creds: crate::claude::ClaudeCredentials =
+            serde_json::from_value(current.clone()).unwrap();
+        let current_comp_id = format!(
+            "{}|{}",
+            current_creds.account_id(),
+            current_creds.subscription_type()
+        );
+
+        let claude_store = ClaudeStore::new(claude_paths.clone());
+        claude_store.save_snapshot("CC", &stale_saved).unwrap();
+        fs::write(
+            claude_paths.credentials_path(),
+            serde_json::to_vec_pretty(&current).unwrap(),
+        )
+        .unwrap();
+        fs::write(claude_paths.current_name_path(), "CC\n").unwrap();
+
+        let claude_usage = UsageService::new(
+            claude_paths.limit_cache_path().to_path_buf(),
+            claude_paths.usage_history_path().to_path_buf(),
+            300,
+        );
+        let now = 1_699_999_900_i64;
+        claude_usage
+            .clone()
+            .with_now_seconds(now)
+            .record_usage_snapshot(
+                Some(&current_comp_id),
+                &crate::usage::UsageReadResult {
+                    usage: Some(sample_usage("team")),
+                    source: crate::usage::UsageSource::Api,
+                    fetched_at: Some(now),
+                    stale: false,
+                },
+            )
+            .unwrap();
+
+        let report = load_profiles_with_report(
+            &store,
+            &UsageService::new(base.join("noop-cache.json"), base.join("noop-history.json"), 300),
+            false,
+            None,
+            true,
+            Some(&claude_store),
+            Some(&claude_usage),
+            None,
+        )
+        .unwrap();
+
+        let profile = report
+            .profiles
+            .iter()
+            .find(|p| p.kind == ProfileKind::Claude && p.saved_name.as_deref() == Some("CC"))
+            .expect("CC profile should exist");
+
+        assert_eq!(profile.account_id.as_deref(), Some(current_creds.account_id().as_str()));
+        assert!(profile.is_current);
+        assert!(
+            !profile.chart_data.seven_day_points.is_empty(),
+            "fallback-matched profile should project current-key history instead of staying at no-usage"
+        );
+        assert_eq!(profile.chart_data.quota_window_label, "7d");
     }
 
     #[test]

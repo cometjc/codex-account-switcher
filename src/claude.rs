@@ -48,6 +48,12 @@ impl ClaudeCredentials {
     }
 }
 
+/// Stable usage/history key for a saved Claude profile.
+/// This avoids history fragmentation when OAuth refresh tokens rotate.
+pub fn usage_history_key_for_saved_profile(profile_name: &str, subscription_type: &str) -> String {
+    format!("claude-profile:{profile_name}|{subscription_type}")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RefreshedClaudeTokens {
     access_token: String,
@@ -458,7 +464,7 @@ fn days_since_epoch(year: i64, month: i64, day: i64) -> Option<i64> {
 }
 
 /// HTTP fetcher for Claude usage. Signature matches UsageService::with_fetcher.
-/// Caller passes "claude-<id>|<subscription_type>" as account_id so we can
+/// Caller passes "<stable_or_derived_id>|<subscription_type>" as account_id so we can
 /// extract subscription_type here without additional parameters.
 pub fn fetch_claude_usage(account_id: &str, access_token: &str) -> anyhow::Result<UsageResponse> {
     let paths = ClaudePaths::detect();

@@ -518,6 +518,12 @@ impl UsageService {
             })
     }
 
+    pub fn history_account_ids(&self) -> Result<Vec<String>> {
+        self.mutate_history_cache(|_| Ok(false))?;
+        let history = self.read_history_cache()?;
+        Ok(history.by_account_id.keys().cloned().collect())
+    }
+
     pub fn merge_profile_history_aliases<'a>(
         &self,
         canonical_account_id: Option<&str>,

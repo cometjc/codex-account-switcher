@@ -187,14 +187,13 @@ fn run_refresh_all() -> Result<()> {
                     } else {
                         &creds
                     };
-                    let composite_id = format!(
-                        "{}|{}",
-                        effective_creds.account_id(),
-                        effective_creds.subscription_type()
+                    let history_key = agent_switch::claude::usage_history_key_for_saved_profile(
+                        &profile.name,
+                        effective_creds.subscription_type(),
                     );
                     if let Err(error) = refresh_usage_snapshot(
                         &cl_usage,
-                        Some(composite_id.as_str()),
+                        Some(history_key.as_str()),
                         Some(effective_creds.access_token()),
                     ) {
                         claude_failed += 1;
@@ -229,10 +228,19 @@ fn run_refresh_all() -> Result<()> {
 
         if !current_saved {
             if let Some(creds) = current_creds {
-                let composite_id = format!("{}|{}", creds.account_id(), creds.subscription_type());
+                let fallback_key = format!("{}|{}", creds.account_id(), creds.subscription_type());
+                let current_history_key = current_name
+                    .as_deref()
+                    .map(|name| {
+                        agent_switch::claude::usage_history_key_for_saved_profile(
+                            name,
+                            creds.subscription_type(),
+                        )
+                    })
+                    .unwrap_or(fallback_key);
                 if let Err(error) = refresh_usage_snapshot(
                     &cl_usage,
-                    Some(composite_id.as_str()),
+                    Some(current_history_key.as_str()),
                     Some(creds.access_token()),
                 ) {
                     claude_failed += 1;
