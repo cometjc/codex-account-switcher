@@ -1004,21 +1004,25 @@ fn build_five_hour_subframe(
     };
     let weekly_start = weekly_window.reset_at - weekly_window.limit_window_seconds;
     let weekly_duration = weekly_window.limit_window_seconds as f64;
-    let five_hour_start = five_hour_window.reset_at - five_hour_window.limit_window_seconds;
+    // Some backends can return a stale 5h reset while weekly observations are newer.
+    // Align the 5h frame end to the newest weekly observation to keep frame/point timebases consistent.
+    let effective_five_hour_end = weekly_history
+        .and_then(|hist| hist.observations.last().map(|obs| obs.observed_at))
+        .map(|latest_obs| latest_obs.max(five_hour_window.reset_at))
+        .unwrap_or(five_hour_window.reset_at)
+        .min(weekly_window.reset_at);
+    let five_hour_start = effective_five_hour_end - five_hour_window.limit_window_seconds;
     let mut start_x = (((five_hour_start - weekly_start) as f64) / weekly_duration * 7.0)
         .clamp(0.0, 7.0);
-    let mut end_x = (((five_hour_window.reset_at - weekly_start) as f64) / weekly_duration * 7.0)
+    let mut end_x = (((effective_five_hour_end - weekly_start) as f64) / weekly_duration * 7.0)
         .clamp(0.0, 7.0);
     if start_x > end_x {
         std::mem::swap(&mut start_x, &mut end_x);
     }
     // Chart x uses the same weekly axis as `project_history_points`:
     //   point_x = (observed_at - weekly_start) / weekly_duration * 7
-    //   end_x   = (five_hour.reset_at - weekly_start) / weekly_duration * 7
-    // For consistent inputs, last observation should satisfy observed_at <= five_hour.reset_at
-    // (next 5h reset is in the future), so the last point is not to the right of end_x.
-    // If observed_at > reset_at (e.g. stale cached 5h vs newer weekly observations), that is a
-    // data/refresh issue — do not patch here.
+    //   end_x   = (effective_5h_end - weekly_start) / weekly_duration * 7
+    // This guarantees the newest plotted point does not end up to the right of the 5h frame.
 
     let current_7d = weekly_window.used_percent.clamp(0.0, 100.0);
     let five_hour_used = five_hour_window.used_percent.clamp(0.0, 100.0);
@@ -1342,21 +1346,21 @@ mod tests {
                 },
             ],
         };
-        let expected_api_end = 540_000f64 / 604_800.0 * 7.0;
+        let expected_end_aligned_to_latest_observation = 604_800f64 / 604_800.0 * 7.0;
         let subframe = build_five_hour_subframe(Some(&weekly), Some(&five_hour), Some(&history), &[], &[]);
         assert!(subframe.available);
         assert!(
-            (subframe.end_x.unwrap() - expected_api_end).abs() < 1e-9,
-            "end_x follows five_hour.reset_at on the weekly axis"
+            (subframe.end_x.unwrap() - expected_end_aligned_to_latest_observation).abs() < 1e-9,
+            "stale 5h reset should align end_x to the newest weekly observation on the same axis"
         );
         let last_point_x = project_history_points(&history).last().unwrap().x;
         assert!(
-            last_point_x > subframe.end_x.unwrap(),
-            "fixture: last obs at week end (x=7) but 5h reset_at earlier — inconsistent (stale 5h vs obs)"
+            last_point_x <= subframe.end_x.unwrap(),
+            "latest weekly point should not sit to the right of the 5h subframe end"
         );
         assert!(subframe.start_x.unwrap() < subframe.end_x.unwrap());
-        assert_eq!(subframe.lower_y, Some(45.0));
-        assert_eq!(subframe.upper_y, Some(95.0));
+        assert_eq!(subframe.lower_y, Some(60.0));
+        assert_eq!(subframe.upper_y, Some(60.0));
 
         // Consistent API: 5h window ends at or after the last observation time on the same week.
         let five_hour_aligned = UsageWindow {

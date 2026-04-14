@@ -2233,6 +2233,19 @@ fn maybe_log_chart_layout_state(chart_state: &ChartState<'_>, layout: ChartLayou
         .iter()
         .map(|series| {
             let last_point = series.points.last();
+            let subframe = &series.five_hour_subframe;
+            let last_point_in_five_hour_window = if subframe.available {
+                match (last_point, subframe.start_x, subframe.end_x) {
+                    (Some(point), Some(start_x), Some(end_x)) => {
+                        let lower = start_x.min(end_x);
+                        let upper = start_x.max(end_x);
+                        Some(point.x >= lower && point.x <= upper)
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            };
             serde_json::json!({
                 "id": series.profile.id,
                 "label": series.profile.label,
@@ -2244,6 +2257,15 @@ fn maybe_log_chart_layout_state(chart_state: &ChartState<'_>, layout: ChartLayou
                 "is_zero_state": series.is_zero_state,
                 "points": series.points.len(),
                 "last_point": last_point.map(|point| serde_json::json!({"x": point.x, "y": point.y})),
+                "five_hour_subframe": {
+                    "available": subframe.available,
+                    "start_x": subframe.start_x,
+                    "end_x": subframe.end_x,
+                    "lower_y": subframe.lower_y,
+                    "upper_y": subframe.upper_y,
+                    "reason": subframe.reason,
+                },
+                "last_point_in_five_hour_window": last_point_in_five_hour_window,
                 "weekly_percent": series.last_seven_day_percent,
                 "five_hour_percent": series.five_hour_used_percent,
                 "forecast_label": series.forecast_label,

@@ -921,8 +921,14 @@ fn project_band_x_bounds(
     let raw_left = to_raw(start_x.min(end_x));
     let raw_right = to_raw(start_x.max(end_x));
 
+    let rounded_left = graph_area.left() + raw_left.round() as u16;
+    let rounded_right = graph_area.left() + raw_right.round() as u16;
     let mut left = graph_area.left() + raw_left.ceil() as u16;
     let mut right = graph_area.left() + raw_right.floor() as u16;
+    // Keep the compact band behavior, but never exclude endpoint cells that data points
+    // can project to (points use `project_x` with `round`).
+    left = left.min(rounded_left);
+    right = right.max(rounded_right);
 
     if right < left {
         let midpoint = graph_area.left() + ((raw_left + raw_right) / 2.0).round() as u16;
@@ -2419,11 +2425,13 @@ mod tests {
     }
 
     #[test]
-    fn project_band_x_bounds_shrinks_extra_edge_padding() {
+    fn project_band_x_bounds_includes_projected_endpoints() {
         let graph_area = Rect::new(10, 2, 20, 8);
         let bounds = project_band_x_bounds(1.2, 5.8, graph_area, [0.0, 7.0]);
 
-        assert_eq!(bounds, (14, 25));
+        assert_eq!(bounds, (13, 26));
+        assert!(bounds.0 <= project_x(1.2, graph_area, [0.0, 7.0]));
+        assert!(bounds.1 >= project_x(5.8, graph_area, [0.0, 7.0]));
     }
 
     #[test]
