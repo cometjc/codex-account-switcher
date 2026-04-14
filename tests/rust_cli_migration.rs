@@ -3,9 +3,10 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_switch::app::App;
+use agent_switch::db::{SqliteStore, UsageCacheRow};
 use agent_switch::paths::AppPaths;
 use agent_switch::store::{AccountStore, StorePlatform};
-use agent_switch::usage::{UsageCache, UsageReadResult, UsageResponse, UsageService};
+use agent_switch::usage::{UsageReadResult, UsageResponse, UsageService};
 
 fn temp_dir(label: &str) -> PathBuf {
     let unique = SystemTime::now()
@@ -110,16 +111,23 @@ fn usage_service_returns_stale_cache_when_fetch_fails() {
         rate_limit: None,
     };
 
-    let cache = UsageCache::from_entries([(
-        "acct-1".to_string(),
-        100,
-        cached_usage.clone(),
-    )]);
-    fs::write(
-        paths.limit_cache_path(),
-        serde_json::to_string_pretty(&cache).expect("serialize cache"),
+    let service_name = paths
+        .limit_cache_path()
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .expect("cache filename stem")
+        .to_string();
+    let db_path = paths.usage_history_path().with_extension("sqlite.db");
+    let db = SqliteStore::new(db_path);
+    db.write_usage_cache_rows(
+        &service_name,
+        &[UsageCacheRow {
+            account_key: "acct-1".to_string(),
+            fetched_at: 100,
+            payload_json: serde_json::to_string(&cached_usage).expect("serialize cache payload"),
+        }],
     )
-    .expect("write cache");
+    .expect("seed sqlite cache");
 
     let service = UsageService::new(
         paths.limit_cache_path().to_path_buf(),
